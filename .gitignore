@@ -1,0 +1,7 @@
+data/
+*.env
+config.local.yaml
+web/node_modules/
+web/.svelte-kit/
+web/build/
+models/
