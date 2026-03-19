@@ -208,15 +208,15 @@ export async function createCampaign(name: string, description: string): Promise
 }
 
 export async function setActiveCampaign(id: number): Promise<void> {
-	await request<void>(`/api/campaigns/${id}/activate`, { method: 'POST' });
+	await request<void>(`/api/campaigns/${id}/active`, { method: 'PUT' });
 }
 
 export async function fetchEntities(campaignId: number, params?: { type?: string; search?: string }): Promise<Entity[]> {
 	const searchParams = new URLSearchParams();
-	searchParams.set('campaign_id', String(campaignId));
 	if (params?.type) searchParams.set('type', params.type);
 	if (params?.search) searchParams.set('search', params.search);
-	return request<Entity[]>(`/api/entities?${searchParams.toString()}`);
+	const qs = searchParams.toString();
+	return request<Entity[]>(`/api/campaigns/${campaignId}/entities${qs ? '?' + qs : ''}`);
 }
 
 export async function fetchEntity(id: number): Promise<EntityDetail> {
