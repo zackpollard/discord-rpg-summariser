@@ -59,3 +59,9 @@ func (s *Store) GetTranscript(ctx context.Context, sessionID int64) ([]Transcrip
 	}
 	return segments, rows.Err()
 }
+
+// DeleteTranscriptSegments removes all transcript segments for a session.
+func (s *Store) DeleteTranscriptSegments(ctx context.Context, sessionID int64) error {
+	_, err := s.Pool.Exec(ctx, `DELETE FROM transcript_segments WHERE session_id = $1`, sessionID)
+	return err
+}

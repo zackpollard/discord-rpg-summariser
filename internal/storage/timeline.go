@@ -7,13 +7,21 @@ import (
 )
 
 type TimelineEvent struct {
-	Type      string     `json:"type"` // session, entity, quest_new, quest_completed, quest_failed
-	Timestamp time.Time  `json:"timestamp"`
-	Title     string     `json:"title"`
-	Detail    string     `json:"detail"`
-	SessionID *int64     `json:"session_id,omitempty"`
-	EntityID  *int64     `json:"entity_id,omitempty"`
-	QuestID   *int64     `json:"quest_id,omitempty"`
+	Type      string    `json:"type"` // session, entity, quest_new, quest_completed, quest_failed
+	Timestamp time.Time `json:"timestamp"`
+	Title     string    `json:"title"`
+	Detail    string    `json:"detail"`
+	SessionID *int64    `json:"session_id,omitempty"`
+	EntityID  *int64    `json:"entity_id,omitempty"`
+	QuestID   *int64    `json:"quest_id,omitempty"`
+}
+
+func truncate(s string, maxChars int) string {
+	r := []rune(s)
+	if len(r) <= maxChars {
+		return s
+	}
+	return string(r[:maxChars])
 }
 
 func (s *Store) GetCampaignTimeline(ctx context.Context, campaignID int64, limit, offset int) ([]TimelineEvent, error) {
@@ -21,7 +29,7 @@ func (s *Store) GetCampaignTimeline(ctx context.Context, campaignID int64, limit
 		SELECT type, timestamp, title, detail, session_id, entity_id, quest_id FROM (
 			SELECT 'session' as type, s.started_at as timestamp,
 				'Session #' || s.id as title,
-				COALESCE(LEFT(s.summary, 200), s.status) as detail,
+				COALESCE(s.summary, s.status, '') as detail,
 				s.id as session_id, NULL::BIGINT as entity_id, NULL::BIGINT as quest_id
 			FROM sessions s WHERE s.campaign_id = $1 AND s.status != 'failed'
 
@@ -29,7 +37,7 @@ func (s *Store) GetCampaignTimeline(ctx context.Context, campaignID int64, limit
 
 			SELECT 'entity' as type, e.created_at as timestamp,
 				e.name as title,
-				e.type || ': ' || LEFT(e.description, 150) as detail,
+				COALESCE(e.type || ': ' || e.description, '') as detail,
 				NULL::BIGINT, e.id, NULL::BIGINT
 			FROM entities e WHERE e.campaign_id = $1
 
@@ -37,7 +45,7 @@ func (s *Store) GetCampaignTimeline(ctx context.Context, campaignID int64, limit
 
 			SELECT 'quest_new' as type, q.created_at as timestamp,
 				q.name as title,
-				CASE WHEN q.giver != '' THEN 'From ' || q.giver || ': ' ELSE '' END || LEFT(q.description, 150) as detail,
+				COALESCE(CASE WHEN q.giver != '' THEN 'From ' || q.giver || ': ' ELSE '' END || q.description, '') as detail,
 				NULL::BIGINT, NULL::BIGINT, q.id
 			FROM quests q WHERE q.campaign_id = $1
 
@@ -64,6 +72,7 @@ func (s *Store) GetCampaignTimeline(ctx context.Context, campaignID int64, limit
 		if err := rows.Scan(&e.Type, &e.Timestamp, &e.Title, &e.Detail, &e.SessionID, &e.EntityID, &e.QuestID); err != nil {
 			return nil, err
 		}
+		e.Detail = truncate(e.Detail, 200)
 		events = append(events, e)
 	}
 	return events, rows.Err()

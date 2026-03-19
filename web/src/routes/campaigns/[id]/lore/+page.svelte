@@ -110,7 +110,7 @@
 						<span class="sources-label">Sources:</span>
 						<ul class="sources-list">
 							{#each loreAnswer.sources as source}
-								<li>{source}</li>
+								<li><span class="source-type">[{source.type}]</span> {source.name}</li>
 							{/each}
 						</ul>
 					</div>
@@ -256,6 +256,11 @@
 		font-size: 0.8rem;
 		color: var(--text-secondary);
 		padding: 0.15rem 0;
+	}
+	.source-type {
+		color: var(--text-muted);
+		font-size: 0.7rem;
+		text-transform: uppercase;
 	}
 
 	.controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
