@@ -49,14 +49,23 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 		charMap[m.UserID] = m.CharacterName
 	}
 
+	// Resolve display names once per unique user
+	nameCache := make(map[string]string)
+	resolveDisplay := func(userID string) string {
+		if name, ok := nameCache[userID]; ok {
+			return name
+		}
+		name := userID
+		if s.memberP != nil {
+			name = s.memberP.ResolveUsername(userID)
+		}
+		nameCache[userID] = name
+		return name
+	}
+
 	resp := make([]transcriptSegmentResponse, len(segments))
 	for i := range segments {
 		seg := &segments[i]
-
-		displayName := seg.UserID
-		if s.memberP != nil {
-			displayName = s.memberP.ResolveUsername(seg.UserID)
-		}
 
 		var charName *string
 		if name, ok := charMap[seg.UserID]; ok {
@@ -67,7 +76,7 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 			ID:            seg.ID,
 			SessionID:     seg.SessionID,
 			UserID:        seg.UserID,
-			DisplayName:   displayName,
+			DisplayName:   resolveDisplay(seg.UserID),
 			CharacterName: charName,
 			StartTime:     seg.StartTime,
 			EndTime:       seg.EndTime,
