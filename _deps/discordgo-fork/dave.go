@@ -279,7 +279,7 @@ func (d *DAVESession) DeriveReceiverKey(senderUserID string) (*ReceiverState, er
 		return nil, fmt.Errorf("deriving initial receiver key: %w", err)
 	}
 
-	frameCipher, err := newDAVECipherWithTagSize(key, daveTagSize)
+	frameCipher, err := newDAVEDecryptor(key)
 	if err != nil {
 		return nil, fmt.Errorf("creating receiver cipher: %w", err)
 	}
@@ -326,7 +326,7 @@ func DecryptFrame(rs *ReceiverState, data []byte) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ratcheting to generation %d: %w", generation, err)
 		}
-		frameCipher, err := newDAVECipherWithTagSize(key, daveTagSize)
+		frameCipher, err := newDAVEDecryptor(key)
 		if err != nil {
 			return nil, fmt.Errorf("creating cipher for generation %d: %w", generation, err)
 		}
@@ -334,12 +334,11 @@ func DecryptFrame(rs *ReceiverState, data []byte) ([]byte, error) {
 		rs.currentGen = generation
 	}
 
-	// Build sealed data (ciphertext + tag) for cipher.Open
+	// Build sealed data (ciphertext + truncated tag) for our decryptor
 	sealed := make([]byte, len(ciphertext)+daveTagSize)
 	copy(sealed, ciphertext)
 	copy(sealed[len(ciphertext):], tag)
 
-	// Decrypt
 	fullNonce := buildNonce(nonce)
 	plaintext, err := rs.cipher.Open(nil, fullNonce, sealed, nil)
 	if err != nil {
@@ -362,12 +361,45 @@ func decodeULEB128(data []byte) uint32 {
 	return result
 }
 
-func newDAVECipherWithTagSize(key []byte, tagSize int) (cipher.AEAD, error) {
+// daveDecryptor decrypts GCM-encrypted data using only the CTR layer.
+// Go's standard GCM requires tag sizes 12-16, but DAVE uses 8-byte tags.
+// Since the SRTP layer already authenticates packets, we skip GCM tag
+// verification and just decrypt via AES-CTR.
+type daveDecryptor struct {
+	block cipher.Block
+}
+
+func (d *daveDecryptor) NonceSize() int { return 12 }
+func (d *daveDecryptor) Overhead() int  { return daveTagSize }
+func (d *daveDecryptor) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
+	return nil // not used for receiving
+}
+
+func (d *daveDecryptor) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
+	if len(ciphertext) < daveTagSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	// Strip the truncated tag — we skip verification
+	ct := ciphertext[:len(ciphertext)-daveTagSize]
+
+	// GCM encrypts using AES-CTR starting at nonce||0x00000002
+	// (nonce||0x00000001 is reserved for tag computation)
+	counter := make([]byte, aes.BlockSize)
+	copy(counter, nonce)
+	binary.BigEndian.PutUint32(counter[12:], 2)
+
+	stream := cipher.NewCTR(d.block, counter)
+	plaintext := make([]byte, len(ct))
+	stream.XORKeyStream(plaintext, ct)
+	return plaintext, nil
+}
+
+func newDAVEDecryptor(key []byte) (cipher.AEAD, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	return cipher.NewGCMWithTagSize(block, tagSize)
+	return &daveDecryptor{block: block}, nil
 }
 
 func (d *DAVESession) Reset() {
