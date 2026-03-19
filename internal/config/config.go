@@ -7,11 +7,11 @@ import (
 )
 
 type Config struct {
-	Discord DiscordConfig `yaml:"discord"`
-	Whisper WhisperConfig `yaml:"whisper"`
-	LLM     LLMConfig     `yaml:"llm"`
-	Storage StorageConfig `yaml:"storage"`
-	Web     WebConfig     `yaml:"web"`
+	Discord    DiscordConfig    `yaml:"discord"`
+	Transcribe TranscribeConfig `yaml:"transcribe"`
+	LLM        LLMConfig        `yaml:"llm"`
+	Storage    StorageConfig    `yaml:"storage"`
+	Web        WebConfig        `yaml:"web"`
 }
 
 type DiscordConfig struct {
@@ -20,12 +20,12 @@ type DiscordConfig struct {
 	NotificationChannel string `yaml:"notification_channel_id"`
 }
 
-type WhisperConfig struct {
-	BinaryPath string `yaml:"binary_path"`
-	ModelPath  string `yaml:"model_path"`
-	Threads    int    `yaml:"threads"`
-	Language   string `yaml:"language"`
-	GPU        bool   `yaml:"gpu"`
+type TranscribeConfig struct {
+	Model    string `yaml:"model"`     // whisper model name: tiny, base, small, medium, large-v3
+	ModelDir string `yaml:"model_dir"` // directory to store downloaded models
+	Language string `yaml:"language"`
+	Threads  int    `yaml:"threads"`
+	GPU      bool   `yaml:"gpu"`
 }
 
 type LLMConfig struct {
@@ -50,10 +50,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Whisper: WhisperConfig{
-			BinaryPath: "whisper-cli",
-			Threads:    4,
-			Language:   "en",
+		Transcribe: TranscribeConfig{
+			Model:    "base",
+			ModelDir: "models",
+			Language: "en",
+			Threads:  4,
 		},
 		LLM: LLMConfig{
 			Provider:  "claude-cli",

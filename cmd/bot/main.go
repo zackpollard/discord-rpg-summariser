@@ -37,13 +37,17 @@ func main() {
 	defer store.Close()
 	log.Println("Database connected and migrated")
 
-	transcriber := transcribe.NewTranscriber(
-		cfg.Whisper.BinaryPath,
-		cfg.Whisper.ModelPath,
-		cfg.Whisper.Threads,
-		cfg.Whisper.Language,
-		cfg.Whisper.GPU,
+	transcriber, err := transcribe.NewTranscriber(
+		cfg.Transcribe.Model,
+		cfg.Transcribe.ModelDir,
+		cfg.Transcribe.Language,
+		cfg.Transcribe.Threads,
 	)
+	if err != nil {
+		log.Fatalf("Failed to initialize transcriber: %v", err)
+	}
+	defer transcriber.Close()
+	log.Println("Whisper model loaded")
 
 	var sum summarise.Summariser
 	switch cfg.LLM.Provider {

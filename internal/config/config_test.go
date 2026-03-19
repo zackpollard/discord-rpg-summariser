@@ -13,11 +13,11 @@ discord:
   guild_id: "123456"
   notification_channel_id: "789"
 
-whisper:
-  binary_path: "/usr/bin/whisper"
-  model_path: "/models/large-v3.bin"
-  threads: 8
+transcribe:
+  model: "large-v3"
+  model_dir: "/models"
   language: "en"
+  threads: 8
   gpu: true
 
 llm:
@@ -49,11 +49,14 @@ web:
 	if cfg.Discord.GuildID != "123456" {
 		t.Errorf("Discord.GuildID = %q, want %q", cfg.Discord.GuildID, "123456")
 	}
-	if cfg.Whisper.Threads != 8 {
-		t.Errorf("Whisper.Threads = %d, want 8", cfg.Whisper.Threads)
+	if cfg.Transcribe.Threads != 8 {
+		t.Errorf("Transcribe.Threads = %d, want 8", cfg.Transcribe.Threads)
 	}
-	if !cfg.Whisper.GPU {
-		t.Error("Whisper.GPU = false, want true")
+	if !cfg.Transcribe.GPU {
+		t.Error("Transcribe.GPU = false, want true")
+	}
+	if cfg.Transcribe.Model != "large-v3" {
+		t.Errorf("Transcribe.Model = %q, want %q", cfg.Transcribe.Model, "large-v3")
 	}
 	if cfg.LLM.Provider != "ollama" {
 		t.Errorf("LLM.Provider = %q, want %q", cfg.LLM.Provider, "ollama")
@@ -82,8 +85,11 @@ discord:
 		t.Fatalf("Load() error: %v", err)
 	}
 
-	if cfg.Whisper.Threads != 4 {
-		t.Errorf("default Whisper.Threads = %d, want 4", cfg.Whisper.Threads)
+	if cfg.Transcribe.Threads != 4 {
+		t.Errorf("default Transcribe.Threads = %d, want 4", cfg.Transcribe.Threads)
+	}
+	if cfg.Transcribe.Model != "base" {
+		t.Errorf("default Transcribe.Model = %q, want %q", cfg.Transcribe.Model, "base")
 	}
 	if cfg.LLM.Provider != "claude-cli" {
 		t.Errorf("default LLM.Provider = %q, want %q", cfg.LLM.Provider, "claude-cli")

@@ -2,137 +2,150 @@ package transcribe
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os/exec"
-	"strconv"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+
+	"discord-rpg-summariser/internal/audio"
+
+	whisper "github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
 )
+
+const modelURLBase = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
 // Segment represents a single transcribed segment of audio.
 type Segment struct {
-	StartTime float64 // seconds from start of audio
+	StartTime float64
 	EndTime   float64
 	Text      string
 }
 
-// Transcriber wraps the whisper-cli binary for audio transcription.
+// Transcriber performs speech-to-text using whisper.cpp in-process.
 type Transcriber struct {
-	binaryPath string
-	modelPath  string
-	threads    int
-	language   string
-	gpu        bool
+	model    whisper.Model
+	language string
+	threads  int
+	mu       sync.Mutex // whisper is not thread-safe
 }
 
-// NewTranscriber creates a new Transcriber that shells out to whisper-cli.
-func NewTranscriber(binaryPath, modelPath string, threads int, language string, gpu bool) *Transcriber {
-	return &Transcriber{
-		binaryPath: binaryPath,
-		modelPath:  modelPath,
-		threads:    threads,
-		language:   language,
-		gpu:        gpu,
-	}
-}
+// NewTranscriber loads the whisper model. If the model file doesn't exist,
+// it is downloaded from HuggingFace automatically.
+func NewTranscriber(modelName, modelDir, language string, threads int) (*Transcriber, error) {
+	modelPath := filepath.Join(modelDir, fmt.Sprintf("ggml-%s.bin", modelName))
 
-// whisperOutput mirrors the JSON structure produced by whisper-cli --output-json.
-type whisperOutput struct {
-	Transcription []whisperSegment `json:"transcription"`
-}
-
-type whisperSegment struct {
-	Timestamps whisperTimestamps `json:"timestamps"`
-	Text       string            `json:"text"`
-}
-
-type whisperTimestamps struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-}
-
-// TranscribeFile runs whisper-cli on the given WAV file and returns parsed segments.
-func (t *Transcriber) TranscribeFile(ctx context.Context, wavPath string) ([]Segment, error) {
-	args := []string{
-		"-m", t.modelPath,
-		"-t", strconv.Itoa(t.threads),
-		"-l", t.language,
-		"--output-json",
-		"--prompt", "Dungeons and Dragons RPG session with fantasy names and places",
-		"-f", wavPath,
-	}
-	if t.gpu {
-		args = append(args, "--gpu")
+	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
+		if err := downloadModel(modelName, modelPath); err != nil {
+			return nil, fmt.Errorf("download model %s: %w", modelName, err)
+		}
 	}
 
-	cmd := exec.CommandContext(ctx, t.binaryPath, args...)
-	output, err := cmd.Output()
+	model, err := whisper.New(modelPath)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("whisper-cli failed: %w: %s", err, string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("whisper-cli failed: %w", err)
+		return nil, fmt.Errorf("load whisper model %s: %w", modelPath, err)
 	}
 
-	var wo whisperOutput
-	if err := json.Unmarshal(output, &wo); err != nil {
-		return nil, fmt.Errorf("parse whisper-cli JSON output: %w", err)
+	return &Transcriber{
+		model:    model,
+		language: language,
+		threads:  threads,
+	}, nil
+}
+
+// Close releases the whisper model resources.
+func (t *Transcriber) Close() error {
+	return t.model.Close()
+}
+
+// TranscribeFile transcribes a 48kHz WAV file and returns timestamped segments.
+func (t *Transcriber) TranscribeFile(ctx context.Context, wavPath string) ([]Segment, error) {
+	// Resample 48kHz → 16kHz float32 for whisper
+	samples, err := audio.LoadAndResample(wavPath)
+	if err != nil {
+		return nil, fmt.Errorf("load and resample audio: %w", err)
 	}
 
-	segments := make([]Segment, 0, len(wo.Transcription))
-	for _, ws := range wo.Transcription {
-		startSec, err := parseTimestamp(ws.Timestamps.From)
-		if err != nil {
-			return nil, fmt.Errorf("parse start timestamp %q: %w", ws.Timestamps.From, err)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	wctx, err := t.model.NewContext()
+	if err != nil {
+		return nil, fmt.Errorf("create whisper context: %w", err)
+	}
+
+	if err := wctx.SetLanguage(t.language); err != nil {
+		return nil, fmt.Errorf("set language %s: %w", t.language, err)
+	}
+	wctx.SetThreads(uint(t.threads))
+	wctx.SetInitialPrompt("Dungeons and Dragons RPG session with fantasy names and places")
+
+	if err := wctx.Process(samples, nil, nil, nil); err != nil {
+		return nil, fmt.Errorf("whisper process: %w", err)
+	}
+
+	var segments []Segment
+	for {
+		seg, err := wctx.NextSegment()
+		if err == io.EOF {
+			break
 		}
-		endSec, err := parseTimestamp(ws.Timestamps.To)
 		if err != nil {
-			return nil, fmt.Errorf("parse end timestamp %q: %w", ws.Timestamps.To, err)
+			return nil, fmt.Errorf("read segment: %w", err)
+		}
+		text := strings.TrimSpace(seg.Text)
+		if text == "" {
+			continue
 		}
 		segments = append(segments, Segment{
-			StartTime: startSec,
-			EndTime:   endSec,
-			Text:      strings.TrimSpace(ws.Text),
+			StartTime: seg.Start.Seconds(),
+			EndTime:   seg.End.Seconds(),
+			Text:      text,
 		})
 	}
 
 	return segments, nil
 }
 
-// parseTimestamp converts a whisper-cli timestamp string "HH:MM:SS,mmm" to seconds.
-func parseTimestamp(ts string) (float64, error) {
-	// Format: "00:00:02,500" -> 2.5 seconds
-	ts = strings.TrimSpace(ts)
+func downloadModel(name, destPath string) error {
+	url := fmt.Sprintf("%s/ggml-%s.bin", modelURLBase, name)
+	log.Printf("Downloading whisper model %q from %s...", name, url)
 
-	// Split on comma to separate seconds from milliseconds.
-	parts := strings.SplitN(ts, ",", 2)
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("expected comma-separated timestamp, got %q", ts)
+	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+		return err
 	}
 
-	millis, err := strconv.Atoi(parts[1])
+	resp, err := http.Get(url)
 	if err != nil {
-		return 0, fmt.Errorf("parse milliseconds %q: %w", parts[1], err)
+		return fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download returned %d", resp.StatusCode)
 	}
 
-	// Split HH:MM:SS
-	hms := strings.SplitN(parts[0], ":", 3)
-	if len(hms) != 3 {
-		return 0, fmt.Errorf("expected HH:MM:SS, got %q", parts[0])
+	tmpPath := destPath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return err
 	}
 
-	hours, err := strconv.Atoi(hms[0])
+	n, err := io.Copy(f, resp.Body)
+	f.Close()
 	if err != nil {
-		return 0, fmt.Errorf("parse hours %q: %w", hms[0], err)
-	}
-	minutes, err := strconv.Atoi(hms[1])
-	if err != nil {
-		return 0, fmt.Errorf("parse minutes %q: %w", hms[1], err)
-	}
-	seconds, err := strconv.Atoi(hms[2])
-	if err != nil {
-		return 0, fmt.Errorf("parse seconds %q: %w", hms[2], err)
+		os.Remove(tmpPath)
+		return fmt.Errorf("write model: %w", err)
 	}
 
-	return float64(hours)*3600 + float64(minutes)*60 + float64(seconds) + float64(millis)/1000.0, nil
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	log.Printf("Downloaded whisper model %q (%d MB)", name, n/1024/1024)
+	return nil
 }

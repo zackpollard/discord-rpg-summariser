@@ -4,6 +4,7 @@ go 1.23.0
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
+	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20260318204338-ef3463bb29ef
 	github.com/jackc/pgx/v5 v5.7.4
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 	gopkg.in/yaml.v3 v3.0.1
