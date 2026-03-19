@@ -23,6 +23,7 @@ type Server struct {
 	guildID    string
 	voiceAP    VoiceActivityProvider
 	liveTP     LiveTranscriptProvider
+	memberP    MemberProvider
 	mux        *http.ServeMux
 	httpServer *http.Server
 }
@@ -53,6 +54,10 @@ func (s *Server) SetVoiceActivityProvider(vap VoiceActivityProvider) {
 
 func (s *Server) SetLiveTranscriptProvider(ltp LiveTranscriptProvider) {
 	s.liveTP = ltp
+}
+
+func (s *Server) SetMemberProvider(mp MemberProvider) {
+	s.memberP = mp
 }
 
 func (s *Server) Start() error {

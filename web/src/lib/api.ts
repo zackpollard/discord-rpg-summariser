@@ -14,11 +14,18 @@ export interface TranscriptSegment {
 	id: number;
 	session_id: number;
 	user_id: string;
+	display_name: string;
 	character_name: string | null;
 	start_time: number;
 	end_time: number;
 	text: string;
 	created_at: string;
+}
+
+export interface GuildMember {
+	user_id: string;
+	username: string;
+	display_name: string;
 }
 
 export interface CharacterMapping {
@@ -84,6 +91,10 @@ export async function upsertCharacter(userId: string, guildId: string, name: str
 
 export async function deleteCharacter(userId: string): Promise<void> {
 	await request<void>(`/api/characters/${userId}`, { method: 'DELETE' });
+}
+
+export async function fetchMembers(): Promise<GuildMember[]> {
+	return request<GuildMember[]>('/api/members');
 }
 
 export async function fetchStatus(): Promise<Status> {

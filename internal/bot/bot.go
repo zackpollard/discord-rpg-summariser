@@ -44,6 +44,58 @@ func (b *Bot) LiveTranscriptWorker() *voice.LiveWorker {
 	return b.liveWorker
 }
 
+// MemberInfo represents a Discord guild member.
+type MemberInfo struct {
+	UserID      string `json:"user_id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"` // nick > global name > username
+}
+
+// GuildMembers returns all members of the configured guild.
+func (b *Bot) GuildMembers() []MemberInfo {
+	guildID := b.config.Discord.GuildID
+	guild, err := b.session.State.Guild(guildID)
+	if err != nil {
+		return nil
+	}
+
+	var members []MemberInfo
+	for _, m := range guild.Members {
+		if m.User == nil || m.User.Bot {
+			continue
+		}
+		display := m.User.Username
+		if m.User.GlobalName != "" {
+			display = m.User.GlobalName
+		}
+		if m.Nick != "" {
+			display = m.Nick
+		}
+		members = append(members, MemberInfo{
+			UserID:      m.User.ID,
+			Username:    m.User.Username,
+			DisplayName: display,
+		})
+	}
+	return members
+}
+
+// ResolveUsername returns a display name for a Discord user ID.
+func (b *Bot) ResolveUsername(userID string) string {
+	guildID := b.config.Discord.GuildID
+	member, err := b.session.GuildMember(guildID, userID)
+	if err != nil || member.User == nil {
+		return userID
+	}
+	if member.Nick != "" {
+		return member.Nick
+	}
+	if member.User.GlobalName != "" {
+		return member.User.GlobalName
+	}
+	return member.User.Username
+}
+
 // VoiceActivity returns current voice activity. Nil if not recording.
 func (b *Bot) VoiceActivity() []voice.UserActivity {
 	b.mu.Lock()

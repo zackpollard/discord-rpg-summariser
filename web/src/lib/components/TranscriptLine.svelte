@@ -20,7 +20,7 @@
 		return `${m}:${String(s).padStart(2, '0')}`;
 	}
 
-	const displayName = $derived(segment.character_name ?? segment.user_id);
+	const displayName = $derived(segment.character_name ?? segment.display_name ?? segment.user_id);
 	const nameColor = $derived(hashColor(displayName));
 </script>
 

@@ -2,18 +2,20 @@
 	import { onMount } from 'svelte';
 	import {
 		fetchCharacters,
+		fetchMembers,
 		upsertCharacter,
 		deleteCharacter,
-		type CharacterMapping
+		type CharacterMapping,
+		type GuildMember
 	} from '$lib/api';
 
 	let characters = $state<CharacterMapping[]>([]);
+	let members = $state<GuildMember[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
 	// Add form
 	let newUserId = $state('');
-	let newGuildId = $state('');
 	let newName = $state('');
 	let addError = $state<string | null>(null);
 	let adding = $state(false);
@@ -26,31 +28,43 @@
 	// Delete confirmation
 	let deleteConfirm = $state<string | null>(null);
 
-	async function loadCharacters() {
+	// Build a lookup for display names
+	const memberMap = $derived(
+		new Map(members.map(m => [m.user_id, m]))
+	);
+
+	function displayFor(userId: string): string {
+		const m = memberMap.get(userId);
+		return m ? m.display_name : userId;
+	}
+
+	async function loadData() {
 		loading = true;
 		error = null;
 		try {
-			characters = await fetchCharacters();
+			const [chars, mems] = await Promise.all([fetchCharacters(), fetchMembers()]);
+			characters = chars;
+			members = mems;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load characters';
+			error = e instanceof Error ? e.message : 'Failed to load data';
 		} finally {
 			loading = false;
 		}
 	}
 
 	async function handleAdd() {
-		if (!newUserId.trim() || !newName.trim()) {
-			addError = 'User ID and character name are required';
+		if (!newUserId || !newName.trim()) {
+			addError = 'Select a user and enter a character name';
 			return;
 		}
 		adding = true;
 		addError = null;
 		try {
-			await upsertCharacter(newUserId.trim(), newGuildId.trim(), newName.trim());
+			// Use the guild ID from config (sent as empty = server default)
+			await upsertCharacter(newUserId, '', newName.trim());
 			newUserId = '';
-			newGuildId = '';
 			newName = '';
-			await loadCharacters();
+			await loadData();
 		} catch (e) {
 			addError = e instanceof Error ? e.message : 'Failed to add character';
 		} finally {
@@ -75,7 +89,7 @@
 			await upsertCharacter(mapping.user_id, mapping.guild_id, editName.trim());
 			editingUserId = null;
 			editName = '';
-			await loadCharacters();
+			await loadData();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to update character';
 		} finally {
@@ -87,7 +101,7 @@
 		try {
 			await deleteCharacter(userId);
 			deleteConfirm = null;
-			await loadCharacters();
+			await loadData();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to delete character';
 		}
@@ -95,15 +109,11 @@
 
 	function formatDate(dateStr: string): string {
 		return new Date(dateStr).toLocaleDateString('en-GB', {
-			day: 'numeric',
-			month: 'short',
-			year: 'numeric'
+			day: 'numeric', month: 'short', year: 'numeric'
 		});
 	}
 
-	onMount(() => {
-		loadCharacters();
-	});
+	onMount(() => { loadData(); });
 </script>
 
 <svelte:head>
@@ -112,29 +122,20 @@
 
 <div class="characters-page">
 	<h1>Character Mappings</h1>
-	<p class="subtitle">Map Discord user IDs to character names for transcript display.</p>
+	<p class="subtitle">Map Discord users to their character names for transcripts.</p>
 
 	<section class="add-form card">
 		<h2>Add Mapping</h2>
 		<form onsubmit={(e) => { e.preventDefault(); handleAdd(); }}>
 			<div class="form-row">
 				<div class="field">
-					<label for="userId">Discord User ID</label>
-					<input
-						id="userId"
-						type="text"
-						bind:value={newUserId}
-						placeholder="e.g. 123456789012345678"
-					/>
-				</div>
-				<div class="field">
-					<label for="guildId">Guild ID <span class="optional">(optional)</span></label>
-					<input
-						id="guildId"
-						type="text"
-						bind:value={newGuildId}
-						placeholder="Uses default if empty"
-					/>
+					<label for="userId">Discord User</label>
+					<select id="userId" bind:value={newUserId}>
+						<option value="">Select a user...</option>
+						{#each members as m (m.user_id)}
+							<option value={m.user_id}>{m.display_name} (@{m.username})</option>
+						{/each}
+					</select>
 				</div>
 				<div class="field">
 					<label for="charName">Character Name</label>
@@ -171,7 +172,7 @@
 			<table>
 				<thead>
 					<tr>
-						<th>User ID</th>
+						<th>Discord User</th>
 						<th>Character Name</th>
 						<th>Updated</th>
 						<th>Actions</th>
@@ -180,7 +181,10 @@
 				<tbody>
 					{#each characters as mapping (mapping.user_id)}
 						<tr>
-							<td class="mono">{mapping.user_id}</td>
+							<td>
+								<span class="user-display">{displayFor(mapping.user_id)}</span>
+								<span class="user-id">{mapping.user_id}</span>
+							</td>
 							<td>
 								{#if editingUserId === mapping.user_id}
 									<div class="inline-edit">
@@ -192,9 +196,7 @@
 												if (e.key === 'Escape') cancelEdit();
 											}}
 										/>
-										<button class="btn-sm btn-primary" onclick={() => saveEdit(mapping)} disabled={editSaving}>
-											Save
-										</button>
+										<button class="btn-sm btn-primary" onclick={() => saveEdit(mapping)} disabled={editSaving}>Save</button>
 										<button class="btn-sm" onclick={cancelEdit}>Cancel</button>
 									</div>
 								{:else}
@@ -267,11 +269,7 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
-	.optional {
-		font-weight: 400;
-		text-transform: none;
-	}
-	input {
+	input, select {
 		background: var(--bg-dark);
 		border: 1px solid var(--border);
 		color: var(--text-primary);
@@ -280,12 +278,16 @@
 		font-size: 0.9rem;
 		font-family: inherit;
 	}
-	input:focus {
+	input:focus, select:focus {
 		outline: none;
 		border-color: var(--accent-gold-dim);
 	}
 	input::placeholder {
 		color: var(--text-muted);
+	}
+	select option {
+		background: var(--bg-dark);
+		color: var(--text-primary);
 	}
 
 	.field-error {
@@ -319,13 +321,17 @@
 		font-size: 0.9rem;
 		border-top: 1px solid var(--border);
 	}
-	.mono {
-		font-family: 'Courier New', Courier, monospace;
-		font-size: 0.85rem;
+	.user-display {
+		display: block;
+		font-weight: 500;
 	}
-	.nowrap {
-		white-space: nowrap;
+	.user-id {
+		display: block;
+		font-family: monospace;
+		font-size: 0.75rem;
+		color: var(--text-muted);
 	}
+	.nowrap { white-space: nowrap; }
 	.actions {
 		display: flex;
 		gap: 0.4rem;
@@ -355,13 +361,8 @@
 		transition: background 0.15s;
 		white-space: nowrap;
 	}
-	.btn-primary:hover:not(:disabled) {
-		background: var(--accent-gold);
-	}
-	.btn-primary:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
+	.btn-primary:hover:not(:disabled) { background: var(--accent-gold); }
+	.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 	.btn-sm {
 		background: var(--bg-surface-2);
@@ -377,15 +378,8 @@
 		background: var(--surface-hover);
 		border-color: var(--accent-gold-dim);
 	}
-
-	.btn-danger {
-		border-color: #7f1d1d;
-		color: #fca5a5;
-	}
-	.btn-danger:hover {
-		background: rgba(185, 28, 28, 0.2);
-		border-color: #b91c1c;
-	}
+	.btn-danger { border-color: #7f1d1d; color: #fca5a5; }
+	.btn-danger:hover { background: rgba(185, 28, 28, 0.2); border-color: #b91c1c; }
 
 	.empty-state {
 		text-align: center;
@@ -394,9 +388,7 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
 	}
-	.muted {
-		color: var(--text-muted);
-	}
+	.muted { color: var(--text-muted); }
 	.error-box {
 		background: rgba(185, 28, 28, 0.15);
 		border: 1px solid #7f1d1d;
