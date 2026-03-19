@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"context"
 	"log"
 	"sync"
 
@@ -61,6 +62,14 @@ func NewBot(cfg *config.Config, store *storage.Store, transcriber *transcribe.Tr
 // Start opens the Discord connection, registers slash commands, and installs
 // event handlers.
 func (b *Bot) Start() error {
+	// Clean up sessions left in non-terminal states from a previous run.
+	ctx := context.Background()
+	if n, err := b.store.CleanupStaleSessions(ctx); err != nil {
+		log.Printf("Warning: failed to clean up stale sessions: %v", err)
+	} else if n > 0 {
+		log.Printf("Cleaned up %d stale session(s) from previous run", n)
+	}
+
 	b.session.AddHandler(b.handleInteraction)
 	b.session.AddHandler(b.handleVoiceStateUpdate)
 
@@ -167,23 +176,31 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 	sessionID := b.sessionID
 	b.mu.Unlock()
 
-	b.stopRecording()
+	userFiles := b.stopRecording()
 
 	if sessionID != 0 {
-		go b.runPipeline(sessionID)
+		ctx := context.Background()
+		if err := b.store.EndSession(ctx, sessionID); err != nil {
+			log.Printf("EndSession error (auto-stop): %v", err)
+		}
+		go b.runPipeline(sessionID, userFiles)
 	}
 }
 
-// stopRecording stops the recorder and disconnects from voice. Caller must NOT
-// hold b.mu.
-func (b *Bot) stopRecording() {
+// stopRecording stops the recorder and disconnects from voice, returning
+// the user-to-WAV file mapping before clearing state. Caller must NOT hold b.mu.
+func (b *Bot) stopRecording() map[string]string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	var userFiles map[string]string
 
 	if b.recorder != nil {
 		if err := b.recorder.Stop(); err != nil {
 			log.Printf("Error stopping recorder: %v", err)
 		}
+		userFiles = b.recorder.UserFiles()
+		b.recorder = nil
 	}
 	if b.activeVC != nil {
 		if err := b.activeVC.Disconnect(); err != nil {
@@ -191,4 +208,7 @@ func (b *Bot) stopRecording() {
 		}
 		b.activeVC = nil
 	}
+	b.sessionID = 0
+
+	return userFiles
 }

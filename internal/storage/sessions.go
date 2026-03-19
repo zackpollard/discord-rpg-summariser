@@ -90,6 +90,18 @@ func (s *Store) UpdateSessionSummary(ctx context.Context, id int64, summary stri
 	return err
 }
 
+// CleanupStaleSessions marks any sessions stuck in non-terminal states as
+// 'failed'. This handles the case where the bot was killed mid-recording.
+func (s *Store) CleanupStaleSessions(ctx context.Context) (int64, error) {
+	tag, err := s.Pool.Exec(ctx,
+		`UPDATE sessions SET status = 'failed', ended_at = NOW()
+		 WHERE status IN ('recording', 'transcribing', 'summarising')`)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup stale sessions: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (s *Store) GetActiveSession(ctx context.Context, guildID string) (*Session, error) {
 	row := s.Pool.QueryRow(ctx,
 		`SELECT id, guild_id, channel_id, started_at, ended_at, status, audio_dir, summary, key_events, created_at

@@ -156,8 +156,8 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	// Stop recording and disconnect.
-	b.stopRecording()
+	// Stop recording and disconnect; get user WAV files before state is cleared.
+	userFiles := b.stopRecording()
 
 	// Mark session as ended in DB.
 	ctx := context.Background()
@@ -168,7 +168,7 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 	respond(s, i, fmt.Sprintf("Recording stopped (session #%d). Processing transcript and summary...", sessionID))
 
 	// Kick off async pipeline.
-	go b.runPipeline(sessionID)
+	go b.runPipeline(sessionID, userFiles)
 }
 
 func (b *Bot) handleSessionStatus(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -261,28 +261,14 @@ func (b *Bot) handleCharacterRemove(s *discordgo.Session, i *discordgo.Interacti
 // runPipeline is executed asynchronously after recording stops. It transcribes
 // each user's audio, merges segments chronologically, summarises the transcript,
 // persists everything to the database, and posts a notification.
-func (b *Bot) runPipeline(sessionID int64) {
+func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 	ctx := context.Background()
 
-	// Read recorder state before it is cleared.
-	b.mu.Lock()
-	rec := b.recorder
-	b.mu.Unlock()
-
-	// Recorder may have already been nilled out by stopRecording; that is
-	// fine -- we still saved a reference before the stop path cleared it.
-	// But just in case someone calls runPipeline after cleanup, grab the
-	// session from DB for the audio dir.
 	session, err := b.store.GetSession(ctx, sessionID)
 	if err != nil {
 		log.Printf("pipeline: GetSession(%d): %v", sessionID, err)
-		b.store.UpdateSessionStatus(ctx, sessionID, "error")
+		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 		return
-	}
-
-	var userFiles map[string]string
-	if rec != nil {
-		userFiles = rec.UserFiles()
 	}
 
 	if len(userFiles) == 0 {
@@ -307,7 +293,7 @@ func (b *Bot) runPipeline(sessionID int64) {
 
 	if len(userSegments) == 0 {
 		log.Printf("pipeline: all transcriptions failed for session %d", sessionID)
-		b.store.UpdateSessionStatus(ctx, sessionID, "error")
+		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 		b.sendNotification(sessionID, "Transcription failed for all users.")
 		return
 	}
@@ -355,7 +341,7 @@ func (b *Bot) runPipeline(sessionID int64) {
 	result, err := b.summariser.Summarise(ctx, transcript, "")
 	if err != nil {
 		log.Printf("pipeline: summarise: %v", err)
-		b.store.UpdateSessionStatus(ctx, sessionID, "error")
+		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 		b.sendNotification(sessionID, "Summarisation failed.")
 		return
 	}
@@ -363,7 +349,7 @@ func (b *Bot) runPipeline(sessionID int64) {
 	// Persist summary.
 	if err := b.store.UpdateSessionSummary(ctx, sessionID, result.Summary, result.KeyEvents); err != nil {
 		log.Printf("pipeline: UpdateSessionSummary: %v", err)
-		b.store.UpdateSessionStatus(ctx, sessionID, "error")
+		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 		return
 	}
 
