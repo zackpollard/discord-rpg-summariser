@@ -51,16 +51,27 @@ type MemberInfo struct {
 	DisplayName string `json:"display_name"` // nick > global name > username
 }
 
-// GuildMembers returns all members of the configured guild.
+// GuildMembers returns all non-bot members of the configured guild.
 func (b *Bot) GuildMembers() []MemberInfo {
 	guildID := b.config.Discord.GuildID
-	guild, err := b.session.State.Guild(guildID)
-	if err != nil {
-		return nil
+
+	// Fetch from API (state cache only has members seen in events)
+	var all []*discordgo.Member
+	after := ""
+	for {
+		batch, err := b.session.GuildMembers(guildID, after, 1000)
+		if err != nil || len(batch) == 0 {
+			break
+		}
+		all = append(all, batch...)
+		after = batch[len(batch)-1].User.ID
+		if len(batch) < 1000 {
+			break
+		}
 	}
 
 	var members []MemberInfo
-	for _, m := range guild.Members {
+	for _, m := range all {
 		if m.User == nil || m.User.Bot {
 			continue
 		}
