@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
-	"time"
 
 	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/transcribe"
