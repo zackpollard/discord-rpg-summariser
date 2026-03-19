@@ -10,12 +10,8 @@ import (
 )
 
 const (
-	// maxPendingPackets is roughly 2 seconds of audio at 50 packets/sec.
-	maxPendingPackets = 100
-
-	// activityTimeout is how long after the last packet a user is still
-	// considered "speaking".
-	activityTimeout = 300 * time.Millisecond
+	maxPendingPackets = 100 // ~2 seconds at 50 packets/sec
+	activityTimeout   = 300 * time.Millisecond
 )
 
 // UserActivity tracks live voice activity for a single user.
@@ -27,22 +23,23 @@ type UserActivity struct {
 	LastPacketAt time.Time `json:"last_packet_at"`
 }
 
-// Recorder manages per-user recording for a voice session.
+// NameResolver resolves a Discord user ID to a display name.
+type NameResolver func(userID string) string
+
+// Recorder manages per-user recording for a voice session. It maps SSRCs to
+// users, decrypts DAVE frames, decodes opus, and writes per-user WAV files.
 type Recorder struct {
 	mu             sync.Mutex
 	streams        map[uint32]*UserStream
 	ssrcToUser     map[uint32]string
 	userToSSRC     map[string]uint32
 	pendingPackets map[uint32][]*discordgo.Packet
+	activity       map[string]*UserActivity
 	outputDir      string
 	guildID        string
 	done           chan struct{}
-
-	// activity tracks per-user packet counts and last-seen times.
-	activity map[string]*UserActivity
 }
 
-// NewRecorder creates a Recorder that writes per-user WAV files into outputDir.
 func NewRecorder(outputDir, guildID string) *Recorder {
 	return &Recorder{
 		streams:        make(map[uint32]*UserStream),
@@ -57,13 +54,10 @@ func NewRecorder(outputDir, guildID string) *Recorder {
 }
 
 // HandleSpeakingUpdate maps an SSRC to a user ID, creates a UserStream if
-// needed, and flushes any buffered packets for that SSRC.
-// displayName is the resolved Discord display name (may be empty).
+// needed, derives the DAVE receiver key, and flushes any buffered packets.
 func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint32, userID, displayName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	log.Printf("Speaking update: SSRC=%d user=%s (%s)", ssrc, userID, displayName)
 
 	r.ssrcToUser[ssrc] = userID
 	r.userToSSRC[userID] = ssrc
@@ -78,16 +72,13 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 		return
 	}
 
-	// Derive DAVE decryption key for this sender
 	var daveState *discordgo.ReceiverState
-	dave := vc.DAVESession()
-	if dave != nil {
+	if dave := vc.DAVESession(); dave != nil {
 		rs, err := dave.DeriveReceiverKey(userID)
 		if err != nil {
-			log.Printf("Warning: failed to derive DAVE key for user %s: %v", userID, err)
+			log.Printf("Warning: DAVE key derivation failed for %s: %v", userID, err)
 		} else {
 			daveState = rs
-			log.Printf("Derived DAVE receiver key for user %s", userID)
 		}
 	}
 
@@ -97,22 +88,19 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 		return
 	}
 	r.streams[ssrc] = us
-	log.Printf("Created audio stream for user %s", userID)
+	log.Printf("Recording user %s (%s)", displayName, userID)
 
-	// Flush any pending packets that arrived before the speaking update.
 	if pending, ok := r.pendingPackets[ssrc]; ok {
 		for _, pkt := range pending {
-			if err := us.HandlePacket(pkt); err != nil {
-				log.Printf("Error flushing pending packet for user %s: %v", userID, err)
-			}
+			us.HandlePacket(pkt) // errors expected for pre-DAVE packets
 		}
 		r.activity[userID].PacketCount += int64(len(pending))
 		delete(r.pendingPackets, ssrc)
 	}
 }
 
-// HandleVoicePacket routes a received packet to the correct UserStream by SSRC.
-// If the SSRC is not yet known, the packet is buffered up to a 2-second limit.
+// HandleVoicePacket routes a packet to the correct UserStream by SSRC.
+// Unknown SSRCs are buffered until a speaking update maps them.
 func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -120,7 +108,7 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 	if us, ok := r.streams[packet.SSRC]; ok {
 		if err := us.HandlePacket(packet); err != nil {
 			uid := r.ssrcToUser[packet.SSRC]
-			log.Printf("Error handling packet for user %s: %v", uid, err)
+			log.Printf("Error handling packet for %s: %v", uid, err)
 		}
 		uid := r.ssrcToUser[packet.SSRC]
 		if a, ok := r.activity[uid]; ok {
@@ -130,7 +118,6 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 		return
 	}
 
-	// SSRC not yet mapped; buffer the packet.
 	buf := r.pendingPackets[packet.SSRC]
 	if len(buf) >= maxPendingPackets {
 		buf = buf[1:]
@@ -138,12 +125,7 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 	r.pendingPackets[packet.SSRC] = append(buf, packet)
 }
 
-// NameResolver resolves a Discord user ID to a display name.
-type NameResolver func(userID string) string
-
-// Start registers the speaking handler on the voice connection and launches a
-// goroutine that reads from vc.OpusRecv until Stop is called.
-// nameResolver is optional — if provided, it resolves user IDs to display names.
+// Start registers handlers and begins reading voice packets.
 func (r *Recorder) Start(vc *discordgo.VoiceConnection, nameResolver NameResolver) {
 	vc.AddHandler(func(vc *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
 		name := ""
@@ -153,34 +135,24 @@ func (r *Recorder) Start(vc *discordgo.VoiceConnection, nameResolver NameResolve
 		r.HandleSpeakingUpdate(vc, uint32(vs.SSRC), vs.UserID, name)
 	})
 
-	log.Printf("Recorder started, waiting for OpusRecv packets...")
-
 	go func() {
-		count := 0
 		for {
 			select {
 			case <-r.done:
-				log.Printf("Recorder stopped after %d total packets", count)
 				return
 			case pkt, ok := <-vc.OpusRecv:
 				if !ok {
-					log.Printf("OpusRecv channel closed after %d packets", count)
 					return
 				}
-				if pkt == nil {
-					continue
+				if pkt != nil {
+					r.HandleVoicePacket(pkt)
 				}
-				count++
-				if count == 1 {
-					log.Printf("First voice packet received (SSRC=%d, %d opus bytes)", pkt.SSRC, len(pkt.Opus))
-				}
-				r.HandleVoicePacket(pkt)
 			}
 		}
 	}()
 }
 
-// Stop signals the receive goroutine to exit and closes all active streams.
+// Stop signals the receive goroutine to exit and closes all streams.
 func (r *Recorder) Stop() error {
 	close(r.done)
 
@@ -196,21 +168,19 @@ func (r *Recorder) Stop() error {
 	return firstErr
 }
 
-// UserFiles returns a mapping of user ID to WAV file path for every recorded user.
+// UserFiles returns userID → WAV file path for every recorded user.
 func (r *Recorder) UserFiles() map[string]string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	files := make(map[string]string, len(r.streams))
 	for ssrc, us := range r.streams {
-		uid := r.ssrcToUser[ssrc]
-		files[uid] = us.FilePath()
+		files[r.ssrcToUser[ssrc]] = us.FilePath()
 	}
 	return files
 }
 
-// Activity returns a snapshot of all tracked users and their current speaking
-// state. A user is considered speaking if a packet arrived within activityTimeout.
+// Activity returns a snapshot of per-user voice activity.
 func (r *Recorder) Activity() []UserActivity {
 	r.mu.Lock()
 	defer r.mu.Unlock()
