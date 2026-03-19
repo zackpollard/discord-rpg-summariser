@@ -75,15 +75,8 @@
 			voiceUsers = users;
 		});
 		unsubTranscript = subscribeLiveTranscript((seg) => {
-			// Remove previous partial segments that this chunk supersedes
-			// (same user, overlapping time range from earlier chunks)
-			liveSegments = liveSegments.filter(s =>
-				s.user_id !== seg.user_id ||
-				!s.partial ||
-				s.end_time <= seg.start_time
-			);
 			liveSegments = [...liveSegments, seg];
-			if (liveSegments.length > 500) liveSegments = liveSegments.slice(-500);
+			if (liveSegments.length > 1000) liveSegments = liveSegments.slice(-1000);
 			requestAnimationFrame(() => {
 				if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
 			});

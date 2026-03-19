@@ -75,24 +75,13 @@ func (w *LiveWorker) processChunk(ctx context.Context, chunk ChunkReady) {
 
 	log.Printf("Live transcribed %d segments for %s", len(segments), chunk.DisplayName)
 
-	// The overlap region is the first ~2s of this chunk. Segments falling
-	// entirely within the overlap were already sent as "partial" by the
-	// previous chunk. We skip those and confirm the rest.
-	overlapEnd := chunk.StartOffset + time.Duration(overlapSamples)*time.Second/48000
-	overlapEndSec := overlapEnd.Seconds()
 	confirmedEnd := w.lastConfirmedEnd[chunk.UserID]
 
-	for i, seg := range segments {
-		// Skip segments that fall entirely within already-confirmed time
+	for _, seg := range segments {
+		// Skip segments we've already confirmed in a previous chunk
 		if seg.EndTime <= confirmedEnd {
 			continue
 		}
-
-		// Segments in the overlap zone that extend beyond it are confirmed
-		// (they were partial before, now we have more context)
-		isLast := i == len(segments)-1
-		isInNewRegion := seg.StartTime >= overlapEndSec
-		partial := isLast && !isInNewRegion // last segment might be cut off
 
 		evt := TranscriptEvent{
 			UserID:      chunk.UserID,
@@ -100,14 +89,11 @@ func (w *LiveWorker) processChunk(ctx context.Context, chunk ChunkReady) {
 			StartTime:   seg.StartTime,
 			EndTime:     seg.EndTime,
 			Text:        seg.Text,
-			Partial:     partial,
+			Partial:     false,
 			ChunkSeq:    chunk.ChunkSeq,
 		}
 		w.broadcast(evt)
-
-		if !partial {
-			w.lastConfirmedEnd[chunk.UserID] = seg.EndTime
-		}
+		w.lastConfirmedEnd[chunk.UserID] = seg.EndTime
 		w.lastPrompt[chunk.UserID] = seg.Text
 	}
 }
