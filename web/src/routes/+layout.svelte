@@ -17,6 +17,8 @@
 			<li><a href="/" onclick={() => (navOpen = false)}>Dashboard</a></li>
 			<li><a href="/sessions" onclick={() => (navOpen = false)}>Sessions</a></li>
 			<li><a href="/characters" onclick={() => (navOpen = false)}>Characters</a></li>
+			<li><a href="/campaigns" onclick={() => (navOpen = false)}>Campaigns</a></li>
+			<li><a href="/lore" onclick={() => (navOpen = false)}>Lore</a></li>
 		</ul>
 	</nav>
 

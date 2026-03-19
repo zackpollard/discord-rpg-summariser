@@ -11,15 +11,16 @@ import (
 )
 
 type sessionResponse struct {
-	ID        int64      `json:"id"`
-	GuildID   string     `json:"guild_id"`
-	ChannelID string     `json:"channel_id"`
-	StartedAt time.Time  `json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at"`
-	Status    string     `json:"status"`
-	Summary   *string    `json:"summary"`
-	KeyEvents []string   `json:"key_events"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID         int64      `json:"id"`
+	GuildID    string     `json:"guild_id"`
+	CampaignID int64      `json:"campaign_id"`
+	ChannelID  string     `json:"channel_id"`
+	StartedAt  time.Time  `json:"started_at"`
+	EndedAt    *time.Time `json:"ended_at"`
+	Status     string     `json:"status"`
+	Summary    *string    `json:"summary"`
+	KeyEvents  []string   `json:"key_events"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 func toSessionResponse(sess *storage.Session) sessionResponse {
@@ -28,15 +29,16 @@ func toSessionResponse(sess *storage.Session) sessionResponse {
 		events = []string{}
 	}
 	return sessionResponse{
-		ID:        sess.ID,
-		GuildID:   sess.GuildID,
-		ChannelID: sess.ChannelID,
-		StartedAt: sess.StartedAt,
-		EndedAt:   sess.EndedAt,
-		Status:    sess.Status,
-		Summary:   sess.Summary,
-		KeyEvents: events,
-		CreatedAt: sess.CreatedAt,
+		ID:         sess.ID,
+		GuildID:    sess.GuildID,
+		CampaignID: sess.CampaignID,
+		ChannelID:  sess.ChannelID,
+		StartedAt:  sess.StartedAt,
+		EndedAt:    sess.EndedAt,
+		Status:     sess.Status,
+		Summary:    sess.Summary,
+		KeyEvents:  events,
+		CreatedAt:  sess.CreatedAt,
 	}
 }
 
@@ -60,7 +62,14 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		guildID = s.guildID
 	}
 
-	sessions, err := s.store.ListSessions(r.Context(), guildID, limit, offset)
+	var campaignID int64
+	if v := r.URL.Query().Get("campaign_id"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			campaignID = n
+		}
+	}
+
+	sessions, err := s.store.ListSessions(r.Context(), guildID, campaignID, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list sessions")
 		return

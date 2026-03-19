@@ -65,8 +65,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	return res.json();
 }
 
-export async function fetchSessions(limit = 20, offset = 0): Promise<Session[]> {
-	return request<Session[]>(`/api/sessions?limit=${limit}&offset=${offset}`);
+export async function fetchSessions(limit = 20, offset = 0, campaignId?: number): Promise<Session[]> {
+	let url = `/api/sessions?limit=${limit}&offset=${offset}`;
+	if (campaignId !== undefined) url += `&campaign_id=${campaignId}`;
+	return request<Session[]>(url);
 }
 
 export async function fetchSession(id: number): Promise<Session> {
@@ -148,4 +150,75 @@ export function subscribeLiveTranscript(
 	};
 	if (onError) source.onerror = onError;
 	return () => source.close();
+}
+
+// Campaign types and functions
+
+export interface Campaign {
+	id: number;
+	guild_id: string;
+	name: string;
+	description: string;
+	is_active: boolean;
+	created_at: string;
+}
+
+export interface Entity {
+	id: number;
+	campaign_id: number;
+	name: string;
+	type: string;
+	description: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface EntityDetail extends Entity {
+	notes: EntityNote[];
+	relationships: EntityRelationshipDisplay[];
+}
+
+export interface EntityNote {
+	id: number;
+	session_id: number;
+	content: string;
+	created_at: string;
+}
+
+export interface EntityRelationshipDisplay {
+	id: number;
+	source_id: number;
+	source_name: string;
+	target_id: number;
+	target_name: string;
+	relationship: string;
+	description: string;
+}
+
+export async function fetchCampaigns(): Promise<Campaign[]> {
+	return request<Campaign[]>('/api/campaigns');
+}
+
+export async function createCampaign(name: string, description: string): Promise<Campaign> {
+	return request<Campaign>('/api/campaigns', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ name, description })
+	});
+}
+
+export async function setActiveCampaign(id: number): Promise<void> {
+	await request<void>(`/api/campaigns/${id}/activate`, { method: 'POST' });
+}
+
+export async function fetchEntities(campaignId: number, params?: { type?: string; search?: string }): Promise<Entity[]> {
+	const searchParams = new URLSearchParams();
+	searchParams.set('campaign_id', String(campaignId));
+	if (params?.type) searchParams.set('type', params.type);
+	if (params?.search) searchParams.set('search', params.search);
+	return request<Entity[]>(`/api/entities?${searchParams.toString()}`);
+}
+
+export async function fetchEntity(id: number): Promise<EntityDetail> {
+	return request<EntityDetail>(`/api/entities/${id}`);
 }

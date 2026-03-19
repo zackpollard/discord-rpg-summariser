@@ -38,12 +38,8 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve character names from current mappings (not stored values)
-	guildID := s.guildID
-	if session != nil {
-		guildID = session.GuildID
-	}
-	charMappings, _ := s.store.GetCharacterMappings(r.Context(), guildID)
+	// Resolve character names from current mappings using session's campaign
+	charMappings, _ := s.store.GetCharacterMappings(r.Context(), session.CampaignID)
 	charMap := make(map[string]string, len(charMappings))
 	for _, m := range charMappings {
 		charMap[m.UserID] = m.CharacterName

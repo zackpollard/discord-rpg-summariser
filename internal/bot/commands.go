@@ -68,4 +68,47 @@ var commands = []*discordgo.ApplicationCommand{
 			},
 		},
 	},
+	{
+		Name:        "campaign",
+		Description: "Manage RPG campaigns",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Name:        "create",
+				Description: "Create a new campaign",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "name",
+						Description: "Campaign name",
+						Type:        discordgo.ApplicationCommandOptionString,
+						Required:    true,
+					},
+					{
+						Name:        "description",
+						Description: "Campaign description",
+						Type:        discordgo.ApplicationCommandOptionString,
+						Required:    false,
+					},
+				},
+			},
+			{
+				Name:        "list",
+				Description: "List campaigns",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+			},
+			{
+				Name:        "set",
+				Description: "Set the active campaign",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "name",
+						Description: "Campaign name",
+						Type:        discordgo.ApplicationCommandOptionString,
+						Required:    true,
+					},
+				},
+			},
+		},
+	},
 }

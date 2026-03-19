@@ -10,24 +10,27 @@ import (
 )
 
 type Session struct {
-	ID        int64
-	GuildID   string
-	ChannelID string
-	StartedAt time.Time
-	EndedAt   *time.Time
-	Status    string
-	AudioDir  string
-	Summary   *string
-	KeyEvents []string
-	CreatedAt time.Time
+	ID         int64
+	GuildID    string
+	CampaignID int64
+	ChannelID  string
+	StartedAt  time.Time
+	EndedAt    *time.Time
+	Status     string
+	AudioDir   string
+	Summary    *string
+	KeyEvents  []string
+	CreatedAt  time.Time
 }
 
-func (s *Store) CreateSession(ctx context.Context, guildID, channelID, audioDir string) (int64, error) {
+const sessionColumns = `id, guild_id, campaign_id, channel_id, started_at, ended_at, status, audio_dir, summary, key_events, created_at`
+
+func (s *Store) CreateSession(ctx context.Context, guildID string, campaignID int64, channelID, audioDir string) (int64, error) {
 	var id int64
 	err := s.Pool.QueryRow(ctx,
-		`INSERT INTO sessions (guild_id, channel_id, started_at, audio_dir, status)
-		 VALUES ($1, $2, $3, $4, 'recording') RETURNING id`,
-		guildID, channelID, time.Now().UTC(), audioDir,
+		`INSERT INTO sessions (guild_id, campaign_id, channel_id, started_at, audio_dir, status)
+		 VALUES ($1, $2, $3, $4, $5, 'recording') RETURNING id`,
+		guildID, campaignID, channelID, time.Now().UTC(), audioDir,
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("create session: %w", err)
@@ -37,18 +40,25 @@ func (s *Store) CreateSession(ctx context.Context, guildID, channelID, audioDir 
 
 func (s *Store) GetSession(ctx context.Context, id int64) (*Session, error) {
 	row := s.Pool.QueryRow(ctx,
-		`SELECT id, guild_id, channel_id, started_at, ended_at, status, audio_dir, summary, key_events, created_at
-		 FROM sessions WHERE id = $1`, id,
+		`SELECT `+sessionColumns+` FROM sessions WHERE id = $1`, id,
 	)
 	return scanSession(row)
 }
 
-func (s *Store) ListSessions(ctx context.Context, guildID string, limit, offset int) ([]Session, error) {
-	rows, err := s.Pool.Query(ctx,
-		`SELECT id, guild_id, channel_id, started_at, ended_at, status, audio_dir, summary, key_events, created_at
-		 FROM sessions WHERE guild_id = $1 ORDER BY started_at DESC LIMIT $2 OFFSET $3`,
-		guildID, limit, offset,
-	)
+func (s *Store) ListSessions(ctx context.Context, guildID string, campaignID int64, limit, offset int) ([]Session, error) {
+	var rows pgx.Rows
+	var err error
+	if campaignID > 0 {
+		rows, err = s.Pool.Query(ctx,
+			`SELECT `+sessionColumns+` FROM sessions WHERE guild_id = $1 AND campaign_id = $2 ORDER BY started_at DESC LIMIT $3 OFFSET $4`,
+			guildID, campaignID, limit, offset,
+		)
+	} else {
+		rows, err = s.Pool.Query(ctx,
+			`SELECT `+sessionColumns+` FROM sessions WHERE guild_id = $1 ORDER BY started_at DESC LIMIT $2 OFFSET $3`,
+			guildID, limit, offset,
+		)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -90,8 +100,6 @@ func (s *Store) UpdateSessionSummary(ctx context.Context, id int64, summary stri
 	return err
 }
 
-// CleanupStaleSessions marks any sessions stuck in non-terminal states as
-// 'failed'. This handles the case where the bot was killed mid-recording.
 func (s *Store) CleanupStaleSessions(ctx context.Context) (int64, error) {
 	tag, err := s.Pool.Exec(ctx,
 		`UPDATE sessions SET status = 'failed', ended_at = NOW()
@@ -104,8 +112,7 @@ func (s *Store) CleanupStaleSessions(ctx context.Context) (int64, error) {
 
 func (s *Store) GetActiveSession(ctx context.Context, guildID string) (*Session, error) {
 	row := s.Pool.QueryRow(ctx,
-		`SELECT id, guild_id, channel_id, started_at, ended_at, status, audio_dir, summary, key_events, created_at
-		 FROM sessions WHERE guild_id = $1 AND status = 'recording' LIMIT 1`, guildID,
+		`SELECT `+sessionColumns+` FROM sessions WHERE guild_id = $1 AND status = 'recording' LIMIT 1`, guildID,
 	)
 	sess, err := scanSession(row)
 	if err == pgx.ErrNoRows {
@@ -119,17 +126,15 @@ func scanSession(row pgx.Row) (*Session, error) {
 	var keyEventsJSON []byte
 
 	err := row.Scan(
-		&sess.ID, &sess.GuildID, &sess.ChannelID, &sess.StartedAt,
+		&sess.ID, &sess.GuildID, &sess.CampaignID, &sess.ChannelID, &sess.StartedAt,
 		&sess.EndedAt, &sess.Status, &sess.AudioDir, &sess.Summary, &keyEventsJSON, &sess.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
-
 	if keyEventsJSON != nil {
 		json.Unmarshal(keyEventsJSON, &sess.KeyEvents)
 	}
-
 	return &sess, nil
 }
 
@@ -138,16 +143,14 @@ func scanSessionRows(rows pgx.Rows) (*Session, error) {
 	var keyEventsJSON []byte
 
 	err := rows.Scan(
-		&sess.ID, &sess.GuildID, &sess.ChannelID, &sess.StartedAt,
+		&sess.ID, &sess.GuildID, &sess.CampaignID, &sess.ChannelID, &sess.StartedAt,
 		&sess.EndedAt, &sess.Status, &sess.AudioDir, &sess.Summary, &keyEventsJSON, &sess.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
-
 	if keyEventsJSON != nil {
 		json.Unmarshal(keyEventsJSON, &sess.KeyEvents)
 	}
-
 	return &sess, nil
 }

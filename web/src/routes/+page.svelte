@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { fetchStatus, fetchSessions, subscribeVoiceActivity, subscribeLiveTranscript, type Status, type Session, type VoiceUser, type LiveTranscriptEvent } from '$lib/api';
+	import { fetchStatus, fetchSessions, fetchCampaigns, subscribeVoiceActivity, subscribeLiveTranscript, type Status, type Session, type VoiceUser, type LiveTranscriptEvent, type Campaign } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 
 	let status = $state<Status | null>(null);
 	let sessions = $state<Session[]>([]);
+	let activeCampaign = $state<Campaign | null>(null);
 	let voiceUsers = $state<VoiceUser[]>([]);
 	let liveSegments = $state<LiveTranscriptEvent[]>([]);
 	let loading = $state(true);
@@ -27,9 +28,10 @@
 		loading = true;
 		error = null;
 		try {
-			const [s, sess] = await Promise.all([fetchStatus(), fetchSessions(5, 0)]);
+			const [s, sess, camps] = await Promise.all([fetchStatus(), fetchSessions(5, 0), fetchCampaigns()]);
 			status = s;
 			sessions = sess;
+			activeCampaign = camps.find((c) => c.is_active) ?? null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load data';
 		} finally {
@@ -95,6 +97,16 @@
 
 <div class="dashboard">
 	<h1>Dashboard</h1>
+
+	{#if activeCampaign}
+		<section class="campaign-card">
+			<h2>Active Campaign</h2>
+			<div class="campaign-info">
+				<span class="campaign-name">{activeCampaign.name}</span>
+				<a href="/campaigns" class="campaign-manage">Manage</a>
+			</div>
+		</section>
+	{/if}
 
 	<section class="status-card">
 		<h2>Recording Status</h2>
@@ -185,6 +197,33 @@
 		color: var(--accent-gold);
 		margin-bottom: 1.25rem;
 		font-size: 1.5rem;
+	}
+
+	.campaign-card {
+		background: var(--bg-surface);
+		border: 1px solid var(--accent-gold-dim);
+		border-radius: var(--radius);
+		padding: 1.25rem;
+		margin-bottom: 1.5rem;
+	}
+	.campaign-card h2 {
+		font-size: 1rem;
+		color: var(--text-secondary);
+		margin-bottom: 0.5rem;
+		font-weight: 600;
+	}
+	.campaign-info {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+	}
+	.campaign-name {
+		font-size: 1.1rem;
+		font-weight: 700;
+		color: var(--accent-gold);
+	}
+	.campaign-manage {
+		font-size: 0.8rem;
 	}
 
 	.status-card, .voice-card {

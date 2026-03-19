@@ -46,6 +46,33 @@ func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSu
 	return &result, nil
 }
 
+// ExtractEntities runs the claude CLI with the extraction prompt and parses
+// the JSON response into an ExtractionResult.
+func (c *ClaudeCLI) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string) (*ExtractionResult, error) {
+	prompt := BuildExtractionPrompt(transcript, summary, existingEntities)
+
+	cmd := exec.CommandContext(ctx, "claude", "--print")
+	cmd.Stdin = strings.NewReader(prompt)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
+	}
+
+	output := stdout.Bytes()
+	output = stripCodeFences(output)
+
+	var result ExtractionResult
+	if err := json.Unmarshal(output, &result); err != nil {
+		return nil, fmt.Errorf("parse claude CLI extraction JSON: %w\nraw output: %s", err, stdout.String())
+	}
+
+	return &result, nil
+}
+
 // stripCodeFences removes optional ```json ... ``` wrapping from LLM output.
 func stripCodeFences(b []byte) []byte {
 	s := strings.TrimSpace(string(b))

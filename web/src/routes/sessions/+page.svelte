@@ -1,20 +1,39 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { fetchSessions, type Session } from '$lib/api';
+	import { fetchSessions, fetchCampaigns, type Session, type Campaign } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 
 	let sessions = $state<Session[]>([]);
+	let campaigns = $state<Campaign[]>([]);
+	let selectedCampaignId = $state<number | undefined>(undefined);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let offset = $state(0);
 	let hasMore = $state(true);
 	const pageSize = 20;
 
+	async function loadCampaigns() {
+		try {
+			campaigns = await fetchCampaigns();
+			// Check URL params for campaign filter
+			const urlParams = new URLSearchParams(window.location.search);
+			const campParam = urlParams.get('campaign');
+			if (campParam) {
+				selectedCampaignId = Number(campParam);
+			} else {
+				const active = campaigns.find((c) => c.is_active);
+				if (active) selectedCampaignId = active.id;
+			}
+		} catch {
+			// campaigns are optional, continue without them
+		}
+	}
+
 	async function loadSessions() {
 		loading = true;
 		error = null;
 		try {
-			const data = await fetchSessions(pageSize, offset);
+			const data = await fetchSessions(pageSize, offset, selectedCampaignId);
 			sessions = data;
 			hasMore = data.length === pageSize;
 		} catch (e) {
@@ -22,6 +41,12 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	function handleCampaignChange(value: string) {
+		selectedCampaignId = value ? Number(value) : undefined;
+		offset = 0;
+		loadSessions();
 	}
 
 	function nextPage() {
@@ -56,8 +81,9 @@
 
 	const currentPage = $derived(Math.floor(offset / pageSize) + 1);
 
-	onMount(() => {
-		loadSessions();
+	onMount(async () => {
+		await loadCampaigns();
+		await loadSessions();
 	});
 </script>
 
@@ -66,7 +92,24 @@
 </svelte:head>
 
 <div class="sessions-page">
-	<h1>Sessions</h1>
+	<div class="page-header">
+		<h1>Sessions</h1>
+		{#if campaigns.length > 0}
+			<div class="campaign-filter">
+				<label for="campaign-select">Campaign:</label>
+				<select
+					id="campaign-select"
+					value={selectedCampaignId !== undefined ? String(selectedCampaignId) : ''}
+					onchange={(e) => handleCampaignChange(e.currentTarget.value)}
+				>
+					<option value="">All Campaigns</option>
+					{#each campaigns as c (c.id)}
+						<option value={String(c.id)}>{c.name}{c.is_active ? ' (active)' : ''}</option>
+					{/each}
+				</select>
+			</div>
+		{/if}
+	</div>
 
 	{#if loading}
 		<p class="muted">Loading sessions...</p>
@@ -116,10 +159,39 @@
 </div>
 
 <style>
+	.page-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		margin-bottom: 1.25rem;
+	}
 	.sessions-page h1 {
 		color: var(--accent-gold);
-		margin-bottom: 1.25rem;
 		font-size: 1.5rem;
+	}
+	.campaign-filter {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.campaign-filter label {
+		color: var(--text-secondary);
+		font-size: 0.85rem;
+	}
+	.campaign-filter select {
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		color: var(--text-primary);
+		padding: 0.35rem 0.6rem;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	.campaign-filter select:focus {
+		outline: none;
+		border-color: var(--accent-gold-dim);
 	}
 
 	.table-wrap {

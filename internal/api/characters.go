@@ -11,13 +11,13 @@ import (
 type characterResponse struct {
 	UserID        string    `json:"user_id"`
 	GuildID       string    `json:"guild_id"`
+	CampaignID    int64     `json:"campaign_id"`
 	CharacterName string    `json:"character_name"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type upsertCharacterRequest struct {
 	UserID        string `json:"user_id"`
-	GuildID       string `json:"guild_id"`
 	CharacterName string `json:"character_name"`
 }
 
@@ -25,18 +25,20 @@ func toCharacterResponse(m *storage.CharacterMapping) characterResponse {
 	return characterResponse{
 		UserID:        m.UserID,
 		GuildID:       m.GuildID,
+		CampaignID:    m.CampaignID,
 		CharacterName: m.CharacterName,
 		UpdatedAt:     m.UpdatedAt,
 	}
 }
 
 func (s *Server) handleListCharacters(w http.ResponseWriter, r *http.Request) {
-	guildID := r.URL.Query().Get("guild_id")
-	if guildID == "" {
-		guildID = s.guildID
+	campaign, err := s.store.GetOrCreateActiveCampaign(r.Context(), s.guildID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve active campaign")
+		return
 	}
 
-	mappings, err := s.store.GetCharacterMappings(r.Context(), guildID)
+	mappings, err := s.store.GetCharacterMappings(r.Context(), campaign.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list characters")
 		return
@@ -62,14 +64,16 @@ func (s *Server) handleUpsertCharacter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	guildID := req.GuildID
-	if guildID == "" {
-		guildID = s.guildID
+	campaign, err := s.store.GetOrCreateActiveCampaign(r.Context(), s.guildID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve active campaign")
+		return
 	}
 
 	mapping := storage.CharacterMapping{
 		UserID:        req.UserID,
-		GuildID:       guildID,
+		GuildID:       s.guildID,
+		CampaignID:    campaign.ID,
 		CharacterName: req.CharacterName,
 	}
 
@@ -88,12 +92,13 @@ func (s *Server) handleDeleteCharacter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	guildID := r.URL.Query().Get("guild_id")
-	if guildID == "" {
-		guildID = s.guildID
+	campaign, err := s.store.GetOrCreateActiveCampaign(r.Context(), s.guildID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve active campaign")
+		return
 	}
 
-	if err := s.store.DeleteCharacterMapping(r.Context(), userID, guildID); err != nil {
+	if err := s.store.DeleteCharacterMapping(r.Context(), userID, campaign.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete character mapping")
 		return
 	}

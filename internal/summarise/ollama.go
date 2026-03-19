@@ -85,3 +85,53 @@ func (o *Ollama) Summarise(ctx context.Context, transcript string, previousSumma
 
 	return &result, nil
 }
+
+// ExtractEntities sends the extraction prompt to Ollama and parses the JSON response.
+func (o *Ollama) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string) (*ExtractionResult, error) {
+	prompt := BuildExtractionPrompt(transcript, summary, existingEntities)
+
+	reqBody := ollamaRequest{
+		Model:  o.model,
+		Prompt: prompt,
+		Stream: false,
+		Format: "json",
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ollama request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.url+"/api/generate", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create ollama request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ollama request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read ollama response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ollama returned status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var ollamaResp ollamaResponse
+	if err := json.Unmarshal(respBody, &ollamaResp); err != nil {
+		return nil, fmt.Errorf("parse ollama response envelope: %w", err)
+	}
+
+	var result ExtractionResult
+	if err := json.Unmarshal([]byte(ollamaResp.Response), &result); err != nil {
+		return nil, fmt.Errorf("parse ollama extraction JSON: %w\nraw response: %s", err, ollamaResp.Response)
+	}
+
+	return &result, nil
+}

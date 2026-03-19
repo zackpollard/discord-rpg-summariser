@@ -3,6 +3,14 @@ package api
 func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 
+	s.mux.HandleFunc("GET /api/campaigns", s.handleListCampaigns)
+	s.mux.HandleFunc("POST /api/campaigns", s.handleCreateCampaign)
+	s.mux.HandleFunc("GET /api/campaigns/{id}", s.handleGetCampaign)
+	s.mux.HandleFunc("PUT /api/campaigns/{id}/active", s.handleSetActiveCampaign)
+	s.mux.HandleFunc("GET /api/campaigns/{id}/entities", s.handleListEntities)
+
+	s.mux.HandleFunc("GET /api/entities/{id}", s.handleGetEntity)
+
 	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/transcript", s.handleGetTranscript)

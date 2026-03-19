@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"discord-rpg-summariser/internal/storage"
+	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/transcribe"
 	"discord-rpg-summariser/internal/voice"
 
@@ -47,6 +48,15 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleCharacterList(s, i)
 		case "remove":
 			b.handleCharacterRemove(s, i)
+		}
+	case "campaign":
+		switch sub.Name {
+		case "create":
+			b.handleCampaignCreate(s, i)
+		case "list":
+			b.handleCampaignList(s, i)
+		case "set":
+			b.handleCampaignSet(s, i)
 		}
 	}
 }
@@ -116,9 +126,17 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
+	// Resolve the active campaign for this guild.
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, guildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		log.Printf("GetOrCreateActiveCampaign error: %v", err)
+		return
+	}
+
 	// Create session directory and DB row.
 	audioDir := filepath.Join(b.config.Storage.AudioDir, guildID, fmt.Sprintf("%d", time.Now().Unix()))
-	sessionID, err := b.store.CreateSession(ctx, guildID, userVoiceChannelID, audioDir)
+	sessionID, err := b.store.CreateSession(ctx, guildID, campaign.ID, userVoiceChannelID, audioDir)
 	if err != nil {
 		respondEphemeral(s, i, "Failed to create session in database.")
 		log.Printf("CreateSession error: %v", err)
@@ -223,9 +241,18 @@ func (b *Bot) handleCharacterSet(s *discordgo.Session, i *discordgo.InteractionC
 		targetUserID = u.UserValue(s).ID
 	}
 
-	err := b.store.SetCharacterMapping(context.Background(), storage.CharacterMapping{
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		log.Printf("GetOrCreateActiveCampaign error: %v", err)
+		return
+	}
+
+	err = b.store.SetCharacterMapping(ctx, storage.CharacterMapping{
 		UserID:        targetUserID,
 		GuildID:       i.GuildID,
+		CampaignID:    campaign.ID,
 		CharacterName: name,
 	})
 	if err != nil {
@@ -238,7 +265,15 @@ func (b *Bot) handleCharacterSet(s *discordgo.Session, i *discordgo.InteractionC
 }
 
 func (b *Bot) handleCharacterList(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	mappings, err := b.store.GetCharacterMappings(context.Background(), i.GuildID)
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		log.Printf("GetOrCreateActiveCampaign error: %v", err)
+		return
+	}
+
+	mappings, err := b.store.GetCharacterMappings(ctx, campaign.ID)
 	if err != nil {
 		respondEphemeral(s, i, "Failed to fetch character mappings.")
 		return
@@ -265,7 +300,15 @@ func (b *Bot) handleCharacterRemove(s *discordgo.Session, i *discordgo.Interacti
 		targetUserID = u.UserValue(s).ID
 	}
 
-	err := b.store.DeleteCharacterMapping(context.Background(), targetUserID, i.GuildID)
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		log.Printf("GetOrCreateActiveCampaign error: %v", err)
+		return
+	}
+
+	err = b.store.DeleteCharacterMapping(ctx, targetUserID, campaign.ID)
 	if err != nil {
 		respondEphemeral(s, i, "Failed to remove character mapping.")
 		log.Printf("DeleteCharacterMapping error: %v", err)
@@ -273,6 +316,101 @@ func (b *Bot) handleCharacterRemove(s *discordgo.Session, i *discordgo.Interacti
 	}
 
 	respond(s, i, fmt.Sprintf("Removed character mapping for <@%s>.", targetUserID))
+}
+
+// ---------------------------------------------------------------------------
+// Campaign handlers
+// ---------------------------------------------------------------------------
+
+func (b *Bot) handleCampaignCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	opts := subcommandOptions(i)
+	name := opts["name"].StringValue()
+	var description string
+	if d, ok := opts["description"]; ok {
+		description = d.StringValue()
+	}
+
+	ctx := context.Background()
+	campaignID, err := b.store.CreateCampaign(ctx, i.GuildID, name, description)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to create campaign.")
+		log.Printf("CreateCampaign error: %v", err)
+		return
+	}
+
+	// Auto-set as active if it's the first campaign for this guild.
+	campaigns, err := b.store.ListCampaigns(ctx, i.GuildID)
+	if err == nil && len(campaigns) == 1 {
+		_ = b.store.SetActiveCampaign(ctx, i.GuildID, campaignID)
+	}
+
+	respond(s, i, fmt.Sprintf("Campaign **%s** created (ID %d).", name, campaignID))
+}
+
+func (b *Bot) handleCampaignList(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	campaigns, err := b.store.ListCampaigns(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to list campaigns.")
+		log.Printf("ListCampaigns error: %v", err)
+		return
+	}
+
+	if len(campaigns) == 0 {
+		respondEphemeral(s, i, "No campaigns yet. Use `/campaign create` to add one.")
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("**Campaigns**\n")
+	for _, c := range campaigns {
+		marker := "  "
+		if c.IsActive {
+			marker = "\u2713 "
+		}
+		line := fmt.Sprintf("%s**%s**", marker, c.Name)
+		if c.Description != "" {
+			line += fmt.Sprintf(" — %s", c.Description)
+		}
+		sb.WriteString(line + "\n")
+	}
+
+	respond(s, i, sb.String())
+}
+
+func (b *Bot) handleCampaignSet(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	opts := subcommandOptions(i)
+	name := opts["name"].StringValue()
+
+	ctx := context.Background()
+	campaigns, err := b.store.ListCampaigns(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to list campaigns.")
+		log.Printf("ListCampaigns error: %v", err)
+		return
+	}
+
+	var matched *storage.Campaign
+	lower := strings.ToLower(name)
+	for idx := range campaigns {
+		if strings.ToLower(campaigns[idx].Name) == lower {
+			matched = &campaigns[idx]
+			break
+		}
+	}
+
+	if matched == nil {
+		respondEphemeral(s, i, fmt.Sprintf("No campaign found with name **%s**.", name))
+		return
+	}
+
+	if err := b.store.SetActiveCampaign(ctx, i.GuildID, matched.ID); err != nil {
+		respondEphemeral(s, i, "Failed to set active campaign.")
+		log.Printf("SetActiveCampaign error: %v", err)
+		return
+	}
+
+	respond(s, i, fmt.Sprintf("Active campaign set to **%s**.", matched.Name))
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +460,7 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 	// Resolve character names.
 	charNames := make(map[string]string, len(userSegments))
 	for userID := range userSegments {
-		name, err := b.store.GetCharacterName(ctx, userID, session.GuildID)
+		name, err := b.store.GetCharacterName(ctx, userID, session.CampaignID)
 		if err != nil {
 			log.Printf("pipeline: GetCharacterName(%s): %v", userID, err)
 		}
@@ -370,6 +508,69 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 	}
 
 	b.sendNotification(sessionID, result.Summary)
+
+	// Extract entities for the knowledge base (non-fatal on error).
+	b.extractEntities(ctx, session, sessionID, transcript, result.Summary)
+}
+
+func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary string) {
+	extractor, ok := b.summariser.(summarise.EntityExtractor)
+	if !ok {
+		return
+	}
+
+	existing, _ := b.store.ListEntities(ctx, session.CampaignID, "", "", 1000, 0)
+	var existingNames []string
+	for _, e := range existing {
+		existingNames = append(existingNames, fmt.Sprintf("%s (%s)", e.Name, e.Type))
+	}
+
+	extraction, err := extractor.ExtractEntities(ctx, transcript, summary, existingNames)
+	if err != nil {
+		log.Printf("pipeline: entity extraction: %v", err)
+		return
+	}
+
+	// Persist entities and notes
+	entityIDs := make(map[string]int64) // "name|type" -> ID
+	for _, e := range extraction.Entities {
+		id, err := b.store.UpsertEntity(ctx, session.CampaignID, e.Name, e.Type, e.Description)
+		if err != nil {
+			log.Printf("pipeline: upsert entity %q: %v", e.Name, err)
+			continue
+		}
+		entityIDs[e.Name+"|"+e.Type] = id
+		if e.Notes != "" {
+			if err := b.store.AddEntityNote(ctx, id, sessionID, e.Notes); err != nil {
+				log.Printf("pipeline: add note for %q: %v", e.Name, err)
+			}
+		}
+	}
+
+	// Persist relationships
+	for _, r := range extraction.Relationships {
+		sourceID := findEntityID(entityIDs, r.Source)
+		targetID := findEntityID(entityIDs, r.Target)
+		if sourceID == 0 || targetID == 0 {
+			continue
+		}
+		sid := sessionID
+		if err := b.store.UpsertEntityRelationship(ctx, session.CampaignID, sourceID, targetID, r.Relationship, r.Description, &sid); err != nil {
+			log.Printf("pipeline: upsert relationship %q->%q: %v", r.Source, r.Target, err)
+		}
+	}
+
+	log.Printf("pipeline: extracted %d entities, %d relationships", len(extraction.Entities), len(extraction.Relationships))
+}
+
+func findEntityID(ids map[string]int64, name string) int64 {
+	// Try to find by name with any type
+	for key, id := range ids {
+		if strings.HasPrefix(key, name+"|") {
+			return id
+		}
+	}
+	return 0
 }
 
 // sendNotification posts an embed to the configured notification channel with a
