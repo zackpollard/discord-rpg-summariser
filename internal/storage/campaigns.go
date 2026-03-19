@@ -9,16 +9,16 @@ import (
 )
 
 type Campaign struct {
-	ID                 int64
-	GuildID            string
-	Name               string
-	Description        string
-	IsActive           bool
-	DMUserID           *string
-	TelegramDMUserID   *int64
-	Recap              string
-	RecapGeneratedAt   *time.Time
-	CreatedAt          time.Time
+	ID               int64
+	GuildID          string
+	Name             string
+	Description      string
+	IsActive         bool
+	DMUserID         *string
+	TelegramDMUserID *int64
+	Recap            string
+	RecapGeneratedAt *time.Time
+	CreatedAt        time.Time
 }
 
 func (s *Store) CreateCampaign(ctx context.Context, guildID, name, description string) (int64, error) {

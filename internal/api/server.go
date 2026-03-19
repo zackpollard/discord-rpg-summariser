@@ -18,16 +18,16 @@ type VoiceActivityProvider interface {
 }
 
 type Server struct {
-	store      *storage.Store
-	listenAddr string
-	guildID    string
-	voiceAP    VoiceActivityProvider
-	liveTP     LiveTranscriptProvider
-	memberP    MemberProvider
+	store       *storage.Store
+	listenAddr  string
+	guildID     string
+	voiceAP     VoiceActivityProvider
+	liveTP      LiveTranscriptProvider
+	memberP     MemberProvider
 	loreQA      LoreQAProvider
 	reprocessor SessionReprocessor
 	mux         *http.ServeMux
-	httpServer *http.Server
+	httpServer  *http.Server
 }
 
 func NewServer(store *storage.Store, listenAddr, guildID, webDir string) *Server {

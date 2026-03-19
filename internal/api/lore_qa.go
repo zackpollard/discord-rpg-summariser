@@ -20,7 +20,7 @@ type loreAskRequest struct {
 }
 
 type loreAskResponse struct {
-	Answer  string                    `json:"answer"`
+	Answer  string                     `json:"answer"`
 	Sources []storage.LoreSearchResult `json:"sources"`
 }
 

@@ -10,11 +10,11 @@ import (
 )
 
 const (
-	sampleRate       = 48000
-	channels         = 1      // Discord voice sends mono opus
-	frameSamples     = 960    // 20ms at 48kHz
-	maxSilenceGap    = 240000 // 5 seconds at 48kHz
-	maxPCMFrameSize  = 5760   // max opus frame at 48kHz (120ms)
+	sampleRate      = 48000
+	channels        = 1      // Discord voice sends mono opus
+	frameSamples    = 960    // 20ms at 48kHz
+	maxSilenceGap   = 240000 // 5 seconds at 48kHz
+	maxPCMFrameSize = 5760   // max opus frame at 48kHz (120ms)
 )
 
 // UserStream manages a single user's audio recording: DAVE decryption,

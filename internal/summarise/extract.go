@@ -9,9 +9,9 @@ import (
 // ExtractedEntity represents a single entity extracted from a session transcript.
 type ExtractedEntity struct {
 	Name        string `json:"name"`
-	Type        string `json:"type"`        // npc, place, organisation, item, event
+	Type        string `json:"type"` // npc, place, organisation, item, event
 	Description string `json:"description"`
-	Notes       string `json:"notes"`       // what happened THIS session
+	Notes       string `json:"notes"` // what happened THIS session
 }
 
 // ExtractedRelationship represents a relationship between two extracted entities.
@@ -24,7 +24,7 @@ type ExtractedRelationship struct {
 
 // ExtractionResult holds all entities and relationships extracted from a session.
 type ExtractionResult struct {
-	Entities      []ExtractedEntity      `json:"entities"`
+	Entities      []ExtractedEntity       `json:"entities"`
 	Relationships []ExtractedRelationship `json:"relationships"`
 }
 

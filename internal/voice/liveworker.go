@@ -17,7 +17,7 @@ type TranscriptEvent struct {
 	StartTime   float64 `json:"start_time"`
 	EndTime     float64 `json:"end_time"`
 	Text        string  `json:"text"`
-	Partial     bool    `json:"partial"`  // true = may be revised by next chunk
+	Partial     bool    `json:"partial"` // true = may be revised by next chunk
 	ChunkSeq    int     `json:"chunk_seq"`
 }
 

@@ -7,13 +7,13 @@ import (
 )
 
 const (
-	windowDuration  = 5 * time.Second  // total audio sent to whisper per chunk
-	windowSamples   = 48000 * 5        // 5s at 48kHz
-	strideDuration  = 3 * time.Second  // new audio between chunks
-	strideSamples   = 48000 * 3        // 3s at 48kHz
-	overlapSamples  = windowSamples - strideSamples // 2s kept for context
-	minFlushSamples = 48000 * 2        // don't flush less than 2s
-	silenceFrames   = 40               // ~0.8s of 20ms frames
+	windowDuration   = 5 * time.Second               // total audio sent to whisper per chunk
+	windowSamples    = 48000 * 5                     // 5s at 48kHz
+	strideDuration   = 3 * time.Second               // new audio between chunks
+	strideSamples    = 48000 * 3                     // 3s at 48kHz
+	overlapSamples   = windowSamples - strideSamples // 2s kept for context
+	minFlushSamples  = 48000 * 2                     // don't flush less than 2s
+	silenceFrames    = 40                            // ~0.8s of 20ms frames
 	silenceRMSThresh = 50
 )
 
@@ -35,7 +35,7 @@ type LiveBuffer struct {
 	buf          []int16
 	overlap      []int16 // last overlapSamples from previous chunk
 	silenceCount int
-	totalNew     int64     // total NEW samples (excluding overlap)
+	totalNew     int64 // total NEW samples (excluding overlap)
 	sessionStart time.Time
 	chunkSeq     int
 	out          chan<- ChunkReady

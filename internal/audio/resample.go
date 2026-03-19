@@ -8,12 +8,12 @@ import (
 )
 
 const (
-	inputRate     = 48000
-	outputRate    = 16000
+	inputRate        = 48000
+	outputRate       = 16000
 	decimationFactor = inputRate / outputRate // 3
-	filterTaps    = 32
-	wavHeaderSkip = 44
-	cutoff        = float64(outputRate/2) / float64(inputRate) // 8000/48000
+	filterTaps       = 32
+	wavHeaderSkip    = 44
+	cutoff           = float64(outputRate/2) / float64(inputRate) // 8000/48000
 )
 
 // LoadAndResample reads a 48kHz 16-bit mono WAV file and returns float32

@@ -1,0 +1,185 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-go:
+    name: Go Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l cmd/ internal/)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Files not formatted with gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            cmake build-essential libopus-dev
+          git clone --depth 1 https://github.com/ggerganov/whisper.cpp _deps/whisper.cpp
+          cmake -B _deps/whisper.cpp/build -S _deps/whisper.cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWHISPER_BUILD_EXAMPLES=OFF \
+            -DWHISPER_BUILD_TESTS=OFF
+          cmake --build _deps/whisper.cpp/build --config Release -j$(nproc)
+
+      - name: Go vet
+        run: make lint
+        env:
+          CGO_ENABLED: "1"
+
+  lint-web:
+    name: Web Lint & Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: cd web && npm ci
+
+      - name: Svelte check
+        run: cd web && npx svelte-check --tsconfig tsconfig.json
+
+  build-go:
+    name: Go Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            cmake build-essential libopus-dev
+          git clone --depth 1 https://github.com/ggerganov/whisper.cpp _deps/whisper.cpp
+          cmake -B _deps/whisper.cpp/build -S _deps/whisper.cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWHISPER_BUILD_EXAMPLES=OFF \
+            -DWHISPER_BUILD_TESTS=OFF
+          cmake --build _deps/whisper.cpp/build --config Release -j$(nproc)
+
+      - name: Build
+        run: make build
+
+  build-web:
+    name: Web Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install and build
+        run: cd web && npm ci && npm run build
+
+  test-unit:
+    name: Go Unit Tests
+    needs: build-go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            cmake build-essential libopus-dev
+          git clone --depth 1 https://github.com/ggerganov/whisper.cpp _deps/whisper.cpp
+          cmake -B _deps/whisper.cpp/build -S _deps/whisper.cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWHISPER_BUILD_EXAMPLES=OFF \
+            -DWHISPER_BUILD_TESTS=OFF
+          cmake --build _deps/whisper.cpp/build --config Release -j$(nproc)
+
+      - name: Run unit tests
+        run: make test-unit
+
+  test-integration:
+    name: Go Integration Tests
+    needs: build-go
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: rpg
+          POSTGRES_PASSWORD: rpg
+          POSTGRES_DB: rpg_summariser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rpg -d rpg_summariser"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            cmake build-essential libopus-dev
+          git clone --depth 1 https://github.com/ggerganov/whisper.cpp _deps/whisper.cpp
+          cmake -B _deps/whisper.cpp/build -S _deps/whisper.cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWHISPER_BUILD_EXAMPLES=OFF \
+            -DWHISPER_BUILD_TESTS=OFF
+          cmake --build _deps/whisper.cpp/build --config Release -j$(nproc)
+
+      - name: Create test database
+        run: PGPASSWORD=rpg psql -h localhost -U rpg -d rpg_summariser -c "CREATE DATABASE rpg_summariser_test;"
+
+      - name: Run integration tests
+        run: make test-integration
+        env:
+          TEST_DATABASE_URL: postgres://rpg:rpg@localhost:5432/rpg_summariser_test?sslmode=disable
+
+  test-web:
+    name: Web Tests
+    needs: build-web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install and test
+        run: cd web && npm ci && npm test

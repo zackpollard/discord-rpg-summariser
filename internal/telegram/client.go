@@ -16,12 +16,12 @@ import (
 
 // Message represents a captured Telegram message.
 type Message struct {
-	MessageID   int64
-	FromID      int64
+	MessageID    int64
+	FromID       int64
 	FromUsername string
-	FromDisplay string
-	Text        string
-	Timestamp   time.Time
+	FromDisplay  string
+	Text         string
+	Timestamp    time.Time
 }
 
 // Client wraps the Telegram Bot API.
@@ -120,12 +120,12 @@ func (l *Listener) poll(ctx context.Context) {
 			}
 
 			msg := Message{
-				MessageID: int64(u.Message.MessageID),
-				FromID:    u.Message.From.ID,
+				MessageID:    int64(u.Message.MessageID),
+				FromID:       u.Message.From.ID,
 				FromUsername: u.Message.From.Username,
-				FromDisplay: u.Message.From.DisplayName(),
-				Text:      u.Message.Text,
-				Timestamp: time.Unix(int64(u.Message.Date), 0),
+				FromDisplay:  u.Message.From.DisplayName(),
+				Text:         u.Message.Text,
+				Timestamp:    time.Unix(int64(u.Message.Date), 0),
 			}
 
 			l.mu.Lock()

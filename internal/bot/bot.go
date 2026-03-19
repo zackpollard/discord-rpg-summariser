@@ -23,12 +23,12 @@ import (
 // Bot manages the Discord session and coordinates recording, transcription,
 // and summarisation of RPG sessions.
 type Bot struct {
-	session     *discordgo.Session
-	store       *storage.Store
-	config      *config.Config
-	recorder    *voice.Recorder
-	transcriber *transcribe.Transcriber
-	summariser  summarise.Summariser
+	session         *discordgo.Session
+	store           *storage.Store
+	config          *config.Config
+	recorder        *voice.Recorder
+	transcriber     *transcribe.Transcriber
+	summariser      summarise.Summariser
 	activeVC        *discordgo.VoiceConnection
 	activeChannelID string // voice channel the bot is currently in
 	mu              sync.Mutex
@@ -335,8 +335,8 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 
 // stopResult bundles the results of stopping a recording session.
 type stopResult struct {
-	UserFiles     map[string]string
-	TelegramMsgs  []telegram.Message
+	UserFiles    map[string]string
+	TelegramMsgs []telegram.Message
 }
 
 // stopRecording stops the recorder, Telegram listener, and disconnects from
