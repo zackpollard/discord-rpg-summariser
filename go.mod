@@ -6,6 +6,7 @@ require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20260318204338-ef3463bb29ef
 	github.com/jackc/pgx/v5 v5.7.4
+	github.com/k2-fsa/sherpa-onnx-go v1.12.30
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -18,7 +19,6 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/k2-fsa/sherpa-onnx-go v1.12.30 // indirect
 	github.com/k2-fsa/sherpa-onnx-go-linux v1.12.30 // indirect
 	github.com/k2-fsa/sherpa-onnx-go-macos v1.12.30 // indirect
 	github.com/k2-fsa/sherpa-onnx-go-windows v1.12.30 // indirect

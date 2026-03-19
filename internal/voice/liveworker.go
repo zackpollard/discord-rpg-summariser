@@ -24,7 +24,7 @@ type TranscriptEvent struct {
 // LiveWorker reads audio chunks, transcribes them, deduplicates overlapping
 // regions, and broadcasts results as partial or confirmed segments.
 type LiveWorker struct {
-	transcriber *transcribe.Transcriber
+	transcriber transcribe.Transcriber
 	chunks      <-chan ChunkReady
 
 	mu          sync.RWMutex
@@ -35,7 +35,7 @@ type LiveWorker struct {
 	lastPrompt       map[string]string  // user -> last text for whisper context
 }
 
-func NewLiveWorker(t *transcribe.Transcriber, chunks <-chan ChunkReady) *LiveWorker {
+func NewLiveWorker(t transcribe.Transcriber, chunks <-chan ChunkReady) *LiveWorker {
 	return &LiveWorker{
 		transcriber:      t,
 		chunks:           chunks,

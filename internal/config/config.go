@@ -23,6 +23,7 @@ type DiscordConfig struct {
 }
 
 type TranscribeConfig struct {
+	Engine   string `yaml:"engine"`    // "whisper" (default) or "parakeet"
 	Model    string `yaml:"model"`     // whisper model name: tiny, base, small, medium, large-v3
 	ModelDir string `yaml:"model_dir"` // directory to store downloaded models
 	Language string `yaml:"language"`
@@ -63,6 +64,7 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{
 		Transcribe: TranscribeConfig{
+			Engine:   "whisper",
 			Model:    "base",
 			ModelDir: "models",
 			Language: "en",

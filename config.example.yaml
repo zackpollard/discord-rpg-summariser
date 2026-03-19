@@ -9,9 +9,10 @@ discord:
 #   chat_id: -1001234567890  # your Telegram group chat ID
 
 transcribe:
-  model: "base"        # whisper model: tiny, base, small, medium, large-v3
+  engine: "whisper"    # "whisper" or "parakeet" (NVIDIA Parakeet TDT 0.6B v3)
+  model: "base"        # whisper model: tiny, base, small, medium, large-v3 (ignored for parakeet)
   model_dir: "models"  # directory to store downloaded models
-  language: "en"
+  language: "en"        # whisper language (parakeet auto-detects from 25 European languages)
   threads: 4
 
 # Speaker diarization for shared microphones (auto-downloads models on first use)

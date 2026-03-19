@@ -14,7 +14,23 @@ WHISPER_INCLUDE     = $(WHISPER_DIR)/include
 # CGO flags for whisper.cpp and opus
 WHISPER_GGML_LIB    = $(WHISPER_DIR)/build/ggml/src
 export CGO_ENABLED  = 1
-export CGO_LDFLAGS      += -L$(abspath $(WHISPER_LIB)) -L$(abspath $(WHISPER_GGML_LIB)) -lwhisper -lggml -lggml-base -lggml-cpu -lm -lstdc++ -fopenmp -Wl,-rpath,$(abspath $(WHISPER_LIB)) -Wl,-rpath,$(abspath $(WHISPER_GGML_LIB))
+
+# Platform-specific flags.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  # macOS: clang needs Homebrew libomp instead of -fopenmp; ggml backend
+  # libraries (metal, blas) live in subdirectories.
+  LIBOMP_PREFIX := $(shell brew --prefix libomp 2>/dev/null)
+  ifneq ($(LIBOMP_PREFIX),)
+    OMP_FLAGS = -L$(LIBOMP_PREFIX)/lib -lomp
+  endif
+  GGML_EXTRA_LIBDIRS = -L$(abspath $(WHISPER_GGML_LIB)/ggml-metal) -L$(abspath $(WHISPER_GGML_LIB)/ggml-blas)
+  GGML_EXTRA_RPATHS  = -Wl,-rpath,$(abspath $(WHISPER_GGML_LIB)/ggml-metal) -Wl,-rpath,$(abspath $(WHISPER_GGML_LIB)/ggml-blas)
+else
+  OMP_FLAGS = -fopenmp
+endif
+
+export CGO_LDFLAGS      += -L$(abspath $(WHISPER_LIB)) -L$(abspath $(WHISPER_GGML_LIB)) $(GGML_EXTRA_LIBDIRS) -lwhisper -lggml -lggml-base -lggml-cpu -lm -lstdc++ $(OMP_FLAGS) -Wl,-rpath,$(abspath $(WHISPER_LIB)) -Wl,-rpath,$(abspath $(WHISPER_GGML_LIB)) $(GGML_EXTRA_RPATHS)
 export CGO_CFLAGS       += -I$(abspath $(WHISPER_INCLUDE)) -I$(abspath $(WHISPER_DIR)/ggml/include)
 export LD_LIBRARY_PATH  := $(abspath $(WHISPER_LIB)):$(abspath $(WHISPER_GGML_LIB)):$(LD_LIBRARY_PATH)
 

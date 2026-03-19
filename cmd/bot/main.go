@@ -38,17 +38,26 @@ func main() {
 	defer store.Close()
 	log.Println("Database connected and migrated")
 
-	transcriber, err := transcribe.NewTranscriber(
-		cfg.Transcribe.Model,
-		cfg.Transcribe.ModelDir,
-		cfg.Transcribe.Language,
-		cfg.Transcribe.Threads,
-	)
+	var transcriber transcribe.Transcriber
+	switch cfg.Transcribe.Engine {
+	case "parakeet":
+		transcriber, err = transcribe.NewParakeetTranscriber(
+			cfg.Transcribe.ModelDir,
+			cfg.Transcribe.Threads,
+		)
+	default:
+		transcriber, err = transcribe.NewWhisperTranscriber(
+			cfg.Transcribe.Model,
+			cfg.Transcribe.ModelDir,
+			cfg.Transcribe.Language,
+			cfg.Transcribe.Threads,
+		)
+	}
 	if err != nil {
 		log.Fatalf("Failed to initialize transcriber: %v", err)
 	}
 	defer transcriber.Close()
-	log.Println("Whisper model loaded")
+	log.Printf("Transcription engine loaded: %s", cfg.Transcribe.Engine)
 
 	var sum summarise.Summariser
 	switch cfg.LLM.Provider {

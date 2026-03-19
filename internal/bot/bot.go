@@ -28,7 +28,7 @@ type Bot struct {
 	store           *storage.Store
 	config          *config.Config
 	recorder        *voice.Recorder
-	transcriber     *transcribe.Transcriber
+	transcriber     transcribe.Transcriber
 	summariser      summarise.Summariser
 	activeVC        *discordgo.VoiceConnection
 	activeChannelID string // voice channel the bot is currently in
@@ -180,7 +180,7 @@ func (b *Bot) VoiceActivity() []voice.UserActivity {
 
 // NewBot creates a new Bot with the given dependencies. The Discord session is
 // created but not yet opened; call Start to connect.
-func NewBot(cfg *config.Config, store *storage.Store, transcriber *transcribe.Transcriber, summariser summarise.Summariser) (*Bot, error) {
+func NewBot(cfg *config.Config, store *storage.Store, transcriber transcribe.Transcriber, summariser summarise.Summariser) (*Bot, error) {
 	dg, err := discordgo.New("Bot " + cfg.Discord.Token)
 	if err != nil {
 		return nil, err

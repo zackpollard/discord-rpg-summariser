@@ -26,17 +26,17 @@ type Segment struct {
 	Text      string
 }
 
-// Transcriber performs speech-to-text using whisper.cpp in-process.
-type Transcriber struct {
+// WhisperTranscriber performs speech-to-text using whisper.cpp in-process.
+type WhisperTranscriber struct {
 	model    whisper.Model
 	language string
 	threads  int
 	mu       sync.Mutex // whisper is not thread-safe
 }
 
-// NewTranscriber loads the whisper model. If the model file doesn't exist,
+// NewWhisperTranscriber loads the whisper model. If the model file doesn't exist,
 // it is downloaded from HuggingFace automatically.
-func NewTranscriber(modelName, modelDir, language string, threads int) (*Transcriber, error) {
+func NewWhisperTranscriber(modelName, modelDir, language string, threads int) (*WhisperTranscriber, error) {
 	modelPath := filepath.Join(modelDir, fmt.Sprintf("ggml-%s.bin", modelName))
 
 	if _, err := os.Stat(modelPath); os.IsNotExist(err) {
@@ -50,7 +50,7 @@ func NewTranscriber(modelName, modelDir, language string, threads int) (*Transcr
 		return nil, fmt.Errorf("load whisper model %s: %w", modelPath, err)
 	}
 
-	return &Transcriber{
+	return &WhisperTranscriber{
 		model:    model,
 		language: language,
 		threads:  threads,
@@ -58,12 +58,12 @@ func NewTranscriber(modelName, modelDir, language string, threads int) (*Transcr
 }
 
 // Close releases the whisper model resources.
-func (t *Transcriber) Close() error {
+func (t *WhisperTranscriber) Close() error {
 	return t.model.Close()
 }
 
 // TranscribeFile transcribes a 48kHz WAV file and returns timestamped segments.
-func (t *Transcriber) TranscribeFile(ctx context.Context, wavPath string) ([]Segment, error) {
+func (t *WhisperTranscriber) TranscribeFile(ctx context.Context, wavPath string) ([]Segment, error) {
 	// Resample 48kHz → 16kHz float32 for whisper
 	samples, err := audio.LoadAndResample(wavPath)
 	if err != nil {
@@ -114,7 +114,7 @@ func (t *Transcriber) TranscribeFile(ctx context.Context, wavPath string) ([]Seg
 // TranscribeChunk transcribes pre-resampled 16kHz float32 mono samples.
 // timeOffset is added to all segment timestamps for session-relative times.
 // prompt provides context from previous chunks for continuity.
-func (t *Transcriber) TranscribeChunk(ctx context.Context, samples []float32, timeOffset time.Duration, prompt string) ([]Segment, error) {
+func (t *WhisperTranscriber) TranscribeChunk(ctx context.Context, samples []float32, timeOffset time.Duration, prompt string) ([]Segment, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

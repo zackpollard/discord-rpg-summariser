@@ -1,7 +1,8 @@
 services:
   postgres:
     image: postgres:17
-    network_mode: host
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: rpg
       POSTGRES_PASSWORD: rpg
