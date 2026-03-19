@@ -2,6 +2,7 @@ package voice
 
 import (
 	"fmt"
+	"log"
 	"path/filepath"
 
 	"github.com/bwmarrin/discordgo"
@@ -86,14 +87,17 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 		}
 		decrypted, err := discordgo.DecryptFrame(us.daveState, daveFrame)
 		if err != nil {
+			log.Printf("DAVE decrypt failed for %s (seq=%d, %d bytes): %v",
+				us.userID, packet.Sequence, len(daveFrame), err)
 			us.decodePLC(packet.Timestamp)
 			return nil
 		}
 		opusData = decrypted
 		us.daveActive = true
 	} else if us.daveActive {
-		// DAVE is active but no trailer found — encrypted data we can't
-		// decode. Use PLC to keep the decoder in sync.
+		last4 := opusData[max(0, len(opusData)-4):]
+		log.Printf("Lost packet for %s (seq=%d, %d bytes, last4=%x) — no DAVE trailer found, using PLC",
+			us.userID, packet.Sequence, len(opusData), last4)
 		us.decodePLC(packet.Timestamp)
 		return nil
 	} else {
