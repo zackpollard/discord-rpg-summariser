@@ -55,7 +55,12 @@ func NewUserStream(userID, outputDir string, daveState *discordgo.ReceiverState)
 // parseDAVEFrame checks if data ends with 0xFAFA and returns the raw frame
 // for decryption. Returns nil if not a DAVE frame.
 func isDAVEFrame(data []byte) bool {
-	return len(data) >= 13 && data[len(data)-1] == 0xFA && data[len(data)-2] == 0xFA
+	if len(data) < 13 || data[len(data)-1] != 0xFA || data[len(data)-2] != 0xFA {
+		return false
+	}
+	// Validate supplemental size: minimum is 12 (8 tag + 1 nonce + 1 size + 2 magic)
+	ss := int(data[len(data)-3])
+	return ss >= 12 && ss < len(data)
 }
 
 // HandlePacket decodes an Opus packet to PCM, inserts silence for RTP timestamp
