@@ -1,0 +1,11 @@
+data/
+*.env
+config.yaml
+config.local.yaml
+models/
+bot
+.git
+.github
+_deps/whisper.cpp/.git
+web/node_modules
+web/.svelte-kit

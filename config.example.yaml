@@ -1,0 +1,27 @@
+discord:
+  token: "your-discord-bot-token"
+  guild_id: "your-discord-guild-id"
+  notification_channel_id: "" # optional: channel to post session summaries
+
+# Optional: Telegram integration for capturing DM text messages during sessions
+# telegram:
+#   bot_token: "your-telegram-bot-token"
+#   chat_id: -1001234567890  # your Telegram group chat ID
+
+transcribe:
+  model: "base"        # whisper model: tiny, base, small, medium, large-v3
+  model_dir: "models"  # directory to store downloaded models
+  language: "en"
+  threads: 4
+
+llm:
+  provider: "claude-cli"  # claude-cli or ollama
+  # ollama_url: "http://localhost:11434"
+  # ollama_model: "llama3"
+
+storage:
+  database_url: "postgres://rpg:rpg@localhost:5432/rpg_summariser?sslmode=disable"
+  audio_dir: "data/audio"
+
+web:
+  listen_addr: ":8080"
