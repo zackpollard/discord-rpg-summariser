@@ -62,7 +62,11 @@
 </svelte:head>
 
 <div class="session-detail">
-	<a href="/sessions" class="back-link">&larr; Back to sessions</a>
+	{#if session}
+		<a href="/campaigns/{session.campaign_id}/sessions" class="back-link">&larr; Back to sessions</a>
+	{:else}
+		<a href="/" class="back-link">&larr; Back</a>
+	{/if}
 
 	{#if loading}
 		<p class="muted">Loading session...</p>

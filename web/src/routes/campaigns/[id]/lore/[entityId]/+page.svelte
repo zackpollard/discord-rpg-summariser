@@ -25,7 +25,7 @@
 
 	onMount(() => {
 		const unsub = page.subscribe(async ($page) => {
-			const id = Number($page.params.id);
+			const id = Number($page.params.entityId);
 			if (isNaN(id)) {
 				error = 'Invalid entity ID';
 				loading = false;
@@ -50,7 +50,7 @@
 </svelte:head>
 
 <div class="entity-page">
-	<a href="/lore" class="back-link">&larr; Back to Lore</a>
+	<a href="/campaigns/{$page.params.id}/lore" class="back-link">&larr; Back to Lore</a>
 
 	{#if loading}
 		<p class="muted">Loading entity...</p>
@@ -91,9 +91,9 @@
 								{#if rel.source_id === entity.id}
 									<span class="rel-self">{rel.source_name}</span>
 									<span class="rel-arrow">&rarr;</span>
-									<a href="/lore/{rel.target_id}" class="rel-link">{rel.target_name}</a>
+									<a href="/campaigns/{$page.params.id}/lore/{rel.target_id}" class="rel-link">{rel.target_name}</a>
 								{:else}
-									<a href="/lore/{rel.source_id}" class="rel-link">{rel.source_name}</a>
+									<a href="/campaigns/{$page.params.id}/lore/{rel.source_id}" class="rel-link">{rel.source_name}</a>
 									<span class="rel-arrow">&rarr;</span>
 									<span class="rel-self">{rel.target_name}</span>
 								{/if}
