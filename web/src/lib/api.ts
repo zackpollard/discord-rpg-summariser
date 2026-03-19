@@ -1,6 +1,7 @@
 export interface Session {
 	id: number;
 	guild_id: string;
+	campaign_id: number;
 	channel_id: string;
 	started_at: string;
 	ended_at: string | null;

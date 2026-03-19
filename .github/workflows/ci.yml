@@ -164,9 +164,11 @@ jobs:
         run: PGPASSWORD=rpg psql -h localhost -U rpg -d rpg_summariser -c "CREATE DATABASE rpg_summariser_test;"
 
       - name: Run integration tests
-        run: make test-integration
+        run: |
+          TEST_DATABASE_URL="postgres://rpg:rpg@localhost:5432/rpg_summariser_test?sslmode=disable" \
+            go test -tags nolibopusfile -count=1 -v ./internal/api/ ./internal/storage/
         env:
-          TEST_DATABASE_URL: postgres://rpg:rpg@localhost:5432/rpg_summariser_test?sslmode=disable
+          CGO_ENABLED: "1"
 
   test-web:
     name: Web Tests
