@@ -169,6 +169,8 @@ jobs:
             go test -tags nolibopusfile -count=1 -v ./internal/api/ ./internal/storage/
         env:
           CGO_ENABLED: "1"
+          CGO_LDFLAGS: "-L${{ github.workspace }}/_deps/whisper.cpp/build/src -L${{ github.workspace }}/_deps/whisper.cpp/build/ggml/src -lwhisper -lggml -lggml-base -lggml-cpu -lm -lstdc++ -fopenmp"
+          CGO_CFLAGS: "-I${{ github.workspace }}/_deps/whisper.cpp/include -I${{ github.workspace }}/_deps/whisper.cpp/ggml/include"
 
   test-web:
     name: Web Tests
