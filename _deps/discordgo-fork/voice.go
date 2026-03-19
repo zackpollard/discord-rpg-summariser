@@ -620,7 +620,17 @@ func (v *VoiceConnection) onEvent(ctx context.Context, binary bool, message []by
 				return
 			}
 
-			v.log(LogInformational, "DAVE protocol version %d (bot passthrough — no key package)", op4.DAVEProtocolVersion)
+			var daveKPData []byte
+			v.log(LogInformational, "DAVE protocol version %d", op4.DAVEProtocolVersion)
+			if op4.DAVEProtocolVersion > 0 {
+				v.dave = NewDAVESession(v.session.State.User.ID)
+
+				var err error
+				daveKPData, err = v.dave.GenerateKeyPackage()
+				if err != nil {
+					v.log(LogError, "DAVE key package generation failed: %s", err)
+				}
+			}
 
 			if v.OpusSend == nil {
 				v.OpusSend = make(chan []byte, 16)
@@ -640,7 +650,9 @@ func (v *VoiceConnection) onEvent(ctx context.Context, binary bool, message []by
 			v.Cond.Broadcast()
 			v.Cond.L.Unlock()
 
-			// Bot does not send DAVE key package — passthrough participant.
+			if daveKPData != nil {
+				v.sendDAVEKeyPackageBinary(daveKPData)
+			}
 			return
 
 		case 5:
