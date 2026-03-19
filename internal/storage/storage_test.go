@@ -1,0 +1,1022 @@
+package storage
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+)
+
+func testStore(t *testing.T) *Store {
+	t.Helper()
+	dbURL := os.Getenv("TEST_DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("TEST_DATABASE_URL not set, skipping integration test")
+	}
+	migrationsFS := os.DirFS("../../migrations")
+	store, err := New(context.Background(), dbURL, migrationsFS)
+	if err != nil {
+		t.Fatalf("connect to test database: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+// uniqueGuild returns a guild ID unique to the current test to avoid collisions.
+func uniqueGuild(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf("test-guild-%d", time.Now().UnixNano())
+}
+
+// ---------------------------------------------------------------------------
+// Campaigns
+// ---------------------------------------------------------------------------
+
+func TestCreateCampaign(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	id, err := store.CreateCampaign(ctx, guildID, "Storm King's Thunder", "Giants awaken")
+	if err != nil {
+		t.Fatalf("CreateCampaign: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("expected non-zero campaign id")
+	}
+
+	c, err := store.GetCampaign(ctx, id)
+	if err != nil {
+		t.Fatalf("GetCampaign: %v", err)
+	}
+	if c.Name != "Storm King's Thunder" {
+		t.Fatalf("expected name 'Storm King's Thunder', got %q", c.Name)
+	}
+	if c.Description != "Giants awaken" {
+		t.Fatalf("expected description 'Giants awaken', got %q", c.Description)
+	}
+	if c.GuildID != guildID {
+		t.Fatalf("expected guild_id %q, got %q", guildID, c.GuildID)
+	}
+	if c.IsActive {
+		t.Fatal("expected new campaign to not be active")
+	}
+}
+
+func TestListCampaigns(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	_, err := store.CreateCampaign(ctx, guildID, "Campaign A", "")
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	_, err = store.CreateCampaign(ctx, guildID, "Campaign B", "")
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+
+	campaigns, err := store.ListCampaigns(ctx, guildID)
+	if err != nil {
+		t.Fatalf("ListCampaigns: %v", err)
+	}
+	if len(campaigns) < 2 {
+		t.Fatalf("expected at least 2 campaigns, got %d", len(campaigns))
+	}
+
+	// Ordered by created_at ascending.
+	if campaigns[0].Name != "Campaign A" {
+		t.Fatalf("expected first campaign 'Campaign A', got %q", campaigns[0].Name)
+	}
+	if campaigns[1].Name != "Campaign B" {
+		t.Fatalf("expected second campaign 'Campaign B', got %q", campaigns[1].Name)
+	}
+}
+
+func TestSetActiveCampaign(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	idA, _ := store.CreateCampaign(ctx, guildID, "Camp A", "")
+	idB, _ := store.CreateCampaign(ctx, guildID, "Camp B", "")
+
+	// Activate A.
+	if err := store.SetActiveCampaign(ctx, guildID, idA); err != nil {
+		t.Fatalf("SetActiveCampaign A: %v", err)
+	}
+	a, _ := store.GetCampaign(ctx, idA)
+	if !a.IsActive {
+		t.Fatal("expected campaign A to be active")
+	}
+
+	// Activate B; A should be deactivated.
+	if err := store.SetActiveCampaign(ctx, guildID, idB); err != nil {
+		t.Fatalf("SetActiveCampaign B: %v", err)
+	}
+	a, _ = store.GetCampaign(ctx, idA)
+	b, _ := store.GetCampaign(ctx, idB)
+	if a.IsActive {
+		t.Fatal("expected campaign A to no longer be active")
+	}
+	if !b.IsActive {
+		t.Fatal("expected campaign B to be active")
+	}
+}
+
+func TestGetActiveCampaign(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	// No active campaign yet.
+	c, err := store.GetActiveCampaign(ctx, guildID)
+	if err != nil {
+		t.Fatalf("GetActiveCampaign: %v", err)
+	}
+	if c != nil {
+		t.Fatal("expected nil when no active campaign")
+	}
+
+	id, _ := store.CreateCampaign(ctx, guildID, "Active One", "")
+	_ = store.SetActiveCampaign(ctx, guildID, id)
+
+	c, err = store.GetActiveCampaign(ctx, guildID)
+	if err != nil {
+		t.Fatalf("GetActiveCampaign after set: %v", err)
+	}
+	if c == nil {
+		t.Fatal("expected non-nil active campaign")
+	}
+	if c.ID != id {
+		t.Fatalf("expected active campaign id %d, got %d", id, c.ID)
+	}
+}
+
+func TestGetOrCreateActiveCampaign(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	// Should auto-create a default campaign.
+	c, err := store.GetOrCreateActiveCampaign(ctx, guildID)
+	if err != nil {
+		t.Fatalf("GetOrCreateActiveCampaign: %v", err)
+	}
+	if c == nil {
+		t.Fatal("expected non-nil campaign")
+	}
+	if c.Name != "Default Campaign" {
+		t.Fatalf("expected 'Default Campaign', got %q", c.Name)
+	}
+	if !c.IsActive {
+		t.Fatal("expected auto-created campaign to be active")
+	}
+
+	// Calling again should return the same campaign.
+	c2, err := store.GetOrCreateActiveCampaign(ctx, guildID)
+	if err != nil {
+		t.Fatalf("GetOrCreateActiveCampaign second call: %v", err)
+	}
+	if c2.ID != c.ID {
+		t.Fatalf("expected same campaign id %d, got %d", c.ID, c2.ID)
+	}
+}
+
+func TestUpdateCampaignRecap(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	id, _ := store.CreateCampaign(ctx, guildID, "Recap Test", "")
+
+	recap := "The heroes ventured into the Underdark..."
+	if err := store.UpdateCampaignRecap(ctx, id, recap); err != nil {
+		t.Fatalf("UpdateCampaignRecap: %v", err)
+	}
+
+	c, _ := store.GetCampaign(ctx, id)
+	if c.Recap != recap {
+		t.Fatalf("expected recap %q, got %q", recap, c.Recap)
+	}
+	if c.RecapGeneratedAt == nil {
+		t.Fatal("expected recap_generated_at to be set")
+	}
+}
+
+func TestSetCampaignDM(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	id, _ := store.CreateCampaign(ctx, guildID, "DM Test", "")
+
+	if err := store.SetCampaignDM(ctx, id, "dm-user-42"); err != nil {
+		t.Fatalf("SetCampaignDM: %v", err)
+	}
+
+	c, _ := store.GetCampaign(ctx, id)
+	if c.DMUserID == nil || *c.DMUserID != "dm-user-42" {
+		t.Fatalf("expected dm_user_id 'dm-user-42', got %v", c.DMUserID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+func createTestCampaign(t *testing.T, store *Store, guildID string) int64 {
+	t.Helper()
+	id, err := store.CreateCampaign(context.Background(), guildID, "Test Campaign", "")
+	if err != nil {
+		t.Fatalf("create test campaign: %v", err)
+	}
+	return id
+}
+
+func TestCreateSession(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	id, err := store.CreateSession(ctx, guildID, campID, "chan-1", "/tmp/audio")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("expected non-zero session id")
+	}
+
+	sess, err := store.GetSession(ctx, id)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.GuildID != guildID {
+		t.Fatalf("expected guild_id %q, got %q", guildID, sess.GuildID)
+	}
+	if sess.CampaignID != campID {
+		t.Fatalf("expected campaign_id %d, got %d", campID, sess.CampaignID)
+	}
+	if sess.Status != "recording" {
+		t.Fatalf("expected status 'recording', got %q", sess.Status)
+	}
+	if sess.AudioDir != "/tmp/audio" {
+		t.Fatalf("expected audio_dir '/tmp/audio', got %q", sess.AudioDir)
+	}
+}
+
+func TestListSessions(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campA := createTestCampaign(t, store, guildID)
+	campB, _ := store.CreateCampaign(ctx, guildID, "Campaign B", "")
+
+	store.CreateSession(ctx, guildID, campA, "ch-1", "/tmp/a1")
+	store.CreateSession(ctx, guildID, campA, "ch-2", "/tmp/a2")
+	store.CreateSession(ctx, guildID, campB, "ch-3", "/tmp/b1")
+
+	// Filter by campaign A.
+	sessions, err := store.ListSessions(ctx, guildID, campA, 10, 0)
+	if err != nil {
+		t.Fatalf("ListSessions campA: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions for campA, got %d", len(sessions))
+	}
+
+	// All campaigns (campaignID = 0).
+	all, err := store.ListSessions(ctx, guildID, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("ListSessions all: %v", err)
+	}
+	if len(all) < 3 {
+		t.Fatalf("expected at least 3 sessions total, got %d", len(all))
+	}
+}
+
+func TestSessionLifecycle(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	id, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/lc")
+
+	// End the session.
+	if err := store.EndSession(ctx, id); err != nil {
+		t.Fatalf("EndSession: %v", err)
+	}
+	sess, _ := store.GetSession(ctx, id)
+	if sess.Status != "transcribing" {
+		t.Fatalf("expected 'transcribing' after end, got %q", sess.Status)
+	}
+	if sess.EndedAt == nil {
+		t.Fatal("expected ended_at to be set")
+	}
+
+	// Update status.
+	if err := store.UpdateSessionStatus(ctx, id, "summarising"); err != nil {
+		t.Fatalf("UpdateSessionStatus: %v", err)
+	}
+	sess, _ = store.GetSession(ctx, id)
+	if sess.Status != "summarising" {
+		t.Fatalf("expected 'summarising', got %q", sess.Status)
+	}
+
+	// Update summary.
+	events := []string{"Fought the dragon", "Found the treasure"}
+	if err := store.UpdateSessionSummary(ctx, id, "Epic battle", events); err != nil {
+		t.Fatalf("UpdateSessionSummary: %v", err)
+	}
+	sess, _ = store.GetSession(ctx, id)
+	if sess.Status != "complete" {
+		t.Fatalf("expected 'complete', got %q", sess.Status)
+	}
+	if sess.Summary == nil || *sess.Summary != "Epic battle" {
+		t.Fatalf("expected summary 'Epic battle', got %v", sess.Summary)
+	}
+	if len(sess.KeyEvents) != 2 {
+		t.Fatalf("expected 2 key events, got %d", len(sess.KeyEvents))
+	}
+}
+
+func TestCleanupStaleSessions(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	id1, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/s1")
+	id2, _ := store.CreateSession(ctx, guildID, campID, "ch-2", "/tmp/s2")
+
+	// Both are "recording". Cleanup should mark them failed.
+	affected, err := store.CleanupStaleSessions(ctx)
+	if err != nil {
+		t.Fatalf("CleanupStaleSessions: %v", err)
+	}
+	if affected < 2 {
+		t.Fatalf("expected at least 2 affected, got %d", affected)
+	}
+
+	s1, _ := store.GetSession(ctx, id1)
+	s2, _ := store.GetSession(ctx, id2)
+	if s1.Status != "failed" {
+		t.Fatalf("expected session 1 status 'failed', got %q", s1.Status)
+	}
+	if s2.Status != "failed" {
+		t.Fatalf("expected session 2 status 'failed', got %q", s2.Status)
+	}
+}
+
+func TestGetActiveSession(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// No active session.
+	sess, err := store.GetActiveSession(ctx, guildID)
+	if err != nil {
+		t.Fatalf("GetActiveSession: %v", err)
+	}
+	if sess != nil {
+		t.Fatal("expected nil when no active session")
+	}
+
+	id, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/act")
+	sess, err = store.GetActiveSession(ctx, guildID)
+	if err != nil {
+		t.Fatalf("GetActiveSession after create: %v", err)
+	}
+	if sess == nil {
+		t.Fatal("expected non-nil active session")
+	}
+	if sess.ID != id {
+		t.Fatalf("expected session id %d, got %d", id, sess.ID)
+	}
+
+	// End it; no active session anymore.
+	_ = store.EndSession(ctx, id)
+	sess, _ = store.GetActiveSession(ctx, guildID)
+	if sess != nil {
+		t.Fatal("expected nil after ending session")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Characters
+// ---------------------------------------------------------------------------
+
+func TestCharacterMapping(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	m := CharacterMapping{
+		UserID:        "user-char-1",
+		GuildID:       guildID,
+		CampaignID:    campID,
+		CharacterName: "Gandalf",
+	}
+	if err := store.SetCharacterMapping(ctx, m); err != nil {
+		t.Fatalf("SetCharacterMapping: %v", err)
+	}
+
+	name, err := store.GetCharacterName(ctx, "user-char-1", campID)
+	if err != nil {
+		t.Fatalf("GetCharacterName: %v", err)
+	}
+	if name != "Gandalf" {
+		t.Fatalf("expected 'Gandalf', got %q", name)
+	}
+
+	mappings, err := store.GetCharacterMappings(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetCharacterMappings: %v", err)
+	}
+	if len(mappings) != 1 {
+		t.Fatalf("expected 1 mapping, got %d", len(mappings))
+	}
+	if mappings[0].CharacterName != "Gandalf" {
+		t.Fatalf("expected 'Gandalf', got %q", mappings[0].CharacterName)
+	}
+}
+
+func TestCharacterMappingCampaignScope(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campA := createTestCampaign(t, store, guildID)
+	campB, _ := store.CreateCampaign(ctx, guildID, "Campaign B", "")
+
+	_ = store.SetCharacterMapping(ctx, CharacterMapping{
+		UserID: "user-scope-1", GuildID: guildID, CampaignID: campA, CharacterName: "Aragorn",
+	})
+	_ = store.SetCharacterMapping(ctx, CharacterMapping{
+		UserID: "user-scope-1", GuildID: guildID, CampaignID: campB, CharacterName: "Legolas",
+	})
+
+	nameA, _ := store.GetCharacterName(ctx, "user-scope-1", campA)
+	nameB, _ := store.GetCharacterName(ctx, "user-scope-1", campB)
+
+	if nameA != "Aragorn" {
+		t.Fatalf("expected 'Aragorn' in campaign A, got %q", nameA)
+	}
+	if nameB != "Legolas" {
+		t.Fatalf("expected 'Legolas' in campaign B, got %q", nameB)
+	}
+}
+
+func TestDeleteCharacterMapping(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	_ = store.SetCharacterMapping(ctx, CharacterMapping{
+		UserID: "user-del-1", GuildID: guildID, CampaignID: campID, CharacterName: "Frodo",
+	})
+
+	if err := store.DeleteCharacterMapping(ctx, "user-del-1", campID); err != nil {
+		t.Fatalf("DeleteCharacterMapping: %v", err)
+	}
+
+	name, _ := store.GetCharacterName(ctx, "user-del-1", campID)
+	if name != "" {
+		t.Fatalf("expected empty name after delete, got %q", name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Entities
+// ---------------------------------------------------------------------------
+
+func TestUpsertEntity(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	id, err := store.UpsertEntity(ctx, campID, "Strahd", "npc", "Vampire lord of Barovia")
+	if err != nil {
+		t.Fatalf("UpsertEntity create: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("expected non-zero entity id")
+	}
+
+	e, _ := store.GetEntity(ctx, id)
+	if e.Name != "Strahd" {
+		t.Fatalf("expected 'Strahd', got %q", e.Name)
+	}
+	if e.Description != "Vampire lord of Barovia" {
+		t.Fatalf("expected description 'Vampire lord of Barovia', got %q", e.Description)
+	}
+
+	// Upsert with new description should update it.
+	id2, err := store.UpsertEntity(ctx, campID, "Strahd", "npc", "Ancient vampire overlord")
+	if err != nil {
+		t.Fatalf("UpsertEntity update: %v", err)
+	}
+	if id2 != id {
+		t.Fatalf("expected same entity id %d on upsert, got %d", id, id2)
+	}
+
+	e, _ = store.GetEntity(ctx, id)
+	if e.Description != "Ancient vampire overlord" {
+		t.Fatalf("expected updated description, got %q", e.Description)
+	}
+
+	// Upsert with empty description should keep existing.
+	store.UpsertEntity(ctx, campID, "Strahd", "npc", "")
+	e, _ = store.GetEntity(ctx, id)
+	if e.Description != "Ancient vampire overlord" {
+		t.Fatalf("expected description preserved on empty upsert, got %q", e.Description)
+	}
+}
+
+func TestListEntities(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	store.UpsertEntity(ctx, campID, "Barovia", "location", "A dark land")
+	store.UpsertEntity(ctx, campID, "Strahd", "npc", "Vampire")
+	store.UpsertEntity(ctx, campID, "Sunblade", "item", "Radiant weapon")
+
+	// All entities.
+	all, err := store.ListEntities(ctx, campID, "", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListEntities all: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 entities, got %d", len(all))
+	}
+
+	// Filter by type.
+	npcs, err := store.ListEntities(ctx, campID, "npc", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListEntities type filter: %v", err)
+	}
+	if len(npcs) != 1 {
+		t.Fatalf("expected 1 npc, got %d", len(npcs))
+	}
+
+	// Search by name (ILIKE).
+	results, err := store.ListEntities(ctx, campID, "", "strahd", 50, 0)
+	if err != nil {
+		t.Fatalf("ListEntities search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for 'strahd', got %d", len(results))
+	}
+	if results[0].Name != "Strahd" {
+		t.Fatalf("expected 'Strahd', got %q", results[0].Name)
+	}
+}
+
+func TestEntityNotes(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/notes")
+	entID, _ := store.UpsertEntity(ctx, campID, "NoteTarget", "npc", "A notable NPC")
+
+	if err := store.AddEntityNote(ctx, entID, sessID, "First encounter in the tavern"); err != nil {
+		t.Fatalf("AddEntityNote 1: %v", err)
+	}
+	if err := store.AddEntityNote(ctx, entID, sessID, "Revealed their true identity"); err != nil {
+		t.Fatalf("AddEntityNote 2: %v", err)
+	}
+
+	notes, err := store.GetEntityNotes(ctx, entID)
+	if err != nil {
+		t.Fatalf("GetEntityNotes: %v", err)
+	}
+	if len(notes) != 2 {
+		t.Fatalf("expected 2 notes, got %d", len(notes))
+	}
+	// Ordered by created_at.
+	if notes[0].Content != "First encounter in the tavern" {
+		t.Fatalf("expected first note content, got %q", notes[0].Content)
+	}
+	if notes[1].Content != "Revealed their true identity" {
+		t.Fatalf("expected second note content, got %q", notes[1].Content)
+	}
+}
+
+func TestEntityRelationships(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	srcID, _ := store.UpsertEntity(ctx, campID, "Alice", "npc", "A wizard")
+	tgtID, _ := store.UpsertEntity(ctx, campID, "Bob", "npc", "A fighter")
+
+	err := store.UpsertEntityRelationship(ctx, campID, srcID, tgtID, "ally", "Fought together", nil)
+	if err != nil {
+		t.Fatalf("UpsertEntityRelationship: %v", err)
+	}
+
+	// Get from source side.
+	rels, err := store.GetEntityRelationships(ctx, srcID)
+	if err != nil {
+		t.Fatalf("GetEntityRelationships source: %v", err)
+	}
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 relationship from source, got %d", len(rels))
+	}
+	if rels[0].Relationship != "ally" {
+		t.Fatalf("expected 'ally', got %q", rels[0].Relationship)
+	}
+
+	// Get from target side.
+	rels, err = store.GetEntityRelationships(ctx, tgtID)
+	if err != nil {
+		t.Fatalf("GetEntityRelationships target: %v", err)
+	}
+	if len(rels) != 1 {
+		t.Fatalf("expected 1 relationship from target, got %d", len(rels))
+	}
+
+	// Upsert should update description.
+	err = store.UpsertEntityRelationship(ctx, campID, srcID, tgtID, "ally", "Lifelong friends", nil)
+	if err != nil {
+		t.Fatalf("UpsertEntityRelationship update: %v", err)
+	}
+	rels, _ = store.GetEntityRelationships(ctx, srcID)
+	if rels[0].Description != "Lifelong friends" {
+		t.Fatalf("expected updated description 'Lifelong friends', got %q", rels[0].Description)
+	}
+}
+
+func TestGetEntityByName(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	store.UpsertEntity(ctx, campID, "Waterdeep", "location", "City of Splendors")
+
+	e, err := store.GetEntityByName(ctx, campID, "Waterdeep", "location")
+	if err != nil {
+		t.Fatalf("GetEntityByName: %v", err)
+	}
+	if e == nil {
+		t.Fatal("expected non-nil entity")
+	}
+	if e.Name != "Waterdeep" {
+		t.Fatalf("expected 'Waterdeep', got %q", e.Name)
+	}
+
+	// Non-existent.
+	e, err = store.GetEntityByName(ctx, campID, "Nowhere", "location")
+	if err != nil {
+		t.Fatalf("GetEntityByName non-existent: %v", err)
+	}
+	if e != nil {
+		t.Fatal("expected nil for non-existent entity")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Quests
+// ---------------------------------------------------------------------------
+
+func TestUpsertQuest(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	id, err := store.UpsertQuest(ctx, campID, "Slay the Dragon", "Defeat the red dragon", "active", "King Hekaton")
+	if err != nil {
+		t.Fatalf("UpsertQuest create: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("expected non-zero quest id")
+	}
+
+	q, _ := store.GetQuest(ctx, id)
+	if q.Name != "Slay the Dragon" {
+		t.Fatalf("expected 'Slay the Dragon', got %q", q.Name)
+	}
+	if q.Status != "active" {
+		t.Fatalf("expected status 'active', got %q", q.Status)
+	}
+	if q.Giver != "King Hekaton" {
+		t.Fatalf("expected giver 'King Hekaton', got %q", q.Giver)
+	}
+
+	// Upsert with updated description.
+	id2, err := store.UpsertQuest(ctx, campID, "Slay the Dragon", "Defeat the ancient red dragon", "", "")
+	if err != nil {
+		t.Fatalf("UpsertQuest update: %v", err)
+	}
+	if id2 != id {
+		t.Fatalf("expected same quest id on upsert, got %d", id2)
+	}
+	q, _ = store.GetQuest(ctx, id)
+	if q.Description != "Defeat the ancient red dragon" {
+		t.Fatalf("expected updated description, got %q", q.Description)
+	}
+	// Empty status/giver should preserve originals.
+	if q.Status != "active" {
+		t.Fatalf("expected status preserved, got %q", q.Status)
+	}
+	if q.Giver != "King Hekaton" {
+		t.Fatalf("expected giver preserved, got %q", q.Giver)
+	}
+}
+
+func TestListQuests(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	store.UpsertQuest(ctx, campID, "Quest Active", "desc", "active", "NPC1")
+	store.UpsertQuest(ctx, campID, "Quest Complete", "desc", "completed", "NPC2")
+	store.UpsertQuest(ctx, campID, "Quest Failed", "desc", "failed", "NPC3")
+
+	// All quests.
+	all, err := store.ListQuests(ctx, campID, "")
+	if err != nil {
+		t.Fatalf("ListQuests all: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 quests, got %d", len(all))
+	}
+
+	// Filter by status.
+	active, err := store.ListQuests(ctx, campID, "active")
+	if err != nil {
+		t.Fatalf("ListQuests active: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("expected 1 active quest, got %d", len(active))
+	}
+	if active[0].Name != "Quest Active" {
+		t.Fatalf("expected 'Quest Active', got %q", active[0].Name)
+	}
+}
+
+func TestUpdateQuestStatus(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	id, _ := store.UpsertQuest(ctx, campID, "Status Quest", "test", "active", "")
+
+	if err := store.UpdateQuestStatus(ctx, id, "completed"); err != nil {
+		t.Fatalf("UpdateQuestStatus: %v", err)
+	}
+
+	q, _ := store.GetQuest(ctx, id)
+	if q.Status != "completed" {
+		t.Fatalf("expected 'completed', got %q", q.Status)
+	}
+}
+
+func TestQuestUpdates(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/qu")
+	questID, _ := store.UpsertQuest(ctx, campID, "Updated Quest", "test", "active", "")
+
+	newStatus := "completed"
+	if err := store.AddQuestUpdate(ctx, questID, sessID, "Dragon was slain", &newStatus); err != nil {
+		t.Fatalf("AddQuestUpdate: %v", err)
+	}
+	if err := store.AddQuestUpdate(ctx, questID, sessID, "Treasure recovered", nil); err != nil {
+		t.Fatalf("AddQuestUpdate 2: %v", err)
+	}
+
+	updates, err := store.GetQuestUpdates(ctx, questID)
+	if err != nil {
+		t.Fatalf("GetQuestUpdates: %v", err)
+	}
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
+	}
+	if updates[0].Content != "Dragon was slain" {
+		t.Fatalf("expected first update 'Dragon was slain', got %q", updates[0].Content)
+	}
+	if updates[0].NewStatus == nil || *updates[0].NewStatus != "completed" {
+		t.Fatalf("expected first update new_status 'completed', got %v", updates[0].NewStatus)
+	}
+	if updates[1].NewStatus != nil {
+		t.Fatalf("expected second update new_status nil, got %v", updates[1].NewStatus)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Timeline
+// ---------------------------------------------------------------------------
+
+func TestGetCampaignTimeline(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create some data to populate the timeline.
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/tl")
+	_ = store.EndSession(ctx, sessID)
+	_ = store.UpdateSessionSummary(ctx, sessID, "A grand adventure", []string{"event1"})
+
+	store.UpsertEntity(ctx, campID, "Timeline NPC", "npc", "A character in the timeline")
+	store.UpsertQuest(ctx, campID, "Timeline Quest", "A quest", "active", "NPC")
+
+	events, err := store.GetCampaignTimeline(ctx, campID, 50, 0)
+	if err != nil {
+		t.Fatalf("GetCampaignTimeline: %v", err)
+	}
+
+	// Should have at least: 1 session + 1 entity + 1 quest = 3 events.
+	if len(events) < 3 {
+		t.Fatalf("expected at least 3 timeline events, got %d", len(events))
+	}
+
+	// Check that we have the expected types.
+	typeSet := make(map[string]bool)
+	for _, e := range events {
+		typeSet[e.Type] = true
+	}
+	for _, typ := range []string{"session", "entity", "quest_new"} {
+		if !typeSet[typ] {
+			t.Fatalf("expected timeline type %q present", typ)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Lore Search
+// ---------------------------------------------------------------------------
+
+func TestSearchLore(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create searchable data.
+	entID, _ := store.UpsertEntity(ctx, campID, "Silverymoon", "location", "A beautiful city of magic")
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/ls")
+	store.AddEntityNote(ctx, entID, sessID, "The party arrived at Silverymoon")
+	_ = store.EndSession(ctx, sessID)
+	_ = store.UpdateSessionSummary(ctx, sessID, "The heroes explored Silverymoon and met the archmage", []string{})
+	store.UpsertQuest(ctx, campID, "Defend Silverymoon", "Protect the city from orcs", "active", "Archmage")
+
+	results, err := store.SearchLore(ctx, campID, "Silverymoon", 20)
+	if err != nil {
+		t.Fatalf("SearchLore: %v", err)
+	}
+
+	// Should find hits across entity, note, summary, and quest.
+	if len(results) < 3 {
+		t.Fatalf("expected at least 3 lore results for 'Silverymoon', got %d", len(results))
+	}
+
+	typeSet := make(map[string]bool)
+	for _, r := range results {
+		typeSet[r.Type] = true
+	}
+	if !typeSet["entity"] {
+		t.Fatal("expected entity in lore search results")
+	}
+	if !typeSet["note"] {
+		t.Fatal("expected note in lore search results")
+	}
+	if !typeSet["summary"] {
+		t.Fatal("expected summary in lore search results")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Discord Users
+// ---------------------------------------------------------------------------
+
+func TestUpsertDiscordUsers(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	users := []DiscordUser{
+		{UserID: "u1", GuildID: guildID, Username: "alice", DisplayName: "Alice A"},
+		{UserID: "u2", GuildID: guildID, Username: "bob", DisplayName: "Bob B"},
+	}
+
+	if err := store.UpsertDiscordUsers(ctx, users); err != nil {
+		t.Fatalf("UpsertDiscordUsers: %v", err)
+	}
+
+	all, err := store.GetDiscordUsers(ctx, guildID)
+	if err != nil {
+		t.Fatalf("GetDiscordUsers: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(all))
+	}
+
+	// Upsert again with updated display name.
+	users[0].DisplayName = "Alice Updated"
+	if err := store.UpsertDiscordUsers(ctx, users); err != nil {
+		t.Fatalf("UpsertDiscordUsers update: %v", err)
+	}
+
+	u, err := store.GetDiscordUser(ctx, "u1", guildID)
+	if err != nil {
+		t.Fatalf("GetDiscordUser: %v", err)
+	}
+	if u.DisplayName != "Alice Updated" {
+		t.Fatalf("expected 'Alice Updated', got %q", u.DisplayName)
+	}
+}
+
+func TestGetDiscordUser(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+
+	if err := store.UpsertDiscordUser(ctx, DiscordUser{
+		UserID: "single-u", GuildID: guildID, Username: "charlie", DisplayName: "Charlie C",
+	}); err != nil {
+		t.Fatalf("UpsertDiscordUser: %v", err)
+	}
+
+	u, err := store.GetDiscordUser(ctx, "single-u", guildID)
+	if err != nil {
+		t.Fatalf("GetDiscordUser: %v", err)
+	}
+	if u.Username != "charlie" {
+		t.Fatalf("expected 'charlie', got %q", u.Username)
+	}
+	if u.DisplayName != "Charlie C" {
+		t.Fatalf("expected 'Charlie C', got %q", u.DisplayName)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Transcripts
+// ---------------------------------------------------------------------------
+
+func TestInsertAndGetTranscript(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/tr")
+
+	segments := []TranscriptSegment{
+		{SessionID: sessID, UserID: "u1", StartTime: 0.0, EndTime: 3.5, Text: "Hello everyone"},
+		{SessionID: sessID, UserID: "u2", StartTime: 4.0, EndTime: 7.0, Text: "Let us begin"},
+		{SessionID: sessID, UserID: "u1", StartTime: 8.0, EndTime: 12.0, Text: "I cast fireball"},
+	}
+
+	if err := store.InsertSegments(ctx, segments); err != nil {
+		t.Fatalf("InsertSegments: %v", err)
+	}
+
+	result, err := store.GetTranscript(ctx, sessID)
+	if err != nil {
+		t.Fatalf("GetTranscript: %v", err)
+	}
+	if len(result) != 3 {
+		t.Fatalf("expected 3 segments, got %d", len(result))
+	}
+
+	// Ordered by start_time.
+	if result[0].Text != "Hello everyone" {
+		t.Fatalf("expected first segment 'Hello everyone', got %q", result[0].Text)
+	}
+	if result[1].Text != "Let us begin" {
+		t.Fatalf("expected second segment 'Let us begin', got %q", result[1].Text)
+	}
+	if result[2].Text != "I cast fireball" {
+		t.Fatalf("expected third segment 'I cast fireball', got %q", result[2].Text)
+	}
+	if result[0].UserID != "u1" {
+		t.Fatalf("expected user_id 'u1', got %q", result[0].UserID)
+	}
+
+	// Getting transcript for non-existent session should return empty.
+	empty, err := store.GetTranscript(ctx, 999999)
+	if err != nil {
+		t.Fatalf("GetTranscript non-existent: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected 0 segments for non-existent session, got %d", len(empty))
+	}
+}

@@ -18,7 +18,7 @@ export CGO_LDFLAGS      += -L$(abspath $(WHISPER_LIB)) -L$(abspath $(WHISPER_GGM
 export CGO_CFLAGS       += -I$(abspath $(WHISPER_INCLUDE)) -I$(abspath $(WHISPER_DIR)/ggml/include)
 export LD_LIBRARY_PATH  := $(abspath $(WHISPER_LIB)):$(abspath $(WHISPER_GGML_LIB)):$(LD_LIBRARY_PATH)
 
-.PHONY: dev dev-deps dev-stop build test test-unit test-integration lint clean help whisper
+.PHONY: dev dev-deps dev-stop build test test-unit test-integration test-web lint clean help whisper
 
 help: ## Show this help
 	@grep -E '^[a-z][a-z_-]+:.*## ' $(MAKEFILE_LIST) | sort | \
@@ -80,7 +80,7 @@ web/build: web/node_modules $(shell find web/src -type f)
 # Test
 # ---------------------------------------------------------------------------
 
-test: test-unit test-integration ## Run all tests
+test: test-unit test-integration test-web ## Run all tests
 
 test-unit: whisper ## Run unit tests (no database required)
 	go test -tags $(BUILD_TAGS) -count=1 \
@@ -93,7 +93,10 @@ test-unit: whisper ## Run unit tests (no database required)
 
 test-integration: dev-deps whisper ## Run integration tests (starts postgres if needed)
 	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
-		go test -tags $(BUILD_TAGS) -count=1 -v ./internal/api/
+		go test -tags $(BUILD_TAGS) -count=1 -v ./internal/api/ ./internal/storage/
+
+test-web: web/node_modules ## Run web frontend tests
+	cd web && npm test
 
 # ---------------------------------------------------------------------------
 # Quality

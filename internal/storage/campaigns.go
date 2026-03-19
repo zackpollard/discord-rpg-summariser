@@ -89,7 +89,7 @@ func (s *Store) SetActiveCampaign(ctx context.Context, guildID string, campaignI
 func (s *Store) GetActiveCampaign(ctx context.Context, guildID string) (*Campaign, error) {
 	var c Campaign
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, guild_id, name, description, is_active, created_at
+		`SELECT id, guild_id, name, description, is_active, dm_user_id, recap, recap_generated_at, created_at
 		 FROM campaigns WHERE guild_id = $1 AND is_active = true`, guildID,
 	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.Recap, &c.RecapGeneratedAt, &c.CreatedAt)
 	if err == pgx.ErrNoRows {

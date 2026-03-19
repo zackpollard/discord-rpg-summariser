@@ -1,0 +1,78 @@
+package summarise
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestBuildExtractionPrompt_Basic(t *testing.T) {
+	transcript := "[00:00:05] Thordak: I open the chest.\n[00:00:12] DM: Inside you find a glowing orb."
+	summary := "The party found a glowing orb in the dungeon."
+
+	prompt := BuildExtractionPrompt(transcript, summary, nil, "")
+
+	if !strings.Contains(prompt, transcript) {
+		t.Error("prompt should contain the transcript")
+	}
+	if !strings.Contains(prompt, summary) {
+		t.Error("prompt should contain the summary")
+	}
+	if !strings.Contains(prompt, "Guidelines:") {
+		t.Error("prompt should contain guidelines section")
+	}
+	if !strings.Contains(prompt, "valid JSON") {
+		t.Error("prompt should instruct to return valid JSON")
+	}
+	if !strings.Contains(prompt, "entities") {
+		t.Error("prompt should mention entities in the JSON schema")
+	}
+	if !strings.Contains(prompt, "relationships") {
+		t.Error("prompt should mention relationships in the JSON schema")
+	}
+	if !strings.Contains(prompt, "character names") {
+		t.Error("prompt should instruct to use character names")
+	}
+}
+
+func TestBuildExtractionPrompt_WithExistingEntities(t *testing.T) {
+	entities := []string{"Strahd von Zarovich", "Barovia", "Ireena Kolyana"}
+
+	prompt := BuildExtractionPrompt("transcript", "summary", entities, "")
+
+	for _, name := range entities {
+		if !strings.Contains(prompt, name) {
+			t.Errorf("prompt should contain existing entity %q", name)
+		}
+	}
+	if !strings.Contains(prompt, "already exist in the knowledge base") {
+		t.Error("prompt should mention existing entities context")
+	}
+}
+
+func TestBuildExtractionPrompt_WithDMName(t *testing.T) {
+	prompt := BuildExtractionPrompt("transcript", "summary", nil, "Matt")
+
+	if !strings.Contains(prompt, "The Dungeon Master is: Matt") {
+		t.Error("prompt should identify the DM by name")
+	}
+	if !strings.Contains(prompt, "Matt") {
+		t.Error("prompt should contain the DM name")
+	}
+	if !strings.Contains(prompt, "narration") {
+		t.Error("prompt should describe DM's role as narrator")
+	}
+	if !strings.Contains(prompt, "Do NOT create an entity for the DM") {
+		t.Error("prompt should instruct not to create an entity for the DM")
+	}
+}
+
+func TestBuildExtractionPrompt_NoDMName(t *testing.T) {
+	prompt := BuildExtractionPrompt("transcript", "summary", nil, "")
+
+	if strings.Contains(prompt, "Dungeon Master is:") {
+		t.Error("prompt should not contain DM section when dmName is empty")
+	}
+	if strings.Contains(prompt, "narration, NPC dialogue") {
+		t.Error("prompt should not contain DM narration instructions when dmName is empty")
+	}
+}

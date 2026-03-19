@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"discord-rpg-summariser/internal/storage"
 )
@@ -26,6 +28,16 @@ func testStore(t *testing.T) *storage.Store {
 	t.Cleanup(func() { store.Close() })
 	return store
 }
+
+// uniqueGuild returns a guild ID unique to the current test to avoid collisions.
+func uniqueGuild(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf("api-test-guild-%d", time.Now().UnixNano())
+}
+
+// ---------------------------------------------------------------------------
+// Existing tests (sessions, characters, status, CORS)
+// ---------------------------------------------------------------------------
 
 func TestHandleListSessions(t *testing.T) {
 	store := testStore(t)
@@ -89,9 +101,10 @@ func TestHandleGetSession_InvalidID(t *testing.T) {
 
 func TestHandleUpsertCharacter(t *testing.T) {
 	store := testStore(t)
-	srv := NewServer(store, ":0", "test-guild", "")
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
 
-	body := `{"user_id": "user-123", "guild_id": "test-guild", "character_name": "Gandalf"}`
+	body := `{"user_id": "user-123", "character_name": "Gandalf"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/characters", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -115,7 +128,7 @@ func TestHandleUpsertCharacter(t *testing.T) {
 	}
 
 	// Clean up.
-	_ = store.DeleteCharacterMapping(context.Background(), "user-123", "test-guild")
+	_ = store.DeleteCharacterMapping(context.Background(), "user-123", resp.CampaignID)
 }
 
 func TestHandleUpsertCharacter_MissingFields(t *testing.T) {
@@ -165,8 +178,18 @@ func TestHandleGetTranscript(t *testing.T) {
 	store := testStore(t)
 	srv := NewServer(store, ":0", "test-guild", "")
 
-	// Request transcript for a non-existent session (should return empty array, not error).
-	req := httptest.NewRequest(http.MethodGet, "/api/sessions/999999/transcript", nil)
+	// Create a real session so the transcript endpoint can look up its campaign.
+	ctx := context.Background()
+	campaign, err := store.GetOrCreateActiveCampaign(ctx, "test-guild")
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+	sessionID, err := store.CreateSession(ctx, "test-guild", campaign.ID, "chan-1", "/tmp/audio")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/sessions/%d/transcript", sessionID), nil)
 	rec := httptest.NewRecorder()
 
 	srv.mux.ServeHTTP(rec, req)
@@ -239,5 +262,416 @@ func TestCORSMiddleware(t *testing.T) {
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
 		t.Fatalf("expected CORS origin 'http://localhost:5173', got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Campaign handler tests
+// ---------------------------------------------------------------------------
+
+func TestHandleListCampaigns(t *testing.T) {
+	store := testStore(t)
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+	ctx := context.Background()
+
+	store.CreateCampaign(ctx, guildID, "Camp Alpha", "")
+	store.CreateCampaign(ctx, guildID, "Camp Beta", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/campaigns", nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var campaigns []campaignResponse
+	if err := json.NewDecoder(rec.Body).Decode(&campaigns); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(campaigns) < 2 {
+		t.Fatalf("expected at least 2 campaigns, got %d", len(campaigns))
+	}
+}
+
+func TestHandleCreateCampaign(t *testing.T) {
+	store := testStore(t)
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	body := `{"name": "New Adventure", "description": "A brave new world"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/campaigns", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp campaignResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Name != "New Adventure" {
+		t.Fatalf("expected name 'New Adventure', got %q", resp.Name)
+	}
+	if resp.Description != "A brave new world" {
+		t.Fatalf("expected description 'A brave new world', got %q", resp.Description)
+	}
+	if resp.ID == 0 {
+		t.Fatal("expected non-zero campaign id")
+	}
+}
+
+func TestHandleCreateCampaign_MissingName(t *testing.T) {
+	store := testStore(t)
+	srv := NewServer(store, ":0", "test-guild", "")
+
+	body := `{"description": "no name given"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/campaigns", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var errResp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp["error"] != "name is required" {
+		t.Fatalf("expected 'name is required', got %q", errResp["error"])
+	}
+}
+
+func TestHandleGetCampaign_NotFound(t *testing.T) {
+	store := testStore(t)
+	srv := NewServer(store, ":0", "test-guild", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/campaigns/999999", nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var errResp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp["error"] != "campaign not found" {
+		t.Fatalf("expected 'campaign not found', got %q", errResp["error"])
+	}
+}
+
+func TestHandleSetActiveCampaign(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	id, err := store.CreateCampaign(ctx, guildID, "Activate Me", "")
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	url := fmt.Sprintf("/api/campaigns/%d/active", id)
+	req := httptest.NewRequest(http.MethodPut, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp campaignResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ID != id {
+		t.Fatalf("expected campaign id %d, got %d", id, resp.ID)
+	}
+	if !resp.IsActive {
+		t.Fatal("expected campaign to be active after SetActive")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Quest handler tests
+// ---------------------------------------------------------------------------
+
+func TestHandleListQuests(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Quest Camp", "")
+	store.UpsertQuest(ctx, campID, "Slay Goblins", "Kill 10 goblins", "active", "Mayor")
+
+	url := fmt.Sprintf("/api/campaigns/%d/quests", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var quests []questResponse
+	if err := json.NewDecoder(rec.Body).Decode(&quests); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(quests) < 1 {
+		t.Fatal("expected at least 1 quest")
+	}
+}
+
+func TestHandleGetQuest_NotFound(t *testing.T) {
+	store := testStore(t)
+	srv := NewServer(store, ":0", "test-guild", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/quests/999999", nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var errResp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errResp["error"] != "quest not found" {
+		t.Fatalf("expected 'quest not found', got %q", errResp["error"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Timeline handler test
+// ---------------------------------------------------------------------------
+
+func TestHandleGetTimeline(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Timeline Camp", "")
+
+	url := fmt.Sprintf("/api/campaigns/%d/timeline", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var events []storage.TimelineEvent
+	if err := json.NewDecoder(rec.Body).Decode(&events); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Valid JSON array (possibly empty for a new campaign).
+	if events == nil {
+		t.Fatal("expected non-nil timeline array")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Lore search handler test
+// ---------------------------------------------------------------------------
+
+func TestHandleLoreSearch(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Lore Camp", "")
+	store.UpsertEntity(ctx, campID, "Moonstone Tower", "location", "An ancient wizard tower")
+
+	url := fmt.Sprintf("/api/campaigns/%d/lore/search?q=Moonstone", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var results []storage.LoreSearchResult
+	if err := json.NewDecoder(rec.Body).Decode(&results); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if results == nil {
+		t.Fatal("expected non-nil results array")
+	}
+	if len(results) < 1 {
+		t.Fatal("expected at least 1 lore search result for 'Moonstone'")
+	}
+}
+
+func TestHandleLoreSearch_MissingQuery(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Lore Camp 2", "")
+
+	url := fmt.Sprintf("/api/campaigns/%d/lore/search", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Recap handler test
+// ---------------------------------------------------------------------------
+
+func TestHandleGetRecap(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Recap Camp", "")
+	_ = store.UpdateCampaignRecap(ctx, campID, "The story so far...")
+
+	url := fmt.Sprintf("/api/campaigns/%d/recap", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp recapResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.CampaignID != campID {
+		t.Fatalf("expected campaign_id %d, got %d", campID, resp.CampaignID)
+	}
+	if resp.Recap != "The story so far..." {
+		t.Fatalf("expected recap 'The story so far...', got %q", resp.Recap)
+	}
+}
+
+func TestHandleGetRecap_NotFound(t *testing.T) {
+	store := testStore(t)
+	srv := NewServer(store, ":0", "test-guild", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/campaigns/999999/recap", nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Entity handler tests
+// ---------------------------------------------------------------------------
+
+func TestHandleListEntities(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Entity Camp", "")
+	store.UpsertEntity(ctx, campID, "Dark Forest", "location", "A haunted forest")
+	store.UpsertEntity(ctx, campID, "Old Sage", "npc", "A wise man")
+
+	url := fmt.Sprintf("/api/campaigns/%d/entities", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var entities []entityResponse
+	if err := json.NewDecoder(rec.Body).Decode(&entities); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entities) < 2 {
+		t.Fatalf("expected at least 2 entities, got %d", len(entities))
+	}
+}
+
+func TestHandleListEntities_TypeFilter(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Entity Filter Camp", "")
+	store.UpsertEntity(ctx, campID, "Castle", "location", "A grand castle")
+	store.UpsertEntity(ctx, campID, "Knight", "npc", "A brave knight")
+
+	url := fmt.Sprintf("/api/campaigns/%d/entities?type=npc", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var entities []entityResponse
+	if err := json.NewDecoder(rec.Body).Decode(&entities); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entities) != 1 {
+		t.Fatalf("expected 1 npc entity, got %d", len(entities))
+	}
+	if entities[0].Name != "Knight" {
+		t.Fatalf("expected 'Knight', got %q", entities[0].Name)
+	}
+}
+
+func TestHandleGetEntity_NotFound(t *testing.T) {
+	store := testStore(t)
+	srv := NewServer(store, ":0", "test-guild", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/entities/999999", nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

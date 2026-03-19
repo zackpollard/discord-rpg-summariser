@@ -132,3 +132,54 @@ func TestResampleFromFile(t *testing.T) {
 		t.Error("output signal is too quiet; resampler may have zeroed the signal")
 	}
 }
+
+func TestResampleChunk_OutputLength(t *testing.T) {
+	// 1 second of 48kHz int16 audio should produce 16000 float32 samples.
+	const numSamples = 48000
+	samples := make([]int16, numSamples)
+	for i := range samples {
+		samples[i] = int16(16000 * math.Sin(2*math.Pi*1000*float64(i)/48000))
+	}
+
+	out := ResampleChunk(samples)
+
+	wantLen := numSamples / 3
+	if len(out) != wantLen {
+		t.Errorf("ResampleChunk output length: got %d, want %d", len(out), wantLen)
+	}
+}
+
+func TestResampleChunk_DCPassthrough(t *testing.T) {
+	// A constant (DC) input should pass through the low-pass filter unchanged
+	// in the middle portion, avoiding edge transients.
+	const numSamples = 48000
+	const dcValue int16 = 10000
+	samples := make([]int16, numSamples)
+	for i := range samples {
+		samples[i] = dcValue
+	}
+
+	out := ResampleChunk(samples)
+	expected := float32(dcValue) / 32768.0
+
+	start := len(out) / 4
+	end := 3 * len(out) / 4
+	for i := start; i < end; i++ {
+		if diff := math.Abs(float64(out[i] - expected)); diff > 0.01 {
+			t.Errorf("sample[%d]: got %f, want ~%f (diff %f)", i, out[i], expected, diff)
+			break
+		}
+	}
+}
+
+func TestResampleChunk_EmptyInput(t *testing.T) {
+	out := ResampleChunk(nil)
+	if len(out) != 0 {
+		t.Errorf("ResampleChunk(nil): got %d samples, want 0", len(out))
+	}
+
+	out = ResampleChunk([]int16{})
+	if len(out) != 0 {
+		t.Errorf("ResampleChunk([]int16{}): got %d samples, want 0", len(out))
+	}
+}
