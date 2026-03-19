@@ -6,5 +6,5 @@ web/node_modules/
 web/.svelte-kit/
 web/build/
 models/
-bot
+/bot
 _deps/whisper.cpp/

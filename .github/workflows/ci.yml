@@ -54,8 +54,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install dependencies
-        run: cd web && npm ci
+      - name: Install and sync
+        run: cd web && npm ci && npx svelte-kit sync
 
       - name: Svelte check
         run: cd web && npx svelte-check --tsconfig tsconfig.json

@@ -98,8 +98,6 @@ func (s *Store) SearchLore(ctx context.Context, campaignID int64, query string, 
 		) results
 		LIMIT %d`, likeClause, limit)
 
-	args = append(args) // limit is embedded in query string
-
 	rows, err := s.Pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search lore: %w", err)
