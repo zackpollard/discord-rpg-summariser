@@ -51,11 +51,11 @@ type MemberInfo struct {
 	DisplayName string `json:"display_name"` // nick > global name > username
 }
 
-// GuildMembers returns all non-bot members of the configured guild.
-func (b *Bot) GuildMembers() []MemberInfo {
+// SyncGuildMembers fetches all guild members from Discord and caches them in the database.
+func (b *Bot) SyncGuildMembers() {
 	guildID := b.config.Discord.GuildID
+	ctx := context.Background()
 
-	// Fetch from API (state cache only has members seen in events)
 	var all []*discordgo.Member
 	after := ""
 	for {
@@ -70,7 +70,7 @@ func (b *Bot) GuildMembers() []MemberInfo {
 		}
 	}
 
-	var members []MemberInfo
+	var users []storage.DiscordUser
 	for _, m := range all {
 		if m.User == nil || m.User.Bot {
 			continue
@@ -82,29 +82,45 @@ func (b *Bot) GuildMembers() []MemberInfo {
 		if m.Nick != "" {
 			display = m.Nick
 		}
-		members = append(members, MemberInfo{
+		users = append(users, storage.DiscordUser{
 			UserID:      m.User.ID,
+			GuildID:     guildID,
 			Username:    m.User.Username,
 			DisplayName: display,
 		})
 	}
+
+	if err := b.store.UpsertDiscordUsers(ctx, users); err != nil {
+		log.Printf("Failed to sync guild members: %v", err)
+	} else {
+		log.Printf("Synced %d guild members to database", len(users))
+	}
+}
+
+// GuildMembers returns cached guild members from the database.
+func (b *Bot) GuildMembers() []MemberInfo {
+	users, err := b.store.GetDiscordUsers(context.Background(), b.config.Discord.GuildID)
+	if err != nil {
+		return nil
+	}
+	members := make([]MemberInfo, len(users))
+	for i, u := range users {
+		members[i] = MemberInfo{
+			UserID:      u.UserID,
+			Username:    u.Username,
+			DisplayName: u.DisplayName,
+		}
+	}
 	return members
 }
 
-// ResolveUsername returns a display name for a Discord user ID.
+// ResolveUsername returns a display name for a Discord user ID from the DB cache.
 func (b *Bot) ResolveUsername(userID string) string {
-	guildID := b.config.Discord.GuildID
-	member, err := b.session.GuildMember(guildID, userID)
-	if err != nil || member.User == nil {
+	u, err := b.store.GetDiscordUser(context.Background(), userID, b.config.Discord.GuildID)
+	if err != nil {
 		return userID
 	}
-	if member.Nick != "" {
-		return member.Nick
-	}
-	if member.User.GlobalName != "" {
-		return member.User.GlobalName
-	}
-	return member.User.Username
+	return u.DisplayName
 }
 
 // VoiceActivity returns current voice activity. Nil if not recording.
@@ -163,6 +179,8 @@ func (b *Bot) Start() error {
 	if err := b.RegisterCommands(); err != nil {
 		return err
 	}
+
+	b.SyncGuildMembers()
 
 	log.Println("Bot is running.")
 	return nil
