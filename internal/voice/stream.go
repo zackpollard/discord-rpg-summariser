@@ -2,7 +2,6 @@ package voice
 
 import (
 	"fmt"
-	"log"
 	"path/filepath"
 
 	"github.com/bwmarrin/discordgo"
@@ -65,33 +64,22 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	opusData := packet.Opus
 	us.pktCount++
 
-	if us.pktCount <= 5 && len(opusData) > 5 {
-		last := opusData[len(opusData)-min(8, len(opusData)):]
-		log.Printf("Packet #%d for user %s: %d bytes, first: %x, last: %x",
-			us.pktCount, us.userID, len(opusData), firstN(opusData, 8), last)
-	}
-
 	// Decrypt DAVE secure frame if present
 	if isDAVEFrame(opusData) {
 		if us.daveState != nil {
 			decrypted, err := discordgo.DecryptFrame(us.daveState, opusData)
 			if err != nil {
-				if us.pktCount <= 200 {
-					log.Printf("  DAVE decrypt failed (pkt %d, %d bytes): %v", us.pktCount, len(opusData), err)
-				}
 				return fmt.Errorf("dave decrypt (%d bytes): %w", len(opusData), err)
 			}
-			if us.pktCount <= 200 {
-				log.Printf("  DAVE decrypted pkt %d: %d -> %d bytes, first: %x",
-					us.pktCount, len(opusData), len(decrypted), firstN(decrypted, 4))
-			}
 			opusData = decrypted
-		} else if us.pktCount <= 200 {
-			log.Printf("  DAVE frame detected (pkt %d, %d bytes) but no receiver key", us.pktCount, len(opusData))
+		} else {
+			return nil // no key yet, skip
 		}
-	} else if us.pktCount <= 200 && len(opusData) > 5 {
-		log.Printf("  Not a DAVE frame (pkt %d, %d bytes), last 4: %x", us.pktCount, len(opusData), opusData[len(opusData)-4:])
+	} else if len(opusData) < 10 {
+		return nil // skip small pre-transition packets
 	}
+	// Non-DAVE frames > 10 bytes that don't end with 0xFAFA are pre-transition;
+	// pass through to opus decoder (may fail, which is fine — they're transient).
 
 	pcm := make([]int16, pcmBufSize)
 	n, err := us.decoder.Decode(opusData, pcm)
@@ -140,9 +128,3 @@ func (us *UserStream) FilePath() string {
 	return us.wav.file.Name()
 }
 
-func firstN(b []byte, n int) []byte {
-	if len(b) < n {
-		return b
-	}
-	return b[:n]
-}
