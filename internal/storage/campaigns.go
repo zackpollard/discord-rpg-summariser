@@ -45,7 +45,7 @@ func (s *Store) GetCampaign(ctx context.Context, id int64) (*Campaign, error) {
 
 func (s *Store) ListCampaigns(ctx context.Context, guildID string) ([]Campaign, error) {
 	rows, err := s.Pool.Query(ctx,
-		`SELECT id, guild_id, name, description, is_active, created_at
+		`SELECT id, guild_id, name, description, is_active, dm_user_id, recap, recap_generated_at, created_at
 		 FROM campaigns WHERE guild_id = $1 ORDER BY created_at`, guildID,
 	)
 	if err != nil {

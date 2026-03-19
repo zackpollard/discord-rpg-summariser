@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -40,6 +41,7 @@ type createCampaignRequest struct {
 func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
 	campaigns, err := s.store.ListCampaigns(r.Context(), s.guildID)
 	if err != nil {
+		log.Printf("ListCampaigns error: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to list campaigns")
 		return
 	}
