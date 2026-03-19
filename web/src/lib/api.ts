@@ -121,6 +121,8 @@ export interface LiveTranscriptEvent {
 	start_time: number;
 	end_time: number;
 	text: string;
+	partial: boolean;
+	chunk_seq: number;
 }
 
 export function subscribeLiveTranscript(

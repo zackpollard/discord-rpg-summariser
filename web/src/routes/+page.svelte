@@ -75,9 +75,15 @@
 			voiceUsers = users;
 		});
 		unsubTranscript = subscribeLiveTranscript((seg) => {
+			// Remove previous partial segments that this chunk supersedes
+			// (same user, overlapping time range from earlier chunks)
+			liveSegments = liveSegments.filter(s =>
+				s.user_id !== seg.user_id ||
+				!s.partial ||
+				s.end_time <= seg.start_time
+			);
 			liveSegments = [...liveSegments, seg];
 			if (liveSegments.length > 500) liveSegments = liveSegments.slice(-500);
-			// Auto-scroll
 			requestAnimationFrame(() => {
 				if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
 			});
@@ -139,7 +145,7 @@
 			<h2>Live Transcript</h2>
 			<div class="transcript-scroll" bind:this={transcriptEl}>
 				{#each liveSegments as seg}
-					<div class="live-line">
+					<div class="live-line" class:partial={seg.partial}>
 						<span class="live-time">[{formatTimestamp(seg.start_time)}]</span>
 						<span class="live-speaker" style="color: {charColor(seg.display_name || seg.user_id)}">{seg.display_name || seg.user_id}:</span>
 						<span class="live-text">{seg.text}</span>
@@ -315,6 +321,10 @@
 	}
 	.live-text {
 		color: var(--text-primary);
+	}
+	.live-line.partial {
+		opacity: 0.5;
+		font-style: italic;
 	}
 
 	.recent-section {
