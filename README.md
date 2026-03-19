@@ -15,21 +15,34 @@ A Discord bot that records D&D voice sessions, transcribes them with whisper.cpp
 - **Telegram Integration** — Capture DM text messages from a Telegram group chat during sessions
 - **Web Panel** — Dark-themed D&D UI for browsing all campaign data
 
-## Screenshots
+## Demo
 
-*Storm King's Thunder demo campaign with 10 sessions of transcript data.*
+*Storm King's Thunder campaign with 10 sessions of generated transcript, summary, entity, and quest data.*
 
-### Campaign Dashboard
+https://github.com/user-attachments/assets/PLACEHOLDER
+
+<details>
+<summary>Screenshots</summary>
+
+#### Campaign Dashboard
 ![Campaign Overview](docs/screenshots/campaign-overview.png)
 
-### Session Transcript
-![Session Detail](docs/screenshots/session-detail.png)
-
-### Sessions List
+#### Sessions List
 ![Sessions List](docs/screenshots/sessions-list.png)
 
-### Campaign Timeline
+#### Session Transcript
+![Session Detail](docs/screenshots/session-detail.png)
+
+#### Knowledge Base
+![Knowledge Base](docs/screenshots/knowledge-base.png)
+
+#### Quest Tracker
+![Quest Tracker](docs/screenshots/quest-tracker.png)
+
+#### Campaign Timeline
 ![Timeline](docs/screenshots/timeline.png)
+
+</details>
 
 ## Architecture
 
