@@ -15,6 +15,22 @@ A Discord bot that records D&D voice sessions, transcribes them with whisper.cpp
 - **Telegram Integration** — Capture DM text messages from a Telegram group chat during sessions
 - **Web Panel** — Dark-themed D&D UI for browsing all campaign data
 
+## Screenshots
+
+*Storm King's Thunder demo campaign with 10 sessions of transcript data.*
+
+### Campaign Dashboard
+![Campaign Overview](docs/screenshots/campaign-overview.png)
+
+### Session Transcript
+![Session Detail](docs/screenshots/session-detail.png)
+
+### Sessions List
+![Sessions List](docs/screenshots/sessions-list.png)
+
+### Campaign Timeline
+![Timeline](docs/screenshots/timeline.png)
+
 ## Architecture
 
 - **Go** backend with CGO bindings to whisper.cpp and opus
@@ -86,22 +102,40 @@ The bot will transcribe the audio, generate a summary, extract entities and ques
 
 ## Shared Microphone Support
 
-If two people share a microphone (e.g., the DM and their partner in the same room), the bot can use speaker diarization to separate their voices and attribute transcript segments correctly.
+If two people share a microphone, the bot can use speaker diarization to separate their voices and attribute transcript segments correctly. Any two people can share a mic — neither needs to be the DM.
 
 Uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (pyannote segmentation + speaker embeddings) for diarization. Models are downloaded automatically on first use (~40MB total).
 
 ### Setup
 
-1. Set the DM for your campaign: `/campaign dm`
-2. Configure the shared mic: `/campaign shared-mic user:@DMUser partner-name:Alice`
+Configure the shared mic — the partner can be a Discord user or a named non-Discord person:
+```
+/campaign shared-mic user:@Alice partner:@Bob
+/campaign shared-mic user:@Alice partner-name:Gandalf
+```
 
-That's it. The next time a session is recorded, the bot will automatically:
-- Detect the shared mic user's audio
-- Run speaker diarization to identify two speakers
-- Determine which speaker is the DM (by speaking time — the DM typically narrates more)
-- Attribute each transcript segment to the correct character
+To remove: `/campaign shared-mic user:@Alice` (with no partner options).
 
-The configuration persists across sessions — you only need to set it up once per campaign.
+### Voice Enrollment
+
+The bot automatically enrols each user's voice print during regular sessions. For shared-mic users who never record solo, use the explicit enrol command:
+```
+/campaign enroll                            # enrol yourself
+/campaign enroll user:@Alice                # enrol Alice
+/campaign enroll user:@Alice partner:true   # enrol Alice's shared-mic partner
+                                            # (only the partner should speak)
+```
+
+The bot joins voice, records a 10-second sample, extracts a speaker embedding, and saves it for the campaign. Future shared-mic sessions use these voice prints to identify who is speaking instead of falling back to a speaking-time heuristic.
+
+### Transcription Engine
+
+Two speech-to-text engines are supported:
+
+| Engine | Config | Description |
+|--------|--------|-------------|
+| `whisper` | `engine: "whisper"` | Default. whisper.cpp with selectable model size. |
+| `parakeet` | `engine: "parakeet"` | NVIDIA Parakeet TDT 0.6B v3. Faster on CPU, better quality, 25 European languages. ~465MB model auto-downloaded on first use. |
 
 ## Docker Deployment
 
@@ -189,6 +223,7 @@ Telegram messages from the DM are filtered for relevance (short chatter is exclu
 | `/campaign set` | Set the active campaign |
 | `/campaign dm` | Set the Dungeon Master |
 | `/campaign shared-mic` | Configure a shared microphone (two speakers) |
+| `/campaign enroll` | Record a voice sample for speaker identification |
 | `/campaign telegram-dm` | Set the DM's Telegram user ID |
 | `/campaign recap` | Generate or view the story recap |
 | `/character set` | Set a character name mapping |
