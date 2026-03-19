@@ -335,21 +335,16 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 	merged := transcribe.MergeTranscripts(userSegments, charNames)
 	transcript := transcribe.FormatTranscript(merged)
 
-	// Persist transcript segments.
+	// Persist transcript segments (store only user_id; character names are
+	// resolved from mappings at display time so they stay up to date).
 	var dbSegments []storage.TranscriptSegment
 	for _, seg := range merged {
-		var charPtr *string
-		if seg.CharacterName != "" {
-			c := seg.CharacterName
-			charPtr = &c
-		}
 		dbSegments = append(dbSegments, storage.TranscriptSegment{
-			SessionID:     sessionID,
-			UserID:        seg.UserID,
-			CharacterName: charPtr,
-			StartTime:     seg.StartTime,
-			EndTime:       seg.EndTime,
-			Text:          seg.Text,
+			SessionID: sessionID,
+			UserID:    seg.UserID,
+			StartTime: seg.StartTime,
+			EndTime:   seg.EndTime,
+			Text:      seg.Text,
 		})
 	}
 	if err := b.store.InsertSegments(ctx, dbSegments); err != nil {
