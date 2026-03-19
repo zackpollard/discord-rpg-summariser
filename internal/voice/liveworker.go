@@ -47,6 +47,10 @@ func (w *LiveWorker) Run(ctx context.Context) {
 }
 
 func (w *LiveWorker) processChunk(ctx context.Context, chunk ChunkReady) {
+	log.Printf("Live transcribing chunk for %s (%s): %d samples (%.1fs) at offset %v",
+		chunk.DisplayName, chunk.UserID, len(chunk.Samples),
+		float64(len(chunk.Samples))/48000.0, chunk.StartOffset)
+
 	resampled := audio.ResampleChunk(chunk.Samples)
 	if len(resampled) == 0 {
 		return
@@ -58,6 +62,8 @@ func (w *LiveWorker) processChunk(ctx context.Context, chunk ChunkReady) {
 		log.Printf("Live transcribe error for %s: %v", chunk.UserID, err)
 		return
 	}
+
+	log.Printf("Live transcribed %d segments for %s", len(segments), chunk.DisplayName)
 
 	for _, seg := range segments {
 		evt := TranscriptEvent{

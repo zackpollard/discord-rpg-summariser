@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"discord-rpg-summariser/internal/voice"
 )
@@ -30,11 +31,18 @@ func (s *Server) handleLiveTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worker := s.liveTP.LiveTranscriptWorker()
-	if worker == nil {
-		// No active session; wait until client disconnects, they can reconnect later
-		<-r.Context().Done()
-		return
+	// Poll until a worker becomes available (session starts) or client disconnects.
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	var worker *voice.LiveWorker
+	for worker == nil {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			worker = s.liveTP.LiveTranscriptWorker()
+		}
 	}
 
 	events, unsub := worker.Subscribe()

@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"log"
 	"math"
 	"time"
 )
@@ -73,6 +74,8 @@ func (lb *LiveBuffer) flush() {
 	copy(chunk, lb.buf)
 
 	offset := time.Duration(lb.totalSamples) * time.Second / 48000
+	log.Printf("LiveBuffer flushing %.1fs of audio for %s at offset %v",
+		float64(len(chunk))/48000.0, lb.userID, offset)
 
 	select {
 	case lb.out <- ChunkReady{
