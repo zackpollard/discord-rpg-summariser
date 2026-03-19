@@ -50,12 +50,27 @@ func NewUserStream(userID, outputDir string, daveState *discordgo.ReceiverState)
 	}, nil
 }
 
-func isDAVEFrame(data []byte) bool {
-	if len(data) < 13 || data[len(data)-1] != 0xFA || data[len(data)-2] != 0xFA {
-		return false
+// findDAVEFrame scans the last few bytes of data for the 0xFAFA DAVE trailer.
+// The RTP extension stripping can occasionally leave extra trailing bytes,
+// so we scan rather than only checking the final 2 positions.
+// Returns the trimmed DAVE frame and true, or the original data and false.
+func findDAVEFrame(data []byte) ([]byte, bool) {
+	if len(data) < 13 {
+		return data, false
 	}
-	ss := int(data[len(data)-3])
-	return ss >= 12 && ss < len(data)
+	// Scan the last 8 bytes looking for 0xFA 0xFA with a valid supplementalSize.
+	limit := min(8, len(data)-12)
+	for offset := 0; offset < limit; offset++ {
+		pos := len(data) - 2 - offset
+		if data[pos] == 0xFA && data[pos+1] == 0xFA {
+			ss := int(data[pos-1])
+			if ss >= 12 && ss < pos {
+				// Trim any trailing bytes after the DAVE frame
+				return data[:pos+2], true
+			}
+		}
+	}
+	return data, false
 }
 
 // HandlePacket decodes an Opus packet to PCM, inserts silence for RTP timestamp
@@ -64,29 +79,25 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	opusData := packet.Opus
 
 	// --- DAVE decryption ---
-	if isDAVEFrame(opusData) {
+	daveFrame, isDave := findDAVEFrame(opusData)
+	if isDave {
 		if us.daveState == nil {
 			return nil // no key, skip
 		}
-		decrypted, err := discordgo.DecryptFrame(us.daveState, opusData)
+		decrypted, err := discordgo.DecryptFrame(us.daveState, daveFrame)
 		if err != nil {
-			// Decryption failed — use PLC (packet loss concealment) so the
-			// decoder stays in sync rather than getting garbage.
 			us.decodePLC(packet.Timestamp)
 			return nil
 		}
 		opusData = decrypted
 		us.daveActive = true
 	} else if us.daveActive {
-		// DAVE is active but this packet isn't a DAVE frame — it's either a
-		// pre-transition straggler or a false negative. Never feed encrypted
-		// data to the opus decoder; use PLC instead.
+		// DAVE is active but no trailer found — encrypted data we can't
+		// decode. Use PLC to keep the decoder in sync.
 		us.decodePLC(packet.Timestamp)
 		return nil
 	} else {
-		// DAVE not yet active. Skip everything until we get the first
-		// successful DAVE decrypt to avoid corrupting decoder state.
-		return nil
+		return nil // pre-DAVE, skip
 	}
 
 	// --- Opus decode ---
