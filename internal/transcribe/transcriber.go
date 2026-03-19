@@ -127,7 +127,6 @@ func (t *Transcriber) TranscribeChunk(ctx context.Context, samples []float32, ti
 		return nil, fmt.Errorf("set language: %w", err)
 	}
 	wctx.SetThreads(uint(t.threads))
-	wctx.SetOffset(timeOffset)
 	if prompt != "" {
 		wctx.SetInitialPrompt(prompt)
 	} else {
@@ -138,6 +137,7 @@ func (t *Transcriber) TranscribeChunk(ctx context.Context, samples []float32, ti
 		return nil, fmt.Errorf("whisper process: %w", err)
 	}
 
+	offsetSec := timeOffset.Seconds()
 	var segments []Segment
 	for {
 		seg, err := wctx.NextSegment()
@@ -152,8 +152,8 @@ func (t *Transcriber) TranscribeChunk(ctx context.Context, samples []float32, ti
 			continue
 		}
 		segments = append(segments, Segment{
-			StartTime: seg.Start.Seconds(),
-			EndTime:   seg.End.Seconds(),
+			StartTime: seg.Start.Seconds() + offsetSec,
+			EndTime:   seg.End.Seconds() + offsetSec,
 			Text:      text,
 		})
 	}
