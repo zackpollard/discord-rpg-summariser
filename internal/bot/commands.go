@@ -109,6 +109,19 @@ var commands = []*discordgo.ApplicationCommand{
 					},
 				},
 			},
+			{
+				Name:        "dm",
+				Description: "Set the Dungeon Master for the active campaign",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "user",
+						Description: "The DM (defaults to you)",
+						Type:        discordgo.ApplicationCommandOptionUser,
+						Required:    false,
+					},
+				},
+			},
 		},
 	},
 }

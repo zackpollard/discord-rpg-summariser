@@ -12,5 +12,5 @@ type SummaryResult struct {
 
 // Summariser produces a structured summary from a session transcript.
 type Summariser interface {
-	Summarise(ctx context.Context, transcript string, previousSummary string) (*SummaryResult, error)
+	Summarise(ctx context.Context, transcript string, previousSummary string, dmName string) (*SummaryResult, error)
 }

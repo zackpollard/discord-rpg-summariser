@@ -30,15 +30,21 @@ type ExtractionResult struct {
 
 // EntityExtractor produces structured entity and relationship data from a session transcript.
 type EntityExtractor interface {
-	ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string) (*ExtractionResult, error)
+	ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string) (*ExtractionResult, error)
 }
 
 // BuildExtractionPrompt constructs the LLM prompt for extracting entities and
 // relationships from a session transcript and its summary.
-func BuildExtractionPrompt(transcript, summary string, existingEntities []string) string {
+func BuildExtractionPrompt(transcript, summary string, existingEntities []string, dmName string) string {
 	var b strings.Builder
 
 	b.WriteString("You are an expert lore-keeper for tabletop RPG campaigns (Dungeons & Dragons 5th Edition).\n\n")
+
+	if dmName != "" {
+		b.WriteString("The Dungeon Master is: " + dmName + "\n")
+		b.WriteString("Everything " + dmName + " says is narration, NPC dialogue, or world description — not a player character.\n")
+		b.WriteString("Extract NPCs and lore from the DM's narration. Do NOT create an entity for the DM themselves.\n\n")
+	}
 
 	b.WriteString("Below is a session transcript and its summary. ")
 	b.WriteString("Analyse them carefully and extract all notable entities and their relationships.\n\n")

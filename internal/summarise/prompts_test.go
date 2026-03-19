@@ -8,7 +8,7 @@ import (
 func TestBuildPrompt_WithoutPreviousSummary(t *testing.T) {
 	transcript := "[00:00:05] Thordak: I open the chest.\n[00:00:12] DM: Inside you find a glowing orb."
 
-	prompt := BuildPrompt(transcript, "")
+	prompt := BuildPrompt(transcript, "", "")
 
 	if !strings.Contains(prompt, "Dungeons & Dragons 5th Edition") {
 		t.Error("prompt should mention D&D 5e")
@@ -46,7 +46,7 @@ func TestBuildPrompt_WithPreviousSummary(t *testing.T) {
 	transcript := "[00:00:05] Thordak: I open the chest."
 	previousSummary := "The party defeated a band of goblins and entered the dungeon."
 
-	prompt := BuildPrompt(transcript, previousSummary)
+	prompt := BuildPrompt(transcript, previousSummary, "")
 
 	if !strings.Contains(prompt, "Previously:") {
 		t.Error("prompt should contain 'Previously:' when previous summary is given")
@@ -60,7 +60,7 @@ func TestBuildPrompt_WithPreviousSummary(t *testing.T) {
 }
 
 func TestBuildPrompt_JSONInstruction(t *testing.T) {
-	prompt := BuildPrompt("some transcript", "")
+	prompt := BuildPrompt("some transcript", "", "")
 
 	if !strings.Contains(prompt, "valid JSON") {
 		t.Error("prompt should instruct the model to return valid JSON")

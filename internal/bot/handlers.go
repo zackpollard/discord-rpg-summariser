@@ -57,6 +57,8 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleCampaignList(s, i)
 		case "set":
 			b.handleCampaignSet(s, i)
+		case "dm":
+			b.handleCampaignDM(s, i)
 		}
 	}
 }
@@ -413,6 +415,29 @@ func (b *Bot) handleCampaignSet(s *discordgo.Session, i *discordgo.InteractionCr
 	respond(s, i, fmt.Sprintf("Active campaign set to **%s**.", matched.Name))
 }
 
+func (b *Bot) handleCampaignDM(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		return
+	}
+
+	opts := subcommandOptions(i)
+	dmUserID := interactionUserID(i)
+	if u, ok := opts["user"]; ok {
+		dmUserID = u.UserValue(s).ID
+	}
+
+	if err := b.store.SetCampaignDM(ctx, campaign.ID, dmUserID); err != nil {
+		respondEphemeral(s, i, "Failed to set DM.")
+		log.Printf("SetCampaignDM error: %v", err)
+		return
+	}
+
+	respond(s, i, fmt.Sprintf("<@%s> is now the DM for **%s**.", dmUserID, campaign.Name))
+}
+
 // ---------------------------------------------------------------------------
 // Pipeline
 // ---------------------------------------------------------------------------
@@ -489,10 +514,22 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 		log.Printf("pipeline: InsertSegments: %v", err)
 	}
 
+	// Resolve DM name for the summariser prompt.
+	dmName := ""
+	campaign, _ := b.store.GetCampaign(ctx, session.CampaignID)
+	if campaign != nil && campaign.DMUserID != nil {
+		// Use character name if mapped, otherwise Discord display name
+		if cn, _ := b.store.GetCharacterName(ctx, *campaign.DMUserID, campaign.ID); cn != "" {
+			dmName = cn
+		} else {
+			dmName = b.ResolveUsername(*campaign.DMUserID)
+		}
+	}
+
 	// Summarise.
 	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
 
-	result, err := b.summariser.Summarise(ctx, transcript, "")
+	result, err := b.summariser.Summarise(ctx, transcript, "", dmName)
 	if err != nil {
 		log.Printf("pipeline: summarise: %v", err)
 		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
@@ -510,10 +547,10 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 	b.sendNotification(sessionID, result.Summary)
 
 	// Extract entities for the knowledge base (non-fatal on error).
-	b.extractEntities(ctx, session, sessionID, transcript, result.Summary)
+	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
 }
 
-func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary string) {
+func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary, dmName string) {
 	extractor, ok := b.summariser.(summarise.EntityExtractor)
 	if !ok {
 		return
@@ -525,7 +562,7 @@ func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, ses
 		existingNames = append(existingNames, fmt.Sprintf("%s (%s)", e.Name, e.Type))
 	}
 
-	extraction, err := extractor.ExtractEntities(ctx, transcript, summary, existingNames)
+	extraction, err := extractor.ExtractEntities(ctx, transcript, summary, existingNames, dmName)
 	if err != nil {
 		log.Printf("pipeline: entity extraction: %v", err)
 		return

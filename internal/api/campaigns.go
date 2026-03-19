@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"discord-rpg-summariser/internal/storage"
+
 	"github.com/jackc/pgx/v5"
 )
 
@@ -15,7 +17,16 @@ type campaignResponse struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	IsActive    bool      `json:"is_active"`
+	DMUserID    *string   `json:"dm_user_id"`
 	CreatedAt   time.Time `json:"created_at"`
+}
+
+func toCampaignResponse(c *storage.Campaign) campaignResponse {
+	return campaignResponse{
+		ID: c.ID, GuildID: c.GuildID, Name: c.Name,
+		Description: c.Description, IsActive: c.IsActive,
+		DMUserID: c.DMUserID, CreatedAt: c.CreatedAt,
+	}
 }
 
 type createCampaignRequest struct {
@@ -32,15 +43,7 @@ func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]campaignResponse, len(campaigns))
 	for i := range campaigns {
-		c := &campaigns[i]
-		resp[i] = campaignResponse{
-			ID:          c.ID,
-			GuildID:     c.GuildID,
-			Name:        c.Name,
-			Description: c.Description,
-			IsActive:    c.IsActive,
-			CreatedAt:   c.CreatedAt,
-		}
+		resp[i] = toCampaignResponse(&campaigns[i])
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -70,14 +73,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, campaignResponse{
-		ID:          campaign.ID,
-		GuildID:     campaign.GuildID,
-		Name:        campaign.Name,
-		Description: campaign.Description,
-		IsActive:    campaign.IsActive,
-		CreatedAt:   campaign.CreatedAt,
-	})
+	writeJSON(w, http.StatusCreated, toCampaignResponse(campaign))
 }
 
 func (s *Server) handleGetCampaign(w http.ResponseWriter, r *http.Request) {
@@ -97,14 +93,7 @@ func (s *Server) handleGetCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, campaignResponse{
-		ID:          campaign.ID,
-		GuildID:     campaign.GuildID,
-		Name:        campaign.Name,
-		Description: campaign.Description,
-		IsActive:    campaign.IsActive,
-		CreatedAt:   campaign.CreatedAt,
-	})
+	writeJSON(w, http.StatusOK, toCampaignResponse(campaign))
 }
 
 func (s *Server) handleSetActiveCampaign(w http.ResponseWriter, r *http.Request) {
@@ -125,12 +114,5 @@ func (s *Server) handleSetActiveCampaign(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, campaignResponse{
-		ID:          campaign.ID,
-		GuildID:     campaign.GuildID,
-		Name:        campaign.Name,
-		Description: campaign.Description,
-		IsActive:    campaign.IsActive,
-		CreatedAt:   campaign.CreatedAt,
-	})
+	writeJSON(w, http.StatusOK, toCampaignResponse(campaign))
 }

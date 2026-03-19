@@ -160,6 +160,7 @@ export interface Campaign {
 	name: string;
 	description: string;
 	is_active: boolean;
+	dm_user_id: string | null;
 	created_at: string;
 }
 

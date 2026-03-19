@@ -14,6 +14,7 @@ type Campaign struct {
 	Name        string
 	Description string
 	IsActive    bool
+	DMUserID    *string
 	CreatedAt   time.Time
 }
 
@@ -32,8 +33,8 @@ func (s *Store) CreateCampaign(ctx context.Context, guildID, name, description s
 func (s *Store) GetCampaign(ctx context.Context, id int64) (*Campaign, error) {
 	var c Campaign
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, guild_id, name, description, is_active, created_at FROM campaigns WHERE id = $1`, id,
-	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.CreatedAt)
+		`SELECT id, guild_id, name, description, is_active, dm_user_id, created_at FROM campaigns WHERE id = $1`, id,
+	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +54,7 @@ func (s *Store) ListCampaigns(ctx context.Context, guildID string) ([]Campaign, 
 	var campaigns []Campaign
 	for rows.Next() {
 		var c Campaign
-		if err := rows.Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)
@@ -88,7 +89,7 @@ func (s *Store) GetActiveCampaign(ctx context.Context, guildID string) (*Campaig
 	err := s.Pool.QueryRow(ctx,
 		`SELECT id, guild_id, name, description, is_active, created_at
 		 FROM campaigns WHERE guild_id = $1 AND is_active = true`, guildID,
-	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.CreatedAt)
+	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -96,6 +97,11 @@ func (s *Store) GetActiveCampaign(ctx context.Context, guildID string) (*Campaig
 		return nil, err
 	}
 	return &c, nil
+}
+
+func (s *Store) SetCampaignDM(ctx context.Context, campaignID int64, dmUserID string) error {
+	_, err := s.Pool.Exec(ctx, `UPDATE campaigns SET dm_user_id = $1 WHERE id = $2`, dmUserID, campaignID)
+	return err
 }
 
 // GetOrCreateActiveCampaign returns the active campaign for a guild, creating

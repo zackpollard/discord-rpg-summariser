@@ -19,8 +19,8 @@ func NewClaudeCLI() *ClaudeCLI {
 
 // Summarise runs the claude CLI with the built prompt piped via stdin and
 // parses the JSON response into a SummaryResult.
-func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSummary string) (*SummaryResult, error) {
-	prompt := BuildPrompt(transcript, previousSummary)
+func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSummary string, dmName string) (*SummaryResult, error) {
+	prompt := BuildPrompt(transcript, previousSummary, dmName)
 
 	cmd := exec.CommandContext(ctx, "claude", "--print")
 	cmd.Stdin = strings.NewReader(prompt)
@@ -48,8 +48,8 @@ func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSu
 
 // ExtractEntities runs the claude CLI with the extraction prompt and parses
 // the JSON response into an ExtractionResult.
-func (c *ClaudeCLI) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string) (*ExtractionResult, error) {
-	prompt := BuildExtractionPrompt(transcript, summary, existingEntities)
+func (c *ClaudeCLI) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string) (*ExtractionResult, error) {
+	prompt := BuildExtractionPrompt(transcript, summary, existingEntities, dmName)
 
 	cmd := exec.CommandContext(ctx, "claude", "--print")
 	cmd.Stdin = strings.NewReader(prompt)

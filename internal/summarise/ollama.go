@@ -37,8 +37,8 @@ type ollamaResponse struct {
 }
 
 // Summarise sends the prompt to Ollama and parses the JSON response.
-func (o *Ollama) Summarise(ctx context.Context, transcript string, previousSummary string) (*SummaryResult, error) {
-	prompt := BuildPrompt(transcript, previousSummary)
+func (o *Ollama) Summarise(ctx context.Context, transcript string, previousSummary string, dmName string) (*SummaryResult, error) {
+	prompt := BuildPrompt(transcript, previousSummary, dmName)
 
 	reqBody := ollamaRequest{
 		Model:  o.model,
@@ -87,8 +87,8 @@ func (o *Ollama) Summarise(ctx context.Context, transcript string, previousSumma
 }
 
 // ExtractEntities sends the extraction prompt to Ollama and parses the JSON response.
-func (o *Ollama) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string) (*ExtractionResult, error) {
-	prompt := BuildExtractionPrompt(transcript, summary, existingEntities)
+func (o *Ollama) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string) (*ExtractionResult, error) {
+	prompt := BuildExtractionPrompt(transcript, summary, existingEntities, dmName)
 
 	reqBody := ollamaRequest{
 		Model:  o.model,
