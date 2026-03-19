@@ -185,6 +185,13 @@ func (v *VoiceConnection) Kill() {
 	v.log(LogInformational, "done")
 }
 
+// DAVESession returns the DAVE E2EE session, or nil if not active.
+func (v *VoiceConnection) DAVESession() *DAVESession {
+	v.Cond.L.Lock()
+	defer v.Cond.L.Unlock()
+	return v.dave
+}
+
 // AddHandler adds a Handler for VoiceSpeakingUpdate events.
 func (v *VoiceConnection) AddHandler(h VoiceSpeakingUpdateHandler) {
 	v.Cond.L.Lock()

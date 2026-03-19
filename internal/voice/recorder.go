@@ -78,7 +78,20 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 		return
 	}
 
-	us, err := NewUserStream(userID, r.outputDir)
+	// Derive DAVE decryption key for this sender
+	var daveState *discordgo.ReceiverState
+	dave := vc.DAVESession()
+	if dave != nil {
+		rs, err := dave.DeriveReceiverKey(userID)
+		if err != nil {
+			log.Printf("Warning: failed to derive DAVE key for user %s: %v", userID, err)
+		} else {
+			daveState = rs
+			log.Printf("Derived DAVE receiver key for user %s", userID)
+		}
+	}
+
+	us, err := NewUserStream(userID, r.outputDir, daveState)
 	if err != nil {
 		log.Printf("Failed to create stream for user %s: %v", userID, err)
 		return

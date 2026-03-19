@@ -1,6 +1,7 @@
 package discordgo
 
 import (
+	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
 	"fmt"
@@ -242,6 +243,131 @@ func (d *DAVESession) CanEncrypt() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.frameCipher != nil
+}
+
+// ReceiverState tracks decryption state for a single remote sender.
+type ReceiverState struct {
+	baseSecret []byte
+	currentGen uint32
+	cipher     cipher.AEAD
+}
+
+// DeriveReceiverKey derives the DAVE decryption key for a remote sender.
+// Returns a ReceiverState that can be used to decrypt their frames.
+func (d *DAVESession) DeriveReceiverKey(senderUserID string) (*ReceiverState, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.exporterSecret == nil {
+		return nil, fmt.Errorf("no exporter secret")
+	}
+
+	userIDNum, err := strconv.ParseUint(senderUserID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parsing sender user ID: %w", err)
+	}
+	context := make([]byte, 8)
+	binary.LittleEndian.PutUint64(context, userIDNum)
+
+	baseSecret, err := mls.Export(d.exporterSecret, daveExportLabel, context, daveKeySize)
+	if err != nil {
+		return nil, fmt.Errorf("exporting receiver base secret: %w", err)
+	}
+
+	key, err := hashRatchetGetKey(baseSecret, 0)
+	if err != nil {
+		return nil, fmt.Errorf("deriving initial receiver key: %w", err)
+	}
+
+	frameCipher, err := newDAVECipherWithTagSize(key, daveTagSize)
+	if err != nil {
+		return nil, fmt.Errorf("creating receiver cipher: %w", err)
+	}
+
+	return &ReceiverState{
+		baseSecret: baseSecret,
+		currentGen: 0,
+		cipher:     frameCipher,
+	}, nil
+}
+
+// DecryptFrame decrypts a DAVE secure frame using the given receiver state.
+// The input should be the raw DAVE frame (with 0xFAFA trailer).
+func DecryptFrame(rs *ReceiverState, data []byte) ([]byte, error) {
+	if len(data) < 13 { // minimum: 1 byte data + 8 tag + 1 nonce + 1 size + 2 magic
+		return nil, fmt.Errorf("frame too short: %d bytes", len(data))
+	}
+
+	// Verify magic trailer
+	if data[len(data)-1] != 0xFA || data[len(data)-2] != 0xFA {
+		return nil, fmt.Errorf("not a DAVE frame (no 0xFAFA trailer)")
+	}
+
+	// Read supplemental size
+	supplementalSize := int(data[len(data)-3])
+	if supplementalSize >= len(data) || supplementalSize < 12 {
+		return nil, fmt.Errorf("invalid supplemental size: %d", supplementalSize)
+	}
+
+	// Extract components
+	ciphertextEnd := len(data) - supplementalSize
+	ciphertext := data[:ciphertextEnd]
+	tag := data[ciphertextEnd : ciphertextEnd+daveTagSize]
+
+	// Read nonce (ULEB128 encoded between tag and supplementalSize byte)
+	nonceStart := ciphertextEnd + daveTagSize
+	nonceEnd := len(data) - 3 // before supplementalSize byte and magic
+	nonce := decodeULEB128(data[nonceStart:nonceEnd])
+
+	// Check if we need to ratchet the key
+	generation := nonce >> 24
+	if generation != rs.currentGen {
+		key, err := hashRatchetGetKey(rs.baseSecret, generation)
+		if err != nil {
+			return nil, fmt.Errorf("ratcheting to generation %d: %w", generation, err)
+		}
+		frameCipher, err := newDAVECipherWithTagSize(key, daveTagSize)
+		if err != nil {
+			return nil, fmt.Errorf("creating cipher for generation %d: %w", generation, err)
+		}
+		rs.cipher = frameCipher
+		rs.currentGen = generation
+	}
+
+	// Build sealed data (ciphertext + tag) for cipher.Open
+	sealed := make([]byte, len(ciphertext)+daveTagSize)
+	copy(sealed, ciphertext)
+	copy(sealed[len(ciphertext):], tag)
+
+	// Decrypt
+	fullNonce := buildNonce(nonce)
+	plaintext, err := rs.cipher.Open(nil, fullNonce, sealed, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt: %w", err)
+	}
+
+	return plaintext, nil
+}
+
+func decodeULEB128(data []byte) uint32 {
+	var result uint32
+	var shift uint
+	for _, b := range data {
+		result |= uint32(b&0x7F) << shift
+		if b&0x80 == 0 {
+			break
+		}
+		shift += 7
+	}
+	return result
+}
+
+func newDAVECipherWithTagSize(key []byte, tagSize int) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCMWithTagSize(block, tagSize)
 }
 
 func (d *DAVESession) Reset() {
