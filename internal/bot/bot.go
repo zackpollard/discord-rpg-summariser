@@ -36,6 +36,17 @@ type Bot struct {
 	sessionID int64
 }
 
+// VoiceActivity returns current voice activity. Nil if not recording.
+func (b *Bot) VoiceActivity() []voice.UserActivity {
+	b.mu.Lock()
+	rec := b.recorder
+	b.mu.Unlock()
+	if rec == nil {
+		return nil
+	}
+	return rec.Activity()
+}
+
 // NewBot creates a new Bot with the given dependencies. The Discord session is
 // created but not yet opened; call Start to connect.
 func NewBot(cfg *config.Config, store *storage.Store, transcriber *transcribe.Transcriber, summariser summarise.Summariser) (*Bot, error) {

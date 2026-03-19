@@ -9,12 +9,19 @@ import (
 	"strings"
 
 	"discord-rpg-summariser/internal/storage"
+	"discord-rpg-summariser/internal/voice"
 )
+
+// VoiceActivityProvider supplies live voice activity data. Implemented by *bot.Bot.
+type VoiceActivityProvider interface {
+	VoiceActivity() []voice.UserActivity
+}
 
 type Server struct {
 	store      *storage.Store
 	listenAddr string
 	guildID    string
+	voiceAP    VoiceActivityProvider
 	mux        *http.ServeMux
 	httpServer *http.Server
 }
@@ -38,6 +45,11 @@ func NewServer(store *storage.Store, listenAddr, guildID, webDir string) *Server
 	return s
 }
 
+// SetVoiceActivityProvider sets the provider for live voice activity data.
+func (s *Server) SetVoiceActivityProvider(vap VoiceActivityProvider) {
+	s.voiceAP = vap
+}
+
 func (s *Server) Start() error {
 	log.Printf("API server listening on %s", s.listenAddr)
 	return s.httpServer.ListenAndServe()
@@ -48,8 +60,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 // setupSPA configures static file serving from the Svelte build directory.
-// For any request not matching /api/* and not matching a real static file,
-// it serves index.html for SPA client-side routing.
 func (s *Server) setupSPA(webDir string) {
 	if webDir == "" {
 		return
@@ -59,26 +69,22 @@ func (s *Server) setupSPA(webDir string) {
 	fileServer := http.FileServerFS(staticFS)
 
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Don't handle API routes here.
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
 			return
 		}
 
-		// Try to serve the static file directly.
 		path := r.URL.Path
 		if path == "/" {
 			path = "/index.html"
 		}
 
-		// Check if the file exists in the webDir.
 		cleaned := strings.TrimPrefix(path, "/")
 		if _, err := fs.Stat(staticFS, cleaned); err == nil {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
 
-		// SPA fallback: serve index.html for all unmatched routes.
 		indexData, err := fs.ReadFile(staticFS, "index.html")
 		if err != nil {
 			http.NotFound(w, r)
@@ -89,8 +95,6 @@ func (s *Server) setupSPA(webDir string) {
 	})
 }
 
-// corsMiddleware adds CORS headers for localhost origins and sets
-// JSON content-type for /api/ routes.
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -105,7 +109,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasSuffix(r.URL.Path, "/voice-activity") {
 			w.Header().Set("Content-Type", "application/json")
 		}
 

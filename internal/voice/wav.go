@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 const (
@@ -23,6 +24,9 @@ type WAVWriter struct {
 
 // NewWAVWriter creates a new WAV file at path and writes a placeholder header.
 func NewWAVWriter(path string) (*WAVWriter, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create audio directory: %w", err)
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return nil, fmt.Errorf("create wav file: %w", err)

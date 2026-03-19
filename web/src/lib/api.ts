@@ -89,3 +89,27 @@ export async function deleteCharacter(userId: string): Promise<void> {
 export async function fetchStatus(): Promise<Status> {
 	return request<Status>('/api/status');
 }
+
+export interface VoiceUser {
+	user_id: string;
+	speaking: boolean;
+	packet_count: number;
+	last_packet_at: string;
+}
+
+export function subscribeVoiceActivity(
+	onUpdate: (users: VoiceUser[]) => void,
+	onError?: (err: Event) => void
+): () => void {
+	const source = new EventSource('/api/voice-activity');
+	source.onmessage = (event) => {
+		try {
+			const users: VoiceUser[] = JSON.parse(event.data);
+			onUpdate(users);
+		} catch {
+			// ignore parse errors
+		}
+	};
+	if (onError) source.onerror = onError;
+	return () => source.close();
+}

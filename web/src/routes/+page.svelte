@@ -1,20 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { fetchStatus, fetchSessions, type Status, type Session } from '$lib/api';
+	import { fetchStatus, fetchSessions, subscribeVoiceActivity, type Status, type Session, type VoiceUser } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 
 	let status = $state<Status | null>(null);
 	let sessions = $state<Session[]>([]);
+	let voiceUsers = $state<VoiceUser[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
 	let pollTimer: ReturnType<typeof setInterval> | undefined;
+	let unsubVoice: (() => void) | undefined;
 
 	async function loadStatus() {
 		try {
 			status = await fetchStatus();
 		} catch (e) {
-			// status poll failure is non-fatal
 			console.warn('Failed to fetch status:', e);
 		}
 	}
@@ -43,11 +44,21 @@
 		});
 	}
 
+	function formatPackets(count: number): string {
+		if (count > 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+		if (count > 1000) return `${(count / 1000).toFixed(1)}k`;
+		return String(count);
+	}
+
 	onMount(() => {
 		loadData();
 		pollTimer = setInterval(loadStatus, 5000);
+		unsubVoice = subscribeVoiceActivity((users) => {
+			voiceUsers = users;
+		});
 		return () => {
 			if (pollTimer) clearInterval(pollTimer);
+			if (unsubVoice) unsubVoice();
 		};
 	});
 </script>
@@ -80,6 +91,21 @@
 			<p class="muted">Unable to fetch status</p>
 		{/if}
 	</section>
+
+	{#if voiceUsers.length > 0}
+		<section class="voice-card">
+			<h2>Voice Channel</h2>
+			<div class="voice-list">
+				{#each voiceUsers as user (user.user_id)}
+					<div class="voice-user" class:speaking={user.speaking}>
+						<span class="voice-dot" class:active={user.speaking}></span>
+						<span class="voice-name">{user.user_id}</span>
+						<span class="voice-packets">{formatPackets(user.packet_count)} pkts</span>
+					</div>
+				{/each}
+			</div>
+		</section>
+	{/if}
 
 	<section class="recent-section">
 		<div class="section-header">
@@ -120,14 +146,14 @@
 		font-size: 1.5rem;
 	}
 
-	.status-card {
+	.status-card, .voice-card {
 		background: var(--bg-surface);
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
 		padding: 1.25rem;
 		margin-bottom: 1.5rem;
 	}
-	.status-card h2 {
+	.status-card h2, .voice-card h2 {
 		font-size: 1rem;
 		color: var(--text-secondary);
 		margin-bottom: 0.75rem;
@@ -166,6 +192,49 @@
 	.active-session p {
 		color: var(--text-secondary);
 		margin-bottom: 0.25rem;
+	}
+
+	.voice-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.voice-user {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.5rem 0.75rem;
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		transition: border-color 0.15s, box-shadow 0.15s;
+	}
+	.voice-user.speaking {
+		border-color: #22c55e;
+		box-shadow: inset 0 0 12px rgba(34, 197, 94, 0.08);
+	}
+	.voice-dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #525252;
+		flex-shrink: 0;
+		transition: background 0.15s, box-shadow 0.15s;
+	}
+	.voice-dot.active {
+		background: #22c55e;
+		box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+	}
+	.voice-name {
+		color: var(--text-primary);
+		font-family: monospace;
+		font-size: 0.85rem;
+		flex: 1;
+	}
+	.voice-packets {
+		color: var(--text-muted);
+		font-size: 0.75rem;
+		font-family: monospace;
 	}
 
 	.recent-section {

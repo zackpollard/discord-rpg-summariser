@@ -59,17 +59,20 @@ func main() {
 	}
 
 	srv := api.NewServer(store, cfg.Web.ListenAddr, cfg.Discord.GuildID, webDir)
+
+	discordBot, err := bot.NewBot(cfg, store, transcriber, sum)
+	if err != nil {
+		log.Fatalf("Failed to create bot: %v", err)
+	}
+
+	srv.SetVoiceActivityProvider(discordBot)
+
 	go func() {
 		log.Printf("API server listening on %s", cfg.Web.ListenAddr)
 		if err := srv.Start(); err != nil {
 			log.Printf("API server error: %v", err)
 		}
 	}()
-
-	discordBot, err := bot.NewBot(cfg, store, transcriber, sum)
-	if err != nil {
-		log.Fatalf("Failed to create bot: %v", err)
-	}
 
 	if err := discordBot.Start(); err != nil {
 		log.Fatalf("Failed to start bot: %v", err)
