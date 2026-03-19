@@ -65,13 +65,20 @@ func findDAVEFrame(data []byte) ([]byte, bool) {
 		pos := len(data) - 2 - offset
 		if data[pos] == 0xFA && data[pos+1] == 0xFA {
 			ss := int(data[pos-1])
-			if ss >= 12 && ss < pos {
-				// Trim any trailing bytes after the DAVE frame
-				return data[:pos+2], true
+			frameLen := pos + 2
+			ciphertextLen := frameLen - ss
+			if ss >= 12 && ciphertextLen >= 1 {
+				return data[:frameLen], true
 			}
 		}
 	}
 	return data, false
+}
+
+// isOpusSilence checks if a packet is a raw (unencrypted) opus silence/DTX frame.
+// Discord sends these even during active DAVE sessions.
+func isOpusSilence(data []byte) bool {
+	return len(data) <= 3 && len(data) > 0 && data[0] == 0xF8
 }
 
 // HandlePacket decodes an Opus packet to PCM, inserts silence for RTP timestamp
@@ -95,11 +102,16 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 		opusData = decrypted
 		us.daveActive = true
 	} else if us.daveActive {
-		last4 := opusData[max(0, len(opusData)-4):]
-		log.Printf("Lost packet for %s (seq=%d, %d bytes, last4=%x) — no DAVE trailer found, using PLC",
-			us.userID, packet.Sequence, len(opusData), last4)
-		us.decodePLC(packet.Timestamp)
-		return nil
+		if isOpusSilence(opusData) {
+			// Raw unencrypted silence frame from Discord — decode directly
+			// to keep decoder state clean.
+		} else {
+			last4 := opusData[max(0, len(opusData)-4):]
+			log.Printf("Lost packet for %s (seq=%d, %d bytes, last4=%x) — no DAVE trailer found, using PLC",
+				us.userID, packet.Sequence, len(opusData), last4)
+			us.decodePLC(packet.Timestamp)
+			return nil
+		}
 	} else {
 		return nil // pre-DAVE, skip
 	}
