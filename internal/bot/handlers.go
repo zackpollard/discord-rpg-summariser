@@ -126,7 +126,7 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	}
 
 	// Join voice channel.
-	vc, err := s.ChannelVoiceJoin(guildID, userVoiceChannelID, false, false)
+	vc, err := s.ChannelVoiceJoin(ctx, guildID, userVoiceChannelID, false, false)
 	if err != nil {
 		respondEphemeral(s, i, "Failed to join your voice channel.")
 		log.Printf("VoiceJoin error: %v", err)
@@ -138,6 +138,7 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 
 	b.mu.Lock()
 	b.activeVC = vc
+	b.activeChannelID = userVoiceChannelID
 	b.recorder = rec
 	b.sessionID = sessionID
 	b.mu.Unlock()

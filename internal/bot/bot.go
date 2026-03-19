@@ -23,9 +23,10 @@ type Bot struct {
 	recorder    *voice.Recorder
 	transcriber *transcribe.Transcriber
 	summariser  summarise.Summariser
-	activeVC    *discordgo.VoiceConnection
-	mu          sync.Mutex
-	webBaseURL  string
+	activeVC        *discordgo.VoiceConnection
+	activeChannelID string // voice channel the bot is currently in
+	mu              sync.Mutex
+	webBaseURL      string
 
 	// registeredCmds holds the IDs of registered slash commands so they can
 	// be removed on shutdown.
@@ -96,7 +97,7 @@ func (b *Bot) Stop() error {
 		b.recorder = nil
 	}
 	if b.activeVC != nil {
-		if err := b.activeVC.Disconnect(); err != nil {
+		if err := b.activeVC.Disconnect(context.Background()); err != nil {
 			log.Printf("Error disconnecting voice during shutdown: %v", err)
 		}
 		b.activeVC = nil
@@ -131,6 +132,7 @@ func (b *Bot) RegisterCommands() error {
 func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceStateUpdate) {
 	b.mu.Lock()
 	vc := b.activeVC
+	channelID := b.activeChannelID
 	b.mu.Unlock()
 
 	if vc == nil {
@@ -144,11 +146,11 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 
 	// A user left our channel (their old channel was ours and they either
 	// disconnected or moved elsewhere).
-	if vsu.BeforeUpdate == nil || vsu.BeforeUpdate.ChannelID != vc.ChannelID {
+	if vsu.BeforeUpdate == nil || vsu.BeforeUpdate.ChannelID != channelID {
 		return
 	}
 	// They stayed in the same channel, nothing changed for us.
-	if vsu.ChannelID == vc.ChannelID {
+	if vsu.ChannelID == channelID {
 		return
 	}
 
@@ -161,7 +163,7 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 
 	botUserID := s.State.User.ID
 	for _, vs := range guild.VoiceStates {
-		if vs.ChannelID != vc.ChannelID {
+		if vs.ChannelID != channelID {
 			continue
 		}
 		if vs.UserID == botUserID {
@@ -203,11 +205,12 @@ func (b *Bot) stopRecording() map[string]string {
 		b.recorder = nil
 	}
 	if b.activeVC != nil {
-		if err := b.activeVC.Disconnect(); err != nil {
+		if err := b.activeVC.Disconnect(context.Background()); err != nil {
 			log.Printf("Error disconnecting from voice: %v", err)
 		}
 		b.activeVC = nil
 	}
+	b.activeChannelID = ""
 	b.sessionID = 0
 
 	return userFiles
