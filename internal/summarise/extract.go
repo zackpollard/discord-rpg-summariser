@@ -30,12 +30,12 @@ type ExtractionResult struct {
 
 // EntityExtractor produces structured entity and relationship data from a session transcript.
 type EntityExtractor interface {
-	ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string) (*ExtractionResult, error)
+	ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string, playerCharacters []string) (*ExtractionResult, error)
 }
 
 // BuildExtractionPrompt constructs the LLM prompt for extracting entities and
 // relationships from a session transcript and its summary.
-func BuildExtractionPrompt(transcript, summary string, existingEntities []string, dmName string) string {
+func BuildExtractionPrompt(transcript, summary string, existingEntities []string, dmName string, playerCharacters []string) string {
 	var b strings.Builder
 
 	b.WriteString("You are an expert lore-keeper for tabletop RPG campaigns (Dungeons & Dragons 5th Edition).\n\n")
@@ -49,8 +49,17 @@ func BuildExtractionPrompt(transcript, summary string, existingEntities []string
 	b.WriteString("Below is a session transcript and its summary. ")
 	b.WriteString("Analyse them carefully and extract all notable entities and their relationships.\n\n")
 
+	if len(playerCharacters) > 0 {
+		b.WriteString("The following are PLAYER CHARACTERS — do NOT extract them as entities (they are not NPCs):\n")
+		for _, name := range playerCharacters {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
+		b.WriteByte('\n')
+	}
+
 	b.WriteString("Guidelines:\n")
 	b.WriteString("- Extract NPCs, places, organisations, items, and events mentioned in the session.\n")
+	b.WriteString("- Do NOT extract player characters as NPCs.\n")
 	b.WriteString("- Use character names, not player names.\n")
 	b.WriteString("- For each entity, write a concise description (what it IS) and notes (what happened THIS session).\n")
 	b.WriteString("- Identify relationships between entities: allied_with, enemy_of, located_in, member_of, owns, related_to.\n")

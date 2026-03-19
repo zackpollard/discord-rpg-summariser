@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -66,6 +67,8 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleCampaignRecap(s, i)
 		case "shared-mic":
 			b.handleCampaignSharedMic(s, i)
+		case "enroll":
+			b.handleCampaignEnroll(s, i)
 		case "telegram-dm":
 			b.handleCampaignTelegramDM(s, i)
 		}
@@ -487,35 +490,247 @@ func (b *Bot) handleCampaignSharedMic(s *discordgo.Session, i *discordgo.Interac
 		return
 	}
 
-	if campaign.DMUserID == nil {
-		respondEphemeral(s, i, "Set the DM first with `/campaign dm` before configuring shared mic.")
+	opts := subcommandOptions(i)
+	micUser := opts["user"].UserValue(s)
+	partnerOpt, hasPartner := opts["partner"]
+	partnerNameOpt, hasPartnerName := opts["partner-name"]
+
+	// Neither provided → remove shared mic config.
+	if !hasPartner && !hasPartnerName {
+		if err := b.store.DeleteSharedMic(ctx, campaign.ID, micUser.ID); err != nil {
+			respondEphemeral(s, i, "Failed to remove shared mic config.")
+			log.Printf("DeleteSharedMic error: %v", err)
+			return
+		}
+		respond(s, i, fmt.Sprintf("Shared mic config removed for <@%s>.", micUser.ID))
 		return
 	}
 
-	opts := subcommandOptions(i)
-	micUser := opts["user"].UserValue(s)
-	partnerName := opts["partner-name"].StringValue()
+	// Both provided → error.
+	if hasPartner && hasPartnerName {
+		respondEphemeral(s, i, "Provide either `partner` (Discord user) or `partner-name` (text), not both.")
+		return
+	}
 
-	partnerID := storage.SyntheticPartnerID(micUser.ID)
+	var partnerID string
+	var displayMsg string
 
-	// Save the shared mic mapping.
-	if err := b.store.SetSharedMic(ctx, campaign.ID, micUser.ID, *campaign.DMUserID, partnerID); err != nil {
+	if hasPartner {
+		// Partner is a real Discord user.
+		partner := partnerOpt.UserValue(s)
+		partnerID = partner.ID
+		displayMsg = fmt.Sprintf("Shared mic configured: <@%s>'s audio will be split between <@%s> and <@%s>.", micUser.ID, micUser.ID, partner.ID)
+	} else {
+		// Partner is a non-Discord person — use synthetic ID and auto-create character mapping.
+		partnerName := partnerNameOpt.StringValue()
+		partnerID = storage.SyntheticPartnerID(micUser.ID)
+		if err := b.store.SetCharacterMapping(ctx, storage.CharacterMapping{
+			UserID:        partnerID,
+			GuildID:       i.GuildID,
+			CampaignID:    campaign.ID,
+			CharacterName: partnerName,
+		}); err != nil {
+			log.Printf("SetCharacterMapping for partner error: %v", err)
+		}
+		displayMsg = fmt.Sprintf("Shared mic configured: <@%s>'s audio will be split between <@%s> and **%s**.", micUser.ID, micUser.ID, partnerName)
+	}
+
+	if err := b.store.SetSharedMic(ctx, campaign.ID, micUser.ID, partnerID); err != nil {
 		respondEphemeral(s, i, "Failed to save shared mic config.")
 		log.Printf("SetSharedMic error: %v", err)
 		return
 	}
 
-	// Auto-create character mapping for the partner.
-	if err := b.store.SetCharacterMapping(ctx, storage.CharacterMapping{
-		UserID:        partnerID,
-		GuildID:       i.GuildID,
-		CampaignID:    campaign.ID,
-		CharacterName: partnerName,
-	}); err != nil {
-		log.Printf("SetCharacterMapping for partner error: %v", err)
+	respond(s, i, displayMsg)
+}
+
+// ---------------------------------------------------------------------------
+// Voice enrollment
+// ---------------------------------------------------------------------------
+
+const enrollDuration = 10 * time.Second
+
+func (b *Bot) handleCampaignEnroll(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		return
 	}
 
-	respond(s, i, fmt.Sprintf("Shared mic configured: <@%s>'s audio will be split between the DM and **%s**.", micUser.ID, partnerName))
+	opts := subcommandOptions(i)
+
+	// Determine the Discord user whose mic we'll record from.
+	micUserID := interactionUserID(i)
+	if u, ok := opts["user"]; ok {
+		micUserID = u.UserValue(s).ID
+	}
+
+	// If partner flag is set, enroll the shared-mic partner instead of the
+	// mic owner. The partner must be the only one speaking during the sample.
+	enrollPartner := false
+	if p, ok := opts["partner"]; ok {
+		enrollPartner = p.BoolValue()
+	}
+
+	// Resolve who we're saving the enrollment for.
+	enrollUserID := micUserID
+	if enrollPartner {
+		// Look up the shared mic config to find the partner's ID.
+		mic, err := b.store.GetSharedMics(ctx, campaign.ID)
+		if err != nil {
+			respondEphemeral(s, i, "Failed to load shared mic config.")
+			return
+		}
+		var found bool
+		for _, m := range mic {
+			if m.DiscordUserID == micUserID {
+				enrollUserID = m.PartnerUserID
+				found = true
+				break
+			}
+		}
+		if !found {
+			respondEphemeral(s, i, fmt.Sprintf("No shared mic configured for <@%s>. Set one up with `/campaign shared-mic` first.", micUserID))
+			return
+		}
+	}
+
+	// Ensure no session is active (would conflict with the recorder).
+	b.mu.Lock()
+	if b.recorder != nil {
+		b.mu.Unlock()
+		respondEphemeral(s, i, "A recording session is active. Enrollment will happen automatically when it ends.")
+		return
+	}
+	b.mu.Unlock()
+
+	// Ensure the diarizer (and its embedding extractor) is available.
+	d := b.getDiarizer()
+	if d == nil {
+		respondEphemeral(s, i, "Speaker embedding models are not available.")
+		return
+	}
+
+	// Find the mic user's voice channel.
+	guild, err := s.State.Guild(i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to look up server information.")
+		return
+	}
+	var voiceChannelID string
+	for _, vs := range guild.VoiceStates {
+		if vs.UserID == micUserID {
+			voiceChannelID = vs.ChannelID
+			break
+		}
+	}
+	if voiceChannelID == "" {
+		respondEphemeral(s, i, fmt.Sprintf("<@%s> must be in a voice channel.", micUserID))
+		return
+	}
+
+	// Defer the response — enrollment takes ~10 seconds.
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+
+	// Run enrollment in the background.
+	go b.runEnrollment(s, i, campaign.ID, micUserID, enrollUserID, enrollPartner, voiceChannelID)
+}
+
+func (b *Bot) runEnrollment(s *discordgo.Session, i *discordgo.InteractionCreate, campaignID int64, micUserID, enrollUserID string, isPartner bool, voiceChannelID string) {
+	ctx := context.Background()
+
+	// Create a temporary directory for the WAV file.
+	tmpDir, err := os.MkdirTemp("", "enroll-*")
+	if err != nil {
+		b.enrollFollowup(s, i, "Failed to create temporary directory.")
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Join voice channel.
+	vc, err := s.ChannelVoiceJoin(ctx, i.GuildID, voiceChannelID, false, false)
+	if err != nil {
+		b.enrollFollowup(s, i, "Failed to join voice channel.")
+		return
+	}
+
+	// Record for the enrollment duration.
+	rec := voice.NewRecorder(tmpDir, i.GuildID, nil)
+	rec.Start(vc, func(userID string) string {
+		member, err := s.GuildMember(i.GuildID, userID)
+		if err != nil {
+			return userID
+		}
+		if member.Nick != "" {
+			return member.Nick
+		}
+		if member.User != nil {
+			if member.User.GlobalName != "" {
+				return member.User.GlobalName
+			}
+			return member.User.Username
+		}
+		return userID
+	})
+
+	time.Sleep(enrollDuration)
+
+	if err := rec.Stop(); err != nil {
+		log.Printf("enroll: stop recorder: %v", err)
+	}
+	if err := vc.Disconnect(ctx); err != nil {
+		log.Printf("enroll: disconnect: %v", err)
+	}
+
+	// Find the mic user's WAV file (audio comes from their Discord account).
+	userFiles := rec.UserFiles()
+	wavPath, ok := userFiles[micUserID]
+	if !ok {
+		who := fmt.Sprintf("<@%s>", micUserID)
+		if isPartner {
+			who = "The partner"
+		}
+		b.enrollFollowup(s, i, fmt.Sprintf("%s did not speak during the enrollment window. Please try again and make sure to talk.", who))
+		return
+	}
+
+	// Resample and extract embedding.
+	samples, err := audio.LoadAndResample(wavPath)
+	if err != nil {
+		b.enrollFollowup(s, i, "Failed to process audio.")
+		log.Printf("enroll: resample: %v", err)
+		return
+	}
+
+	d := b.getDiarizer()
+	embedding, err := d.ExtractEmbedding(samples)
+	if err != nil {
+		b.enrollFollowup(s, i, "Failed to extract voice embedding (was there enough speech?).")
+		log.Printf("enroll: extract embedding: %v", err)
+		return
+	}
+
+	// Persist the enrollment under the correct user ID.
+	if err := b.store.UpsertSpeakerEnrollment(ctx, campaignID, enrollUserID, embedding); err != nil {
+		b.enrollFollowup(s, i, "Failed to save voice enrollment.")
+		log.Printf("enroll: save: %v", err)
+		return
+	}
+
+	if isPartner {
+		b.enrollFollowup(s, i, fmt.Sprintf("Voice enrollment saved for <@%s>'s shared-mic partner. Their voice will now be used for speaker identification.", micUserID))
+	} else {
+		b.enrollFollowup(s, i, fmt.Sprintf("Voice enrollment saved for <@%s>. Shared mic sessions will now use this to identify their voice.", enrollUserID))
+	}
+}
+
+func (b *Bot) enrollFollowup(s *discordgo.Session, i *discordgo.InteractionCreate, msg string) {
+	s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Content: msg,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -574,6 +789,29 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 		b.sendNotification(sessionID, "Transcription failed for all users.")
 		return
+	}
+
+	// Auto-enroll voice embeddings for non-shared-mic users so future
+	// shared-mic sessions can identify speakers by voice.
+	if d := b.getDiarizer(); d != nil {
+		for userID, wavPath := range userFiles {
+			if _, ok := sharedMicMap[userID]; ok {
+				continue
+			}
+			samples, err := audio.LoadAndResample(wavPath)
+			if err != nil {
+				continue
+			}
+			embedding, err := d.ExtractEmbedding(samples)
+			if err != nil {
+				log.Printf("pipeline: auto-enroll %s: %v", userID, err)
+				continue
+			}
+			if err := b.store.UpsertSpeakerEnrollment(ctx, session.CampaignID, userID, embedding); err != nil {
+				log.Printf("pipeline: save enrollment %s: %v", userID, err)
+			}
+		}
+		log.Printf("pipeline: auto-enrolled voice embeddings for %d user(s)", len(userFiles)-len(sharedMicMap))
 	}
 
 	// Resolve character names.
@@ -735,7 +973,7 @@ func (b *Bot) transcribeSharedMic(ctx context.Context, wavPath string, mic stora
 			log.Printf("pipeline: transcribe shared mic user %s: %v", mic.DiscordUserID, err)
 			return
 		}
-		userSegments[mic.SpeakerAUserID] = segments
+		userSegments[mic.DiscordUserID] = segments
 		return
 	}
 
@@ -753,29 +991,63 @@ func (b *Bot) transcribeSharedMic(ctx context.Context, wavPath string, mic stora
 		// Fall back to single speaker.
 		segments, _ := b.transcriber.TranscribeFile(ctx, wavPath)
 		if segments != nil {
-			userSegments[mic.SpeakerAUserID] = segments
+			userSegments[mic.DiscordUserID] = segments
 		}
 		return
 	}
 
-	// Identify which diarized speaker is the DM (most speaking time).
-	dmSpeakerID := diarize.IdentifyDMSpeaker(diarSegments)
-	log.Printf("pipeline: diarized %s: %d segments, DM is speaker %d", mic.DiscordUserID, len(diarSegments), dmSpeakerID)
+	// Try to identify speakers using enrolled voice embeddings.
+	primarySpeaker := -1
+	speakers := diarize.UniqueSpeakers(diarSegments)
+	if len(speakers) == 2 {
+		micOwnerEnroll, _ := b.store.GetSpeakerEnrollment(ctx, mic.CampaignID, mic.DiscordUserID)
+		partnerEnroll, _ := b.store.GetSpeakerEnrollment(ctx, mic.CampaignID, mic.PartnerUserID)
 
-	// Transcribe the full audio with whisper.
+		if micOwnerEnroll != nil || partnerEnroll != nil {
+			spk0Audio := diarize.ExtractSpeakerAudio(samples, diarSegments, speakers[0])
+			spk1Audio := diarize.ExtractSpeakerAudio(samples, diarSegments, speakers[1])
+			emb0, err0 := d.ExtractEmbedding(spk0Audio)
+			emb1, err1 := d.ExtractEmbedding(spk1Audio)
+
+			if err0 == nil && err1 == nil {
+				var ownerEmb, partnerEmb []float32
+				if micOwnerEnroll != nil {
+					ownerEmb = micOwnerEnroll.Embedding
+				}
+				if partnerEnroll != nil {
+					partnerEmb = partnerEnroll.Embedding
+				}
+				primarySpeaker = diarize.IdentifySpeakerByEmbedding(emb0, emb1, ownerEmb, partnerEmb)
+				if primarySpeaker >= 0 {
+					// Map from position (0/1) back to actual speaker ID.
+					primarySpeaker = speakers[primarySpeaker]
+					log.Printf("pipeline: identified speakers by voice enrollment for %s", mic.DiscordUserID)
+				}
+			}
+		}
+	}
+
+	if primarySpeaker < 0 {
+		// Fall back to speaking time heuristic.
+		primarySpeaker = diarize.IdentifyPrimarySpeaker(diarSegments)
+		log.Printf("pipeline: no voice enrollment, using speaking time heuristic for %s", mic.DiscordUserID)
+	}
+	log.Printf("pipeline: diarized %s: %d segments, mic owner is speaker %d", mic.DiscordUserID, len(diarSegments), primarySpeaker)
+
+	// Transcribe the full audio.
 	allSegments, err := b.transcriber.TranscribeFile(ctx, wavPath)
 	if err != nil {
 		log.Printf("pipeline: transcribe shared mic %s: %v", mic.DiscordUserID, err)
 		return
 	}
 
-	// Attribute each whisper segment to a speaker based on diarization overlap.
+	// Attribute each segment to a speaker based on diarization overlap.
 	for _, seg := range allSegments {
 		speaker := diarize.AttributeSegment(seg.StartTime, seg.EndTime, diarSegments)
-		if speaker == dmSpeakerID {
-			userSegments[mic.SpeakerAUserID] = append(userSegments[mic.SpeakerAUserID], seg)
+		if speaker == primarySpeaker {
+			userSegments[mic.DiscordUserID] = append(userSegments[mic.DiscordUserID], seg)
 		} else {
-			userSegments[mic.SpeakerBUserID] = append(userSegments[mic.SpeakerBUserID], seg)
+			userSegments[mic.PartnerUserID] = append(userSegments[mic.PartnerUserID], seg)
 		}
 	}
 }
@@ -792,7 +1064,14 @@ func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, ses
 		existingNames = append(existingNames, fmt.Sprintf("%s (%s)", e.Name, e.Type))
 	}
 
-	extraction, err := extractor.ExtractEntities(ctx, transcript, summary, existingNames, dmName)
+	// Collect player character names so the LLM doesn't extract them as NPCs.
+	charMappings, _ := b.store.GetCharacterMappings(ctx, session.CampaignID)
+	var playerCharacters []string
+	for _, m := range charMappings {
+		playerCharacters = append(playerCharacters, m.CharacterName)
+	}
+
+	extraction, err := extractor.ExtractEntities(ctx, transcript, summary, existingNames, dmName, playerCharacters)
 	if err != nil {
 		log.Printf("pipeline: entity extraction: %v", err)
 		return

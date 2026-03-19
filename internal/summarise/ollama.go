@@ -87,8 +87,8 @@ func (o *Ollama) Summarise(ctx context.Context, transcript string, previousSumma
 }
 
 // ExtractEntities sends the extraction prompt to Ollama and parses the JSON response.
-func (o *Ollama) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string) (*ExtractionResult, error) {
-	prompt := BuildExtractionPrompt(transcript, summary, existingEntities, dmName)
+func (o *Ollama) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string, playerCharacters []string) (*ExtractionResult, error) {
+	prompt := BuildExtractionPrompt(transcript, summary, existingEntities, dmName, playerCharacters)
 
 	reqBody := ollamaRequest{
 		Model:  o.model,

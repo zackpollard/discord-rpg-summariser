@@ -9,7 +9,7 @@ func TestBuildExtractionPrompt_Basic(t *testing.T) {
 	transcript := "[00:00:05] Thordak: I open the chest.\n[00:00:12] DM: Inside you find a glowing orb."
 	summary := "The party found a glowing orb in the dungeon."
 
-	prompt := BuildExtractionPrompt(transcript, summary, nil, "")
+	prompt := BuildExtractionPrompt(transcript, summary, nil, "", nil)
 
 	if !strings.Contains(prompt, transcript) {
 		t.Error("prompt should contain the transcript")
@@ -37,7 +37,7 @@ func TestBuildExtractionPrompt_Basic(t *testing.T) {
 func TestBuildExtractionPrompt_WithExistingEntities(t *testing.T) {
 	entities := []string{"Strahd von Zarovich", "Barovia", "Ireena Kolyana"}
 
-	prompt := BuildExtractionPrompt("transcript", "summary", entities, "")
+	prompt := BuildExtractionPrompt("transcript", "summary", entities, "", nil)
 
 	for _, name := range entities {
 		if !strings.Contains(prompt, name) {
@@ -50,7 +50,7 @@ func TestBuildExtractionPrompt_WithExistingEntities(t *testing.T) {
 }
 
 func TestBuildExtractionPrompt_WithDMName(t *testing.T) {
-	prompt := BuildExtractionPrompt("transcript", "summary", nil, "Matt")
+	prompt := BuildExtractionPrompt("transcript", "summary", nil, "Matt", nil)
 
 	if !strings.Contains(prompt, "The Dungeon Master is: Matt") {
 		t.Error("prompt should identify the DM by name")
@@ -66,8 +66,25 @@ func TestBuildExtractionPrompt_WithDMName(t *testing.T) {
 	}
 }
 
+func TestBuildExtractionPrompt_WithPlayerCharacters(t *testing.T) {
+	pcs := []string{"Thordak", "Elara", "Grimjaw"}
+	prompt := BuildExtractionPrompt("transcript", "summary", nil, "", pcs)
+
+	if !strings.Contains(prompt, "PLAYER CHARACTERS") {
+		t.Error("prompt should contain player characters section")
+	}
+	for _, name := range pcs {
+		if !strings.Contains(prompt, name) {
+			t.Errorf("prompt should contain player character %q", name)
+		}
+	}
+	if !strings.Contains(prompt, "Do NOT extract player characters as NPCs") {
+		t.Error("prompt should instruct not to extract PCs as NPCs")
+	}
+}
+
 func TestBuildExtractionPrompt_NoDMName(t *testing.T) {
-	prompt := BuildExtractionPrompt("transcript", "summary", nil, "")
+	prompt := BuildExtractionPrompt("transcript", "summary", nil, "", nil)
 
 	if strings.Contains(prompt, "Dungeon Master is:") {
 		t.Error("prompt should not contain DM section when dmName is empty")

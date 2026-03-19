@@ -139,10 +139,35 @@ var commands = []*discordgo.ApplicationCommand{
 						Required:    true,
 					},
 					{
+						Name:        "partner",
+						Description: "The other Discord user on the same mic",
+						Type:        discordgo.ApplicationCommandOptionUser,
+						Required:    false,
+					},
+					{
 						Name:        "partner-name",
-						Description: "Character name of the second person on the mic",
+						Description: "Name for the other person if they are not in Discord",
 						Type:        discordgo.ApplicationCommandOptionString,
-						Required:    true,
+						Required:    false,
+					},
+				},
+			},
+			{
+				Name:        "enroll",
+				Description: "Record a 10-second voice sample for speaker identification on shared mics",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "user",
+						Description: "Discord user whose mic to record from (defaults to you)",
+						Type:        discordgo.ApplicationCommandOptionUser,
+						Required:    false,
+					},
+					{
+						Name:        "partner",
+						Description: "Enroll the shared-mic partner instead (only partner should speak)",
+						Type:        discordgo.ApplicationCommandOptionBoolean,
+						Required:    false,
 					},
 				},
 			},

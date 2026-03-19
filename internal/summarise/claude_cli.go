@@ -48,8 +48,8 @@ func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSu
 
 // ExtractEntities runs the claude CLI with the extraction prompt and parses
 // the JSON response into an ExtractionResult.
-func (c *ClaudeCLI) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string) (*ExtractionResult, error) {
-	prompt := BuildExtractionPrompt(transcript, summary, existingEntities, dmName)
+func (c *ClaudeCLI) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string, playerCharacters []string) (*ExtractionResult, error) {
+	prompt := BuildExtractionPrompt(transcript, summary, existingEntities, dmName, playerCharacters)
 
 	cmd := exec.CommandContext(ctx, "claude", "--print")
 	cmd.Stdin = strings.NewReader(prompt)
