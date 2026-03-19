@@ -56,6 +56,52 @@ func FormatTranscript(segments []UserSegment) string {
 	return b.String()
 }
 
+// TelegramEntry represents a Telegram message to be interleaved into a transcript.
+type TelegramEntry struct {
+	ElapsedSecs float64 // seconds since session start
+	SenderName  string
+	Text        string
+}
+
+// FormatTranscriptWithTelegram renders merged voice segments interleaved with
+// Telegram messages, sorted chronologically by timestamp.
+func FormatTranscriptWithTelegram(segments []UserSegment, telegramMsgs []TelegramEntry) string {
+	// Build a unified timeline of tagged entries.
+	type entry struct {
+		time float64
+		line string
+	}
+
+	var entries []entry
+	for _, seg := range segments {
+		name := seg.CharacterName
+		if name == "" {
+			name = seg.UserID
+		}
+		entries = append(entries, entry{
+			time: seg.StartTime,
+			line: fmt.Sprintf("[%s] %s: %s", formatSeconds(seg.StartTime), name, seg.Text),
+		})
+	}
+	for _, tm := range telegramMsgs {
+		entries = append(entries, entry{
+			time: tm.ElapsedSecs,
+			line: fmt.Sprintf("[%s] [%s via Telegram]: %s", formatSeconds(tm.ElapsedSecs), tm.SenderName, tm.Text),
+		})
+	}
+
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].time < entries[j].time
+	})
+
+	var b strings.Builder
+	for _, e := range entries {
+		b.WriteString(e.line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // formatSeconds converts a float64 seconds value to "HH:MM:SS".
 func formatSeconds(secs float64) string {
 	total := int(secs)

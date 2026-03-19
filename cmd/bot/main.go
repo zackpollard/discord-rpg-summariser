@@ -14,6 +14,7 @@ import (
 	"discord-rpg-summariser/internal/config"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
+	"discord-rpg-summariser/internal/telegram"
 	"discord-rpg-summariser/internal/transcribe"
 )
 
@@ -62,6 +63,10 @@ func main() {
 		webDir = env
 	}
 
+	if cfg.Telegram.BotToken != "" {
+		log.Println("Telegram integration enabled")
+	}
+
 	srv := api.NewServer(store, cfg.Web.ListenAddr, cfg.Discord.GuildID, webDir)
 
 	discordBot, err := bot.NewBot(cfg, store, transcriber, sum)
@@ -69,10 +74,15 @@ func main() {
 		log.Fatalf("Failed to create bot: %v", err)
 	}
 
+	if cfg.Telegram.BotToken != "" {
+		discordBot.SetTelegramClient(telegram.NewClient(cfg.Telegram.BotToken))
+	}
+
 	srv.SetVoiceActivityProvider(discordBot)
 	srv.SetLiveTranscriptProvider(discordBot)
 	srv.SetMemberProvider(discordBot)
 	srv.SetLoreQAProvider(discordBot)
+	srv.SetSessionReprocessor(discordBot)
 
 	go func() {
 		log.Printf("API server listening on %s", cfg.Web.ListenAddr)

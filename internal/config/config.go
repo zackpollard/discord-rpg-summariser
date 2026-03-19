@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	Discord    DiscordConfig    `yaml:"discord"`
+	Telegram   TelegramConfig   `yaml:"telegram"`
 	Transcribe TranscribeConfig `yaml:"transcribe"`
 	LLM        LLMConfig        `yaml:"llm"`
 	Storage    StorageConfig    `yaml:"storage"`
@@ -37,6 +38,11 @@ type LLMConfig struct {
 type StorageConfig struct {
 	DatabaseURL string `yaml:"database_url"`
 	AudioDir    string `yaml:"audio_dir"`
+}
+
+type TelegramConfig struct {
+	BotToken string `yaml:"bot_token"`
+	ChatID   int64  `yaml:"chat_id"`
 }
 
 type WebConfig struct {
@@ -81,6 +87,9 @@ func Load(path string) (*Config, error) {
 	}
 	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
 		cfg.Storage.DatabaseURL = dbURL
+	}
+	if tgToken := os.Getenv("TELEGRAM_BOT_TOKEN"); tgToken != "" {
+		cfg.Telegram.BotToken = tgToken
 	}
 
 	return cfg, nil

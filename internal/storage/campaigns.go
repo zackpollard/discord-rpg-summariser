@@ -9,15 +9,16 @@ import (
 )
 
 type Campaign struct {
-	ID               int64
-	GuildID          string
-	Name             string
-	Description      string
-	IsActive         bool
-	DMUserID         *string
-	Recap            string
-	RecapGeneratedAt *time.Time
-	CreatedAt        time.Time
+	ID                 int64
+	GuildID            string
+	Name               string
+	Description        string
+	IsActive           bool
+	DMUserID           *string
+	TelegramDMUserID   *int64
+	Recap              string
+	RecapGeneratedAt   *time.Time
+	CreatedAt          time.Time
 }
 
 func (s *Store) CreateCampaign(ctx context.Context, guildID, name, description string) (int64, error) {
@@ -35,8 +36,8 @@ func (s *Store) CreateCampaign(ctx context.Context, guildID, name, description s
 func (s *Store) GetCampaign(ctx context.Context, id int64) (*Campaign, error) {
 	var c Campaign
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, guild_id, name, description, is_active, dm_user_id, recap, recap_generated_at, created_at FROM campaigns WHERE id = $1`, id,
-	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.Recap, &c.RecapGeneratedAt, &c.CreatedAt)
+		`SELECT id, guild_id, name, description, is_active, dm_user_id, telegram_dm_user_id, recap, recap_generated_at, created_at FROM campaigns WHERE id = $1`, id,
+	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.TelegramDMUserID, &c.Recap, &c.RecapGeneratedAt, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +46,7 @@ func (s *Store) GetCampaign(ctx context.Context, id int64) (*Campaign, error) {
 
 func (s *Store) ListCampaigns(ctx context.Context, guildID string) ([]Campaign, error) {
 	rows, err := s.Pool.Query(ctx,
-		`SELECT id, guild_id, name, description, is_active, dm_user_id, recap, recap_generated_at, created_at
+		`SELECT id, guild_id, name, description, is_active, dm_user_id, telegram_dm_user_id, recap, recap_generated_at, created_at
 		 FROM campaigns WHERE guild_id = $1 ORDER BY created_at`, guildID,
 	)
 	if err != nil {
@@ -56,7 +57,7 @@ func (s *Store) ListCampaigns(ctx context.Context, guildID string) ([]Campaign, 
 	var campaigns []Campaign
 	for rows.Next() {
 		var c Campaign
-		if err := rows.Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.Recap, &c.RecapGeneratedAt, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.TelegramDMUserID, &c.Recap, &c.RecapGeneratedAt, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)
@@ -89,9 +90,9 @@ func (s *Store) SetActiveCampaign(ctx context.Context, guildID string, campaignI
 func (s *Store) GetActiveCampaign(ctx context.Context, guildID string) (*Campaign, error) {
 	var c Campaign
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, guild_id, name, description, is_active, dm_user_id, recap, recap_generated_at, created_at
+		`SELECT id, guild_id, name, description, is_active, dm_user_id, telegram_dm_user_id, recap, recap_generated_at, created_at
 		 FROM campaigns WHERE guild_id = $1 AND is_active = true`, guildID,
-	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.Recap, &c.RecapGeneratedAt, &c.CreatedAt)
+	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.IsActive, &c.DMUserID, &c.TelegramDMUserID, &c.Recap, &c.RecapGeneratedAt, &c.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}

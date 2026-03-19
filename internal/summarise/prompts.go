@@ -23,7 +23,10 @@ func BuildPrompt(transcript string, previousSummary string, dmName string) strin
 	}
 
 	b.WriteString("Below is the transcript of the latest session. ")
-	b.WriteString("Analyse it carefully and produce a structured JSON summary.\n\n")
+	b.WriteString("Some entries are marked \"[Name via Telegram]\" — these are text messages the DM sent in a group chat during the session, ")
+	b.WriteString("typically containing lore, NPC dialogue, item descriptions, or other detailed information read aloud to the players. ")
+	b.WriteString("Treat these Telegram messages as authoritative narration — they are more accurate than the voice transcription of the same content being read aloud.\n\n")
+	b.WriteString("Analyse the transcript carefully and produce a structured JSON summary.\n\n")
 
 	b.WriteString("Guidelines:\n")
 	b.WriteString("- Use character names, not player names.\n")

@@ -13,6 +13,7 @@ import (
 	"discord-rpg-summariser/internal/config"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
+	"discord-rpg-summariser/internal/telegram"
 	"discord-rpg-summariser/internal/transcribe"
 	"discord-rpg-summariser/internal/voice"
 
@@ -40,6 +41,10 @@ type Bot struct {
 	// sessionID is the DB ID for the currently active recording session.
 	sessionID  int64
 	liveWorker *voice.LiveWorker
+
+	// Telegram integration (nil if not configured).
+	telegramClient   *telegram.Client
+	telegramListener *telegram.Listener
 }
 
 // LiveTranscriptWorker returns the current live transcription worker, or nil.
@@ -192,6 +197,11 @@ func NewBot(cfg *config.Config, store *storage.Store, transcriber *transcribe.Tr
 	return b, nil
 }
 
+// SetTelegramClient sets the Telegram client for capturing group chat messages.
+func (b *Bot) SetTelegramClient(c *telegram.Client) {
+	b.telegramClient = c
+}
+
 // Start opens the Discord connection, registers slash commands, and installs
 // event handlers.
 func (b *Bot) Start() error {
@@ -312,31 +322,42 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 	sessionID := b.sessionID
 	b.mu.Unlock()
 
-	userFiles := b.stopRecording()
+	result := b.stopRecording()
 
 	if sessionID != 0 {
 		ctx := context.Background()
 		if err := b.store.EndSession(ctx, sessionID); err != nil {
 			log.Printf("EndSession error (auto-stop): %v", err)
 		}
-		go b.runPipeline(sessionID, userFiles)
+		go b.runPipeline(sessionID, result.UserFiles, result.TelegramMsgs)
 	}
 }
 
-// stopRecording stops the recorder and disconnects from voice, returning
-// the user-to-WAV file mapping before clearing state. Caller must NOT hold b.mu.
-func (b *Bot) stopRecording() map[string]string {
+// stopResult bundles the results of stopping a recording session.
+type stopResult struct {
+	UserFiles     map[string]string
+	TelegramMsgs  []telegram.Message
+}
+
+// stopRecording stops the recorder, Telegram listener, and disconnects from
+// voice, returning audio files and captured Telegram messages before clearing
+// state. Caller must NOT hold b.mu.
+func (b *Bot) stopRecording() stopResult {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	var userFiles map[string]string
+	var result stopResult
 
 	if b.recorder != nil {
 		if err := b.recorder.Stop(); err != nil {
 			log.Printf("Error stopping recorder: %v", err)
 		}
-		userFiles = b.recorder.UserFiles()
+		result.UserFiles = b.recorder.UserFiles()
 		b.recorder = nil
+	}
+	if b.telegramListener != nil {
+		result.TelegramMsgs = b.telegramListener.Stop()
+		b.telegramListener = nil
 	}
 	if b.activeVC != nil {
 		if err := b.activeVC.Disconnect(context.Background()); err != nil {
@@ -348,5 +369,5 @@ func (b *Bot) stopRecording() map[string]string {
 	b.sessionID = 0
 	b.liveWorker = nil
 
-	return userFiles
+	return result
 }

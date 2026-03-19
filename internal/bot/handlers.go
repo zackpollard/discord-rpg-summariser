@@ -10,6 +10,7 @@ import (
 
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
+	"discord-rpg-summariser/internal/telegram"
 	"discord-rpg-summariser/internal/transcribe"
 	"discord-rpg-summariser/internal/voice"
 
@@ -61,6 +62,8 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleCampaignDM(s, i)
 		case "recap":
 			b.handleCampaignRecap(s, i)
+		case "telegram-dm":
+			b.handleCampaignTelegramDM(s, i)
 		}
 	case "quest":
 		switch sub.Name {
@@ -192,6 +195,9 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	b.recorder = rec
 	b.sessionID = sessionID
 	b.liveWorker = liveWorker
+	if b.telegramClient != nil && b.config.Telegram.ChatID != 0 {
+		b.telegramListener = b.telegramClient.StartListening(ctx, b.config.Telegram.ChatID)
+	}
 	b.mu.Unlock()
 
 	respond(s, i, fmt.Sprintf("Recording started (session #%d). Use `/session stop` when finished.", sessionID))
@@ -208,8 +214,8 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
-	// Stop recording and disconnect; get user WAV files before state is cleared.
-	userFiles := b.stopRecording()
+	// Stop recording and disconnect; get user WAV files and Telegram messages.
+	result := b.stopRecording()
 
 	// Mark session as ended in DB.
 	ctx := context.Background()
@@ -220,7 +226,7 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 	respond(s, i, fmt.Sprintf("Recording stopped (session #%d). Processing transcript and summary...", sessionID))
 
 	// Kick off async pipeline.
-	go b.runPipeline(sessionID, userFiles)
+	go b.runPipeline(sessionID, result.UserFiles, result.TelegramMsgs)
 }
 
 func (b *Bot) handleSessionStatus(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -449,14 +455,35 @@ func (b *Bot) handleCampaignDM(s *discordgo.Session, i *discordgo.InteractionCre
 	respond(s, i, fmt.Sprintf("<@%s> is now the DM for **%s**.", dmUserID, campaign.Name))
 }
 
+func (b *Bot) handleCampaignTelegramDM(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		return
+	}
+
+	opts := subcommandOptions(i)
+	telegramUserID := opts["telegram_user_id"].IntValue()
+
+	if err := b.store.SetCampaignTelegramDM(ctx, campaign.ID, telegramUserID); err != nil {
+		respondEphemeral(s, i, "Failed to set Telegram DM.")
+		log.Printf("SetCampaignTelegramDM error: %v", err)
+		return
+	}
+
+	respond(s, i, fmt.Sprintf("Telegram DM user ID set to **%d** for **%s**.", telegramUserID, campaign.Name))
+}
+
 // ---------------------------------------------------------------------------
 // Pipeline
 // ---------------------------------------------------------------------------
 
 // runPipeline is executed asynchronously after recording stops. It transcribes
-// each user's audio, merges segments chronologically, summarises the transcript,
-// persists everything to the database, and posts a notification.
-func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
+// each user's audio, merges segments chronologically (including any Telegram
+// messages), summarises the transcript, persists everything to the database,
+// and posts a notification.
+func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegramMsgs []telegram.Message) {
 	ctx := context.Background()
 
 	session, err := b.store.GetSession(ctx, sessionID)
@@ -505,9 +532,8 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 		}
 	}
 
-	// Merge and format.
+	// Merge voice segments.
 	merged := transcribe.MergeTranscripts(userSegments, charNames)
-	transcript := transcribe.FormatTranscript(merged)
 
 	// Persist transcript segments (store only user_id; character names are
 	// resolved from mappings at display time so they stay up to date).
@@ -525,17 +551,19 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 		log.Printf("pipeline: InsertSegments: %v", err)
 	}
 
-	// Resolve DM name for the summariser prompt.
+	// Resolve DM name and campaign for Telegram filtering.
 	dmName := ""
 	campaign, _ := b.store.GetCampaign(ctx, session.CampaignID)
 	if campaign != nil && campaign.DMUserID != nil {
-		// Use character name if mapped, otherwise Discord display name
 		if cn, _ := b.store.GetCharacterName(ctx, *campaign.DMUserID, campaign.ID); cn != "" {
 			dmName = cn
 		} else {
 			dmName = b.ResolveUsername(*campaign.DMUserID)
 		}
 	}
+
+	// Process and persist Telegram messages, then interleave into transcript.
+	transcript := b.buildTranscriptWithTelegram(ctx, session, campaign, merged, telegramMsgs, dmName)
 
 	// Summarise.
 	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
@@ -562,6 +590,82 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 
 	// Extract quests (non-fatal on error).
 	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
+}
+
+// buildTranscriptWithTelegram persists Telegram messages to the DB, filters
+// them, and returns a formatted transcript with voice segments and Telegram
+// messages interleaved chronologically.
+func (b *Bot) buildTranscriptWithTelegram(
+	ctx context.Context,
+	session *storage.Session,
+	campaign *storage.Campaign,
+	merged []transcribe.UserSegment,
+	telegramMsgs []telegram.Message,
+	dmName string,
+) string {
+	// If no Telegram messages, just format voice segments.
+	if len(telegramMsgs) == 0 {
+		return transcribe.FormatTranscript(merged)
+	}
+
+	// Determine the Telegram DM user ID for filtering.
+	var telegramDMID int64
+	if campaign != nil && campaign.TelegramDMUserID != nil {
+		telegramDMID = *campaign.TelegramDMUserID
+	}
+
+	// Persist all Telegram messages to DB.
+	var dbMsgs []storage.TelegramMessage
+	for _, m := range telegramMsgs {
+		isDM := telegramDMID != 0 && m.FromID == telegramDMID
+		dbMsgs = append(dbMsgs, storage.TelegramMessage{
+			SessionID:     session.ID,
+			TelegramMsgID: m.MessageID,
+			FromUserID:    m.FromID,
+			FromUsername:  m.FromUsername,
+			FromDisplay:   m.FromDisplay,
+			Text:          m.Text,
+			SentAt:        m.Timestamp,
+			IsDM:          isDM,
+		})
+	}
+	if err := b.store.InsertTelegramMessages(ctx, dbMsgs); err != nil {
+		log.Printf("pipeline: InsertTelegramMessages: %v", err)
+	}
+
+	// Filter: only DM messages that pass relevance check.
+	var entries []transcribe.TelegramEntry
+	senderLabel := "DM"
+	if dmName != "" {
+		senderLabel = dmName
+	}
+
+	for _, m := range telegramMsgs {
+		isDM := telegramDMID != 0 && m.FromID == telegramDMID
+		if !telegram.IsRelevant(m, isDM) {
+			continue
+		}
+		elapsed := m.Timestamp.Sub(session.StartedAt).Seconds()
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		name := senderLabel
+		if !isDM {
+			name = m.FromDisplay
+		}
+		entries = append(entries, transcribe.TelegramEntry{
+			ElapsedSecs: elapsed,
+			SenderName:  name,
+			Text:        m.Text,
+		})
+	}
+
+	if len(entries) == 0 {
+		return transcribe.FormatTranscript(merged)
+	}
+
+	log.Printf("pipeline: interleaving %d Telegram messages into transcript", len(entries))
+	return transcribe.FormatTranscriptWithTelegram(merged, entries)
 }
 
 func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary, dmName string) {

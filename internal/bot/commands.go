@@ -127,6 +127,19 @@ var commands = []*discordgo.ApplicationCommand{
 				Description: "Generate or view the story so far",
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 			},
+			{
+				Name:        "telegram-dm",
+				Description: "Set the Telegram user ID of the DM for Telegram integration",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "telegram_user_id",
+						Description: "The DM's Telegram numeric user ID",
+						Type:        discordgo.ApplicationCommandOptionInteger,
+						Required:    true,
+					},
+				},
+			},
 		},
 	},
 	{
