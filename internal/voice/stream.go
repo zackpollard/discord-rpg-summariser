@@ -72,19 +72,25 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	}
 
 	// Decrypt DAVE secure frame if present
-	if isDAVEFrame(opusData) && us.daveState != nil {
-		decrypted, err := discordgo.DecryptFrame(us.daveState, opusData)
-		if err != nil {
-			if us.pktCount <= 5 {
-				log.Printf("  DAVE decrypt failed: %v", err)
+	if isDAVEFrame(opusData) {
+		if us.daveState != nil {
+			decrypted, err := discordgo.DecryptFrame(us.daveState, opusData)
+			if err != nil {
+				if us.pktCount <= 200 {
+					log.Printf("  DAVE decrypt failed (pkt %d, %d bytes): %v", us.pktCount, len(opusData), err)
+				}
+				return fmt.Errorf("dave decrypt (%d bytes): %w", len(opusData), err)
 			}
-			return fmt.Errorf("dave decrypt (%d bytes): %w", len(opusData), err)
+			if us.pktCount <= 200 {
+				log.Printf("  DAVE decrypted pkt %d: %d -> %d bytes, first: %x",
+					us.pktCount, len(opusData), len(decrypted), firstN(decrypted, 4))
+			}
+			opusData = decrypted
+		} else if us.pktCount <= 200 {
+			log.Printf("  DAVE frame detected (pkt %d, %d bytes) but no receiver key", us.pktCount, len(opusData))
 		}
-		if us.pktCount <= 5 {
-			log.Printf("  DAVE decrypted: %d -> %d bytes, first: %x",
-				len(opusData), len(decrypted), firstN(decrypted, 4))
-		}
-		opusData = decrypted
+	} else if us.pktCount <= 200 && len(opusData) > 5 {
+		log.Printf("  Not a DAVE frame (pkt %d, %d bytes), last 4: %x", us.pktCount, len(opusData), opusData[len(opusData)-4:])
 	}
 
 	pcm := make([]int16, pcmBufSize)
