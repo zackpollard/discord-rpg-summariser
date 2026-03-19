@@ -10,7 +10,7 @@ import (
 
 const (
 	streamSampleRate  = 48000
-	streamChannels    = 2 // Discord sends stereo opus
+	streamChannels    = 1 // Discord voice sends mono opus (TOC byte 0x78 = CELT FB 20ms mono)
 	frameSamples      = 960 // 20ms at 48kHz
 	maxSilenceSamples = 240000 // 5 seconds at 48kHz
 	pcmBufSize        = 5760 * streamChannels
@@ -95,15 +95,7 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	if err != nil {
 		return fmt.Errorf("decode opus (%d bytes): %w", len(opusData), err)
 	}
-	pcm = pcm[:n*streamChannels]
-
-	// Downmix stereo to mono for WAV output
-	mono := make([]int16, n)
-	for i := 0; i < n; i++ {
-		l := int32(pcm[i*2])
-		r := int32(pcm[i*2+1])
-		mono[i] = int16((l + r) / 2)
-	}
+	pcm = pcm[:n]
 
 	// --- Silence gap insertion ---
 	if us.hasFirstTS {
@@ -122,26 +114,22 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	us.hasFirstTS = true
 	us.lastTS = packet.Timestamp
 
-	return us.wav.Write(mono)
+	return us.wav.Write(pcm)
 }
 
 // decodePLC runs opus Packet Loss Concealment for a missing frame, writing
 // the interpolated audio to the WAV file. This keeps the decoder state clean
 // so subsequent real frames decode without artifacts.
 func (us *UserStream) decodePLC(timestamp uint32) {
-	pcm := make([]int16, frameSamples*streamChannels)
+	if !us.daveActive {
+		return // don't PLC before decoder has any real state
+	}
+	pcm := make([]int16, frameSamples)
 	n, err := us.decoder.Decode(nil, pcm)
 	if err != nil || n == 0 {
 		return
 	}
-	pcm = pcm[:n*streamChannels]
-
-	mono := make([]int16, n)
-	for i := 0; i < n; i++ {
-		l := int32(pcm[i*2])
-		r := int32(pcm[i*2+1])
-		mono[i] = int16((l + r) / 2)
-	}
+	pcm = pcm[:n]
 
 	if us.hasFirstTS {
 		expected := us.lastTS + uint32(frameSamples)
@@ -157,7 +145,7 @@ func (us *UserStream) decodePLC(timestamp uint32) {
 	us.hasFirstTS = true
 	us.lastTS = timestamp
 
-	us.wav.Write(mono)
+	us.wav.Write(pcm)
 }
 
 // Close closes the WAV writer.
