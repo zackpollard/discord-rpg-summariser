@@ -646,7 +646,7 @@ func (v *VoiceConnection) onEvent(ctx context.Context, binary bool, message []by
 
 			if !v.deaf {
 				if v.OpusRecv == nil {
-					v.OpusRecv = make(chan *Packet, 2)
+					v.OpusRecv = make(chan *Packet, 128)
 				}
 
 				go v.opusReceiver(ctx)
@@ -1103,6 +1103,12 @@ func (v *VoiceConnection) opusReceiver(ctx context.Context) {
 			p.Extension = recvbuf[extensionBegin : extensionBegin+4+int(extensionLength)*4]
 			p.Opus = p.Opus[int(extensionLength)*4:]
 		}
+
+		// Copy opus data out of recvbuf so the next UDP read doesn't
+		// overwrite it while the consumer is still processing.
+		opusCopy := make([]byte, len(p.Opus))
+		copy(opusCopy, p.Opus)
+		p.Opus = opusCopy
 
 		if ch != nil {
 			select {
