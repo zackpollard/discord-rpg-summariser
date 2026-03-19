@@ -27,6 +27,7 @@ type UserStream struct {
 	hasFirstTS bool
 	daveState  *discordgo.ReceiverState
 	daveActive bool // true after the first successful DAVE decrypt
+	liveBuf    *LiveBuffer
 }
 
 // NewUserStream creates a WAV writer and opus decoder for the given user.
@@ -121,7 +122,13 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	us.lastTS = packet.Timestamp
 	us.hasFirstTS = true
 
-	return us.wav.Write(pcm)
+	if err := us.wav.Write(pcm); err != nil {
+		return err
+	}
+	if us.liveBuf != nil {
+		us.liveBuf.AddSamples(pcm)
+	}
+	return nil
 }
 
 // decodePLC runs opus Packet Loss Concealment for a missing frame.
@@ -161,5 +168,10 @@ func (us *UserStream) insertSilenceGap(timestamp uint32) {
 	us.wav.Write(make([]int16, gap))
 }
 
-func (us *UserStream) Close() error  { return us.wav.Close() }
+func (us *UserStream) Close() error {
+	if us.liveBuf != nil {
+		us.liveBuf.Flush()
+	}
+	return us.wav.Close()
+}
 func (us *UserStream) FilePath() string { return us.wav.file.Name() }

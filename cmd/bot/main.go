@@ -70,6 +70,7 @@ func main() {
 	}
 
 	srv.SetVoiceActivityProvider(discordBot)
+	srv.SetLiveTranscriptProvider(discordBot)
 
 	go func() {
 		log.Printf("API server listening on %s", cfg.Web.ListenAddr)

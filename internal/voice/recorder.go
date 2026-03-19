@@ -38,9 +38,11 @@ type Recorder struct {
 	outputDir      string
 	guildID        string
 	done           chan struct{}
+	liveCh         chan ChunkReady // nil if live transcription disabled
+	sessionStart   time.Time
 }
 
-func NewRecorder(outputDir, guildID string) *Recorder {
+func NewRecorder(outputDir, guildID string, liveCh chan ChunkReady) *Recorder {
 	return &Recorder{
 		streams:        make(map[uint32]*UserStream),
 		ssrcToUser:     make(map[uint32]string),
@@ -50,6 +52,8 @@ func NewRecorder(outputDir, guildID string) *Recorder {
 		outputDir:      outputDir,
 		guildID:        guildID,
 		done:           make(chan struct{}),
+		liveCh:         liveCh,
+		sessionStart:   time.Now(),
 	}
 }
 
@@ -86,6 +90,9 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 	if err != nil {
 		log.Printf("Failed to create stream for user %s: %v", userID, err)
 		return
+	}
+	if r.liveCh != nil {
+		us.liveBuf = NewLiveBuffer(userID, displayName, r.sessionStart, r.liveCh)
 	}
 	r.streams[ssrc] = us
 	log.Printf("Recording user %s (%s)", displayName, userID)
@@ -164,6 +171,9 @@ func (r *Recorder) Stop() error {
 		if err := us.Close(); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("close stream for SSRC %d: %w", ssrc, err)
 		}
+	}
+	if r.liveCh != nil {
+		close(r.liveCh)
 	}
 	return firstErr
 }

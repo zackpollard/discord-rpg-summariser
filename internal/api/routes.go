@@ -12,4 +12,5 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("DELETE /api/characters/{userId}", s.handleDeleteCharacter)
 
 	s.mux.HandleFunc("GET /api/voice-activity", s.handleVoiceActivity)
+	s.mux.HandleFunc("GET /api/live-transcript", s.handleLiveTranscript)
 }

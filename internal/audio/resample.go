@@ -10,7 +10,7 @@ import (
 const (
 	inputRate     = 48000
 	outputRate    = 16000
-	decimation    = inputRate / outputRate // 3
+	decimationFactor = inputRate / outputRate // 3
 	filterTaps    = 32
 	wavHeaderSkip = 44
 	cutoff        = float64(outputRate/2) / float64(inputRate) // 8000/48000
@@ -45,7 +45,7 @@ func LoadAndResample(wavPath string) ([]float32, error) {
 
 	// Apply filter and decimate 3:1.
 	filtered := applyFilter(samples, kernel)
-	output := decimate(filtered, decimation)
+	output := decimate(filtered, decimationFactor)
 
 	return output, nil
 }

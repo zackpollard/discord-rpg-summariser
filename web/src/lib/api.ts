@@ -114,3 +114,25 @@ export function subscribeVoiceActivity(
 	if (onError) source.onerror = onError;
 	return () => source.close();
 }
+
+export interface LiveTranscriptEvent {
+	user_id: string;
+	display_name: string;
+	start_time: number;
+	end_time: number;
+	text: string;
+}
+
+export function subscribeLiveTranscript(
+	onSegment: (event: LiveTranscriptEvent) => void,
+	onError?: (err: Event) => void
+): () => void {
+	const source = new EventSource('/api/live-transcript');
+	source.onmessage = (event) => {
+		try {
+			onSegment(JSON.parse(event.data));
+		} catch { }
+	};
+	if (onError) source.onerror = onError;
+	return () => source.close();
+}

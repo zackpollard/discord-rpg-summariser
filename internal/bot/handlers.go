@@ -133,7 +133,11 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
-	rec := voice.NewRecorder(audioDir, guildID)
+	liveCh := make(chan voice.ChunkReady, 16)
+	rec := voice.NewRecorder(audioDir, guildID, liveCh)
+	liveWorker := voice.NewLiveWorker(b.transcriber, liveCh)
+	go liveWorker.Run(ctx)
+
 	rec.Start(vc, func(userID string) string {
 		member, err := s.GuildMember(guildID, userID)
 		if err != nil {
@@ -156,6 +160,7 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	b.activeChannelID = userVoiceChannelID
 	b.recorder = rec
 	b.sessionID = sessionID
+	b.liveWorker = liveWorker
 	b.mu.Unlock()
 
 	respond(s, i, fmt.Sprintf("Recording started (session #%d). Use `/session stop` when finished.", sessionID))

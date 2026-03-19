@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"discord-rpg-summariser/internal/audio"
 
@@ -107,6 +108,55 @@ func (t *Transcriber) TranscribeFile(ctx context.Context, wavPath string) ([]Seg
 		})
 	}
 
+	return segments, nil
+}
+
+// TranscribeChunk transcribes pre-resampled 16kHz float32 mono samples.
+// timeOffset is added to all segment timestamps for session-relative times.
+// prompt provides context from previous chunks for continuity.
+func (t *Transcriber) TranscribeChunk(ctx context.Context, samples []float32, timeOffset time.Duration, prompt string) ([]Segment, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	wctx, err := t.model.NewContext()
+	if err != nil {
+		return nil, fmt.Errorf("create whisper context: %w", err)
+	}
+
+	if err := wctx.SetLanguage(t.language); err != nil {
+		return nil, fmt.Errorf("set language: %w", err)
+	}
+	wctx.SetThreads(uint(t.threads))
+	wctx.SetOffset(timeOffset)
+	if prompt != "" {
+		wctx.SetInitialPrompt(prompt)
+	} else {
+		wctx.SetInitialPrompt("Dungeons and Dragons RPG session with fantasy names and places")
+	}
+
+	if err := wctx.Process(samples, nil, nil, nil); err != nil {
+		return nil, fmt.Errorf("whisper process: %w", err)
+	}
+
+	var segments []Segment
+	for {
+		seg, err := wctx.NextSegment()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read segment: %w", err)
+		}
+		text := strings.TrimSpace(seg.Text)
+		if text == "" {
+			continue
+		}
+		segments = append(segments, Segment{
+			StartTime: seg.Start.Seconds(),
+			EndTime:   seg.End.Seconds(),
+			Text:      text,
+		})
+	}
 	return segments, nil
 }
 

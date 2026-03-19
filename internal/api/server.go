@@ -22,6 +22,7 @@ type Server struct {
 	listenAddr string
 	guildID    string
 	voiceAP    VoiceActivityProvider
+	liveTP     LiveTranscriptProvider
 	mux        *http.ServeMux
 	httpServer *http.Server
 }
@@ -48,6 +49,10 @@ func NewServer(store *storage.Store, listenAddr, guildID, webDir string) *Server
 // SetVoiceActivityProvider sets the provider for live voice activity data.
 func (s *Server) SetVoiceActivityProvider(vap VoiceActivityProvider) {
 	s.voiceAP = vap
+}
+
+func (s *Server) SetLiveTranscriptProvider(ltp LiveTranscriptProvider) {
+	s.liveTP = ltp
 }
 
 func (s *Server) Start() error {
@@ -109,7 +114,9 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if strings.HasPrefix(r.URL.Path, "/api/") && !strings.HasSuffix(r.URL.Path, "/voice-activity") {
+		if strings.HasPrefix(r.URL.Path, "/api/") &&
+			!strings.HasSuffix(r.URL.Path, "/voice-activity") &&
+			!strings.HasSuffix(r.URL.Path, "/live-transcript") {
 			w.Header().Set("Content-Type", "application/json")
 		}
 

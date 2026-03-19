@@ -33,7 +33,15 @@ type Bot struct {
 	registeredCmds []*discordgo.ApplicationCommand
 
 	// sessionID is the DB ID for the currently active recording session.
-	sessionID int64
+	sessionID  int64
+	liveWorker *voice.LiveWorker
+}
+
+// LiveTranscriptWorker returns the current live transcription worker, or nil.
+func (b *Bot) LiveTranscriptWorker() *voice.LiveWorker {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.liveWorker
 }
 
 // VoiceActivity returns current voice activity. Nil if not recording.
@@ -223,6 +231,7 @@ func (b *Bot) stopRecording() map[string]string {
 	}
 	b.activeChannelID = ""
 	b.sessionID = 0
+	b.liveWorker = nil
 
 	return userFiles
 }

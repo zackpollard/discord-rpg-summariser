@@ -1,16 +1,19 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { fetchStatus, fetchSessions, subscribeVoiceActivity, type Status, type Session, type VoiceUser } from '$lib/api';
+	import { fetchStatus, fetchSessions, subscribeVoiceActivity, subscribeLiveTranscript, type Status, type Session, type VoiceUser, type LiveTranscriptEvent } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 
 	let status = $state<Status | null>(null);
 	let sessions = $state<Session[]>([]);
 	let voiceUsers = $state<VoiceUser[]>([]);
+	let liveSegments = $state<LiveTranscriptEvent[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
 	let pollTimer: ReturnType<typeof setInterval> | undefined;
 	let unsubVoice: (() => void) | undefined;
+	let unsubTranscript: (() => void) | undefined;
+	let transcriptEl: HTMLDivElement;
 
 	async function loadStatus() {
 		try {
@@ -44,6 +47,21 @@
 		});
 	}
 
+	function formatTimestamp(seconds: number): string {
+		const h = Math.floor(seconds / 3600);
+		const m = Math.floor((seconds % 3600) / 60);
+		const s = Math.floor(seconds % 60);
+		if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+		return `${m}:${String(s).padStart(2, '0')}`;
+	}
+
+	function charColor(name: string): string {
+		let hash = 0;
+		for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+		const hue = ((hash % 360) + 360) % 360;
+		return `hsl(${hue}, 70%, 65%)`;
+	}
+
 	function formatPackets(count: number): string {
 		if (count > 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
 		if (count > 1000) return `${(count / 1000).toFixed(1)}k`;
@@ -56,9 +74,18 @@
 		unsubVoice = subscribeVoiceActivity((users) => {
 			voiceUsers = users;
 		});
+		unsubTranscript = subscribeLiveTranscript((seg) => {
+			liveSegments = [...liveSegments, seg];
+			if (liveSegments.length > 500) liveSegments = liveSegments.slice(-500);
+			// Auto-scroll
+			requestAnimationFrame(() => {
+				if (transcriptEl) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+			});
+		});
 		return () => {
 			if (pollTimer) clearInterval(pollTimer);
 			if (unsubVoice) unsubVoice();
+			if (unsubTranscript) unsubTranscript();
 		};
 	});
 </script>
@@ -101,6 +128,21 @@
 						<span class="voice-dot" class:active={user.speaking}></span>
 						<span class="voice-name">{user.display_name || user.user_id}</span>
 						<span class="voice-packets">{formatPackets(user.packet_count)} pkts</span>
+					</div>
+				{/each}
+			</div>
+		</section>
+	{/if}
+
+	{#if liveSegments.length > 0}
+		<section class="transcript-card">
+			<h2>Live Transcript</h2>
+			<div class="transcript-scroll" bind:this={transcriptEl}>
+				{#each liveSegments as seg}
+					<div class="live-line">
+						<span class="live-time">[{formatTimestamp(seg.start_time)}]</span>
+						<span class="live-speaker" style="color: {charColor(seg.display_name || seg.user_id)}">{seg.display_name || seg.user_id}:</span>
+						<span class="live-text">{seg.text}</span>
 					</div>
 				{/each}
 			</div>
@@ -235,6 +277,44 @@
 		color: var(--text-muted);
 		font-size: 0.75rem;
 		font-family: monospace;
+	}
+
+	.transcript-card {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 1.25rem;
+		margin-bottom: 1.5rem;
+	}
+	.transcript-card h2 {
+		font-size: 1rem;
+		color: var(--text-secondary);
+		margin-bottom: 0.75rem;
+		font-weight: 600;
+	}
+	.transcript-scroll {
+		max-height: 400px;
+		overflow-y: auto;
+		font-family: monospace;
+		font-size: 0.85rem;
+		line-height: 1.6;
+		padding: 0.5rem;
+		background: var(--bg-surface-2);
+		border-radius: var(--radius);
+	}
+	.live-line {
+		padding: 0.15rem 0;
+	}
+	.live-time {
+		color: var(--text-muted);
+		margin-right: 0.5rem;
+	}
+	.live-speaker {
+		font-weight: 600;
+		margin-right: 0.4rem;
+	}
+	.live-text {
+		color: var(--text-primary);
 	}
 
 	.recent-section {
