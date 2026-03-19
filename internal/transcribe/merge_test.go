@@ -64,8 +64,8 @@ func TestMergeTranscripts_CharacterNameFallback(t *testing.T) {
 	if merged[0].CharacterName != "Gandalf" {
 		t.Errorf("expected known user to resolve to Gandalf, got %q", merged[0].CharacterName)
 	}
-	if merged[1].CharacterName != "User-unknown-user" {
-		t.Errorf("expected unknown user fallback to User-unknown-user, got %q", merged[1].CharacterName)
+	if merged[1].CharacterName != "" {
+		t.Errorf("expected unknown user to have empty CharacterName, got %q", merged[1].CharacterName)
 	}
 }
 

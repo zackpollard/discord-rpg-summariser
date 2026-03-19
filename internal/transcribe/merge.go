@@ -21,10 +21,7 @@ func MergeTranscripts(userSegments map[string][]Segment, characterNames map[stri
 	var merged []UserSegment
 
 	for userID, segments := range userSegments {
-		name, ok := characterNames[userID]
-		if !ok || name == "" {
-			name = "User-" + userID
-		}
+		name := characterNames[userID] // empty string if no mapping
 
 		for _, seg := range segments {
 			merged = append(merged, UserSegment{
@@ -50,7 +47,11 @@ func MergeTranscripts(userSegments map[string][]Segment, characterNames map[stri
 func FormatTranscript(segments []UserSegment) string {
 	var b strings.Builder
 	for _, seg := range segments {
-		b.WriteString(fmt.Sprintf("[%s] %s: %s\n", formatSeconds(seg.StartTime), seg.CharacterName, seg.Text))
+		name := seg.CharacterName
+		if name == "" {
+			name = seg.UserID
+		}
+		b.WriteString(fmt.Sprintf("[%s] %s: %s\n", formatSeconds(seg.StartTime), name, seg.Text))
 	}
 	return b.String()
 }
