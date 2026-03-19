@@ -162,6 +162,8 @@ export interface Campaign {
 	is_active: boolean;
 	dm_user_id: string | null;
 	created_at: string;
+	recap: string;
+	recap_generated_at: string | null;
 }
 
 export interface Entity {
@@ -222,4 +224,99 @@ export async function fetchEntities(campaignId: number, params?: { type?: string
 
 export async function fetchEntity(id: number): Promise<EntityDetail> {
 	return request<EntityDetail>(`/api/entities/${id}`);
+}
+
+// Quest types and functions
+
+export interface Quest {
+	id: number;
+	campaign_id: number;
+	name: string;
+	description: string;
+	status: string;
+	giver: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface QuestDetail extends Quest {
+	updates: QuestUpdate[];
+}
+
+export interface QuestUpdate {
+	id: number;
+	quest_id: number;
+	session_id: number;
+	content: string;
+	new_status: string | null;
+	created_at: string;
+}
+
+export interface TimelineEvent {
+	type: string;
+	timestamp: string;
+	title: string;
+	detail: string;
+	session_id: number | null;
+	entity_id: number | null;
+	quest_id: number | null;
+}
+
+export interface LoreAnswer {
+	answer: string;
+	sources: string[];
+}
+
+export interface LoreSearchResult {
+	entity_id: number;
+	name: string;
+	type: string;
+	snippet: string;
+	score: number;
+}
+
+export interface CampaignRecap {
+	recap: string;
+	recap_generated_at: string | null;
+}
+
+export async function fetchQuests(campaignId: number, status?: string): Promise<Quest[]> {
+	const params = new URLSearchParams();
+	if (status) params.set('status', status);
+	const qs = params.toString();
+	return request<Quest[]>(`/api/campaigns/${campaignId}/quests${qs ? '?' + qs : ''}`);
+}
+
+export async function fetchQuest(id: number): Promise<QuestDetail> {
+	return request<QuestDetail>(`/api/quests/${id}`);
+}
+
+export async function fetchTimeline(campaignId: number, limit?: number, offset?: number): Promise<TimelineEvent[]> {
+	const params = new URLSearchParams();
+	if (limit !== undefined) params.set('limit', String(limit));
+	if (offset !== undefined) params.set('offset', String(offset));
+	const qs = params.toString();
+	return request<TimelineEvent[]>(`/api/campaigns/${campaignId}/timeline${qs ? '?' + qs : ''}`);
+}
+
+export async function askLore(campaignId: number, question: string): Promise<LoreAnswer> {
+	return request<LoreAnswer>(`/api/campaigns/${campaignId}/lore/ask`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ question })
+	});
+}
+
+export async function searchLore(campaignId: number, query: string): Promise<LoreSearchResult[]> {
+	return request<LoreSearchResult[]>(`/api/campaigns/${campaignId}/lore/search?q=${encodeURIComponent(query)}`);
+}
+
+export async function fetchRecap(campaignId: number): Promise<CampaignRecap> {
+	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`);
+}
+
+export async function regenerateRecap(campaignId: number): Promise<CampaignRecap> {
+	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`, {
+		method: 'POST'
+	});
 }

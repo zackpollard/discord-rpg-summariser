@@ -1,8 +1,13 @@
 package bot
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
+	"os/exec"
+	"strings"
 	"sync"
 
 	"discord-rpg-summariser/internal/config"
@@ -121,6 +126,35 @@ func (b *Bot) ResolveUsername(userID string) string {
 		return userID
 	}
 	return u.DisplayName
+}
+
+// AskLore answers a lore question using the LLM with provided context.
+func (b *Bot) AskLore(ctx context.Context, campaignID int64, question, loreContext string) (string, error) {
+	prompt := summarise.BuildLoreQAPrompt(question, loreContext)
+
+	type loreResult struct {
+		Answer  string   `json:"answer"`
+		Sources []string `json:"sources"`
+	}
+
+	// Shell out to claude CLI directly (same pattern as summariser)
+	cmd := exec.CommandContext(ctx, "claude", "--print")
+	cmd.Stdin = strings.NewReader(prompt)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("lore QA failed: %w: %s", err, stderr.String())
+	}
+
+	output := summarise.StripCodeFences(stdout.Bytes())
+	var result loreResult
+	if err := json.Unmarshal(output, &result); err != nil {
+		// If JSON parse fails, return raw text as answer
+		return strings.TrimSpace(string(output)), nil
+	}
+	return result.Answer, nil
 }
 
 // VoiceActivity returns current voice activity. Nil if not recording.

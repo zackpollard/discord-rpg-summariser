@@ -122,6 +122,48 @@ var commands = []*discordgo.ApplicationCommand{
 					},
 				},
 			},
+			{
+				Name:        "recap",
+				Description: "Generate or view the story so far",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+			},
+		},
+	},
+	{
+		Name:        "quest",
+		Description: "Manage campaign quests",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Name:        "list",
+				Description: "List all quests for the active campaign",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+			},
+			{
+				Name:        "complete",
+				Description: "Mark a quest as completed",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "name",
+						Description: "Quest name",
+						Type:        discordgo.ApplicationCommandOptionString,
+						Required:    true,
+					},
+				},
+			},
+			{
+				Name:        "fail",
+				Description: "Mark a quest as failed",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "name",
+						Description: "Quest name",
+						Type:        discordgo.ApplicationCommandOptionString,
+						Required:    true,
+					},
+				},
+			},
 		},
 	},
 }

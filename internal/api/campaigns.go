@@ -12,20 +12,23 @@ import (
 )
 
 type campaignResponse struct {
-	ID          int64     `json:"id"`
-	GuildID     string    `json:"guild_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	IsActive    bool      `json:"is_active"`
-	DMUserID    *string   `json:"dm_user_id"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID               int64      `json:"id"`
+	GuildID          string     `json:"guild_id"`
+	Name             string     `json:"name"`
+	Description      string     `json:"description"`
+	IsActive         bool       `json:"is_active"`
+	DMUserID         *string    `json:"dm_user_id"`
+	Recap            string     `json:"recap"`
+	RecapGeneratedAt *time.Time `json:"recap_generated_at"`
+	CreatedAt        time.Time  `json:"created_at"`
 }
 
 func toCampaignResponse(c *storage.Campaign) campaignResponse {
 	return campaignResponse{
 		ID: c.ID, GuildID: c.GuildID, Name: c.Name,
 		Description: c.Description, IsActive: c.IsActive,
-		DMUserID: c.DMUserID, CreatedAt: c.CreatedAt,
+		DMUserID: c.DMUserID, Recap: c.Recap,
+		RecapGeneratedAt: c.RecapGeneratedAt, CreatedAt: c.CreatedAt,
 	}
 }
 

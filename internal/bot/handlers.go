@@ -59,6 +59,17 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleCampaignSet(s, i)
 		case "dm":
 			b.handleCampaignDM(s, i)
+		case "recap":
+			b.handleCampaignRecap(s, i)
+		}
+	case "quest":
+		switch sub.Name {
+		case "list":
+			b.handleQuestList(s, i)
+		case "complete":
+			b.handleQuestComplete(s, i)
+		case "fail":
+			b.handleQuestFail(s, i)
 		}
 	}
 }
@@ -548,6 +559,9 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string) {
 
 	// Extract entities for the knowledge base (non-fatal on error).
 	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
+
+	// Extract quests (non-fatal on error).
+	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
 }
 
 func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary, dmName string) {
@@ -608,6 +622,235 @@ func findEntityID(ids map[string]int64, name string) int64 {
 		}
 	}
 	return 0
+}
+
+func (b *Bot) extractQuests(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary, dmName string) {
+	extractor, ok := b.summariser.(summarise.QuestExtractor)
+	if !ok {
+		return
+	}
+
+	existing, _ := b.store.ListQuests(ctx, session.CampaignID, "")
+	var existingNames []string
+	for _, q := range existing {
+		existingNames = append(existingNames, q.Name)
+	}
+
+	extraction, err := extractor.ExtractQuests(ctx, transcript, summary, existingNames, dmName)
+	if err != nil {
+		log.Printf("pipeline: quest extraction: %v", err)
+		return
+	}
+
+	for _, q := range extraction.Quests {
+		questID, err := b.store.UpsertQuest(ctx, session.CampaignID, q.Name, q.Description, q.Status, q.Giver)
+		if err != nil {
+			log.Printf("pipeline: upsert quest %q: %v", q.Name, err)
+			continue
+		}
+		var newStatus *string
+		if q.Status == "completed" || q.Status == "failed" {
+			newStatus = &q.Status
+			if err := b.store.UpdateQuestStatus(ctx, questID, q.Status); err != nil {
+				log.Printf("pipeline: update quest status %q: %v", q.Name, err)
+			}
+		}
+		if q.Update != "" {
+			if err := b.store.AddQuestUpdate(ctx, questID, sessionID, q.Update, newStatus); err != nil {
+				log.Printf("pipeline: add quest update for %q: %v", q.Name, err)
+			}
+		}
+	}
+
+	log.Printf("pipeline: extracted %d quests", len(extraction.Quests))
+}
+
+// ---------------------------------------------------------------------------
+// Quest handlers
+// ---------------------------------------------------------------------------
+
+func (b *Bot) handleQuestList(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		log.Printf("GetOrCreateActiveCampaign error: %v", err)
+		return
+	}
+
+	quests, err := b.store.ListQuests(ctx, campaign.ID, "")
+	if err != nil {
+		respondEphemeral(s, i, "Failed to list quests.")
+		log.Printf("ListQuests error: %v", err)
+		return
+	}
+
+	if len(quests) == 0 {
+		respondEphemeral(s, i, "No quests tracked yet. Quests are automatically extracted from session transcripts.")
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("**Quests for %s**\n", campaign.Name))
+	for _, q := range quests {
+		icon := "  "
+		switch q.Status {
+		case "active":
+			icon = "\u2694\ufe0f "
+		case "completed":
+			icon = "\u2705 "
+		case "failed":
+			icon = "\u274c "
+		}
+		sb.WriteString(fmt.Sprintf("%s**%s** [%s]", icon, q.Name, q.Status))
+		if q.Giver != "" {
+			sb.WriteString(fmt.Sprintf(" — from %s", q.Giver))
+		}
+		sb.WriteString("\n")
+		if q.Description != "" {
+			sb.WriteString(fmt.Sprintf("  %s\n", q.Description))
+		}
+	}
+
+	respond(s, i, sb.String())
+}
+
+func (b *Bot) handleQuestComplete(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	b.handleQuestStatusChange(s, i, "completed")
+}
+
+func (b *Bot) handleQuestFail(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	b.handleQuestStatusChange(s, i, "failed")
+}
+
+func (b *Bot) handleQuestStatusChange(s *discordgo.Session, i *discordgo.InteractionCreate, newStatus string) {
+	opts := subcommandOptions(i)
+	name := opts["name"].StringValue()
+
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		log.Printf("GetOrCreateActiveCampaign error: %v", err)
+		return
+	}
+
+	quests, err := b.store.ListQuests(ctx, campaign.ID, "")
+	if err != nil {
+		respondEphemeral(s, i, "Failed to list quests.")
+		log.Printf("ListQuests error: %v", err)
+		return
+	}
+
+	var matched *storage.Quest
+	lower := strings.ToLower(name)
+	for idx := range quests {
+		if strings.ToLower(quests[idx].Name) == lower {
+			matched = &quests[idx]
+			break
+		}
+	}
+
+	if matched == nil {
+		respondEphemeral(s, i, fmt.Sprintf("No quest found with name **%s**.", name))
+		return
+	}
+
+	if err := b.store.UpdateQuestStatus(ctx, matched.ID, newStatus); err != nil {
+		respondEphemeral(s, i, "Failed to update quest status.")
+		log.Printf("UpdateQuestStatus error: %v", err)
+		return
+	}
+
+	respond(s, i, fmt.Sprintf("Quest **%s** marked as **%s**.", matched.Name, newStatus))
+}
+
+// ---------------------------------------------------------------------------
+// Campaign recap handler
+// ---------------------------------------------------------------------------
+
+func (b *Bot) handleCampaignRecap(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		log.Printf("GetOrCreateActiveCampaign error: %v", err)
+		return
+	}
+
+	// If a recap already exists, show it.
+	if campaign.Recap != "" {
+		respond(s, i, fmt.Sprintf("**The Story So Far — %s**\n\n%s", campaign.Name, campaign.Recap))
+		return
+	}
+
+	generator, ok := b.summariser.(summarise.RecapGenerator)
+	if !ok {
+		respondEphemeral(s, i, "Recap generation is not supported by the current LLM backend.")
+		return
+	}
+
+	// Fetch all completed sessions for this campaign.
+	sessions, err := b.store.ListSessions(ctx, i.GuildID, campaign.ID, 1000, 0)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to fetch sessions.")
+		log.Printf("ListSessions error: %v", err)
+		return
+	}
+
+	// Collect summaries in chronological order (ListSessions returns DESC).
+	var summaries []string
+	for idx := len(sessions) - 1; idx >= 0; idx-- {
+		sess := sessions[idx]
+		if sess.Status == "complete" && sess.Summary != nil && *sess.Summary != "" {
+			summaries = append(summaries, *sess.Summary)
+		}
+	}
+
+	if len(summaries) == 0 {
+		respondEphemeral(s, i, "No completed sessions with summaries found. Run some sessions first!")
+		return
+	}
+
+	// Acknowledge — recap generation may take a while.
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+
+	// Resolve DM name.
+	dmName := ""
+	if campaign.DMUserID != nil {
+		if cn, _ := b.store.GetCharacterName(ctx, *campaign.DMUserID, campaign.ID); cn != "" {
+			dmName = cn
+		} else {
+			dmName = b.ResolveUsername(*campaign.DMUserID)
+		}
+	}
+
+	result, err := generator.GenerateRecap(ctx, summaries, dmName)
+	if err != nil {
+		log.Printf("GenerateRecap error: %v", err)
+		s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+			Content: "Failed to generate recap.",
+		})
+		return
+	}
+
+	// Persist recap.
+	if err := b.store.UpdateCampaignRecap(ctx, campaign.ID, result.Recap); err != nil {
+		log.Printf("UpdateCampaignRecap error: %v", err)
+	}
+
+	recap := result.Recap
+	content := fmt.Sprintf("**The Story So Far — %s**\n\n%s", campaign.Name, recap)
+	// Discord message limit is 2000 characters.
+	if len(content) > 2000 {
+		content = content[:1997] + "..."
+	}
+
+	s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
+		Content: content,
+	})
 }
 
 // sendNotification posts an embed to the configured notification channel with a

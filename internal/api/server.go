@@ -24,6 +24,7 @@ type Server struct {
 	voiceAP    VoiceActivityProvider
 	liveTP     LiveTranscriptProvider
 	memberP    MemberProvider
+	loreQA     LoreQAProvider
 	mux        *http.ServeMux
 	httpServer *http.Server
 }
@@ -58,6 +59,11 @@ func (s *Server) SetLiveTranscriptProvider(ltp LiveTranscriptProvider) {
 
 func (s *Server) SetMemberProvider(mp MemberProvider) {
 	s.memberP = mp
+}
+
+// SetLoreQAProvider sets the provider for lore Q&A and recap generation.
+func (s *Server) SetLoreQAProvider(lqp LoreQAProvider) {
+	s.loreQA = lqp
 }
 
 func (s *Server) Start() error {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchEntities, type Entity } from '$lib/api';
+	import { fetchEntities, askLore, type Entity, type LoreAnswer } from '$lib/api';
 
 	const campaignId = $derived(Number($page.params.id));
 
@@ -12,6 +12,25 @@
 	let activeType = $state<string>('');
 	let searchQuery = $state('');
 	let searchTimeout: ReturnType<typeof setTimeout> | undefined;
+
+	let loreQuestion = $state('');
+	let loreAnswer = $state<LoreAnswer | null>(null);
+	let loreLoading = $state(false);
+	let loreError = $state<string | null>(null);
+
+	async function handleAskLore() {
+		if (!loreQuestion.trim()) return;
+		loreLoading = true;
+		loreError = null;
+		loreAnswer = null;
+		try {
+			loreAnswer = await askLore(campaignId, loreQuestion.trim());
+		} catch (e) {
+			loreError = e instanceof Error ? e.message : 'Failed to get answer';
+		} finally {
+			loreLoading = false;
+		}
+	}
 
 	const entityTypes = [
 		{ value: '', label: 'All' },
@@ -60,6 +79,46 @@
 </svelte:head>
 
 <div class="lore-page">
+	<section class="ask-lore-section">
+		<h2>Ask the Lore</h2>
+		<form class="ask-form" onsubmit={(e) => { e.preventDefault(); handleAskLore(); }}>
+			<input
+				type="text"
+				placeholder="Ask a question about your campaign lore..."
+				bind:value={loreQuestion}
+				class="ask-input"
+				disabled={loreLoading}
+			/>
+			<button type="submit" class="ask-btn" disabled={loreLoading || !loreQuestion.trim()}>
+				{loreLoading ? 'Thinking...' : 'Ask'}
+			</button>
+		</form>
+		{#if loreLoading}
+			<div class="ask-loading">
+				<span class="spinner"></span>
+				<span>Consulting the archives...</span>
+			</div>
+		{/if}
+		{#if loreError}
+			<div class="error-box">{loreError}</div>
+		{/if}
+		{#if loreAnswer}
+			<div class="answer-box">
+				<p class="answer-text">{loreAnswer.answer}</p>
+				{#if loreAnswer.sources && loreAnswer.sources.length > 0}
+					<div class="answer-sources">
+						<span class="sources-label">Sources:</span>
+						<ul class="sources-list">
+							{#each loreAnswer.sources as source}
+								<li>{source}</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+			</div>
+		{/if}
+	</section>
+
 	<div class="controls">
 		<div class="type-filters">
 			{#each entityTypes as t (t.value)}
@@ -106,6 +165,99 @@
 </div>
 
 <style>
+	.ask-lore-section {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 1.25rem;
+		margin-bottom: 1.25rem;
+	}
+	.ask-lore-section h2 {
+		font-size: 1rem;
+		color: var(--text-secondary);
+		margin-bottom: 0.75rem;
+		font-weight: 600;
+	}
+	.ask-form {
+		display: flex;
+		gap: 0.5rem;
+	}
+	.ask-input {
+		flex: 1;
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		color: var(--text-primary);
+		padding: 0.5rem 0.75rem;
+		border-radius: var(--radius);
+		font-size: 0.9rem;
+	}
+	.ask-input:focus { outline: none; border-color: var(--accent-gold-dim); }
+	.ask-input:disabled { opacity: 0.6; }
+	.ask-btn {
+		background: var(--accent-gold-dim);
+		color: var(--bg-dark);
+		border: 1px solid var(--accent-gold);
+		padding: 0.5rem 1.25rem;
+		border-radius: var(--radius);
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.ask-btn:hover:not(:disabled) { background: var(--accent-gold); }
+	.ask-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.ask-loading {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.75rem;
+		color: var(--text-muted);
+		font-size: 0.85rem;
+	}
+	.spinner {
+		width: 14px;
+		height: 14px;
+		border: 2px solid var(--border);
+		border-top-color: var(--accent-gold);
+		border-radius: 50%;
+		animation: spin 0.6s linear infinite;
+	}
+	@keyframes spin { to { transform: rotate(360deg); } }
+	.answer-box {
+		margin-top: 0.75rem;
+		padding: 1rem;
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+	}
+	.answer-text {
+		color: var(--text-primary);
+		font-size: 0.9rem;
+		line-height: 1.6;
+		margin-bottom: 0.75rem;
+	}
+	.answer-sources {
+		border-top: 1px solid var(--border);
+		padding-top: 0.5rem;
+	}
+	.sources-label {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.sources-list {
+		list-style: none;
+		padding: 0;
+		margin-top: 0.25rem;
+	}
+	.sources-list li {
+		font-size: 0.8rem;
+		color: var(--text-secondary);
+		padding: 0.15rem 0;
+	}
+
 	.controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
 	.type-filters { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 	.filter-btn { background: var(--bg-surface-2); border: 1px solid var(--border); color: var(--text-secondary); padding: 0.35rem 0.75rem; border-radius: var(--radius); cursor: pointer; font-size: 0.8rem; transition: all 0.15s; }

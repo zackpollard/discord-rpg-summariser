@@ -224,8 +224,8 @@ func TestInteractionUserID(t *testing.T) {
 }
 
 func TestCommandDefinitions(t *testing.T) {
-	if len(commands) != 3 {
-		t.Fatalf("expected 3 top-level commands, got %d", len(commands))
+	if len(commands) != 4 {
+		t.Fatalf("expected 4 top-level commands, got %d", len(commands))
 	}
 
 	sessionCmd := commands[0]
