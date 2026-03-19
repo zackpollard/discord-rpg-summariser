@@ -24,8 +24,9 @@ type Server struct {
 	voiceAP    VoiceActivityProvider
 	liveTP     LiveTranscriptProvider
 	memberP    MemberProvider
-	loreQA     LoreQAProvider
-	mux        *http.ServeMux
+	loreQA      LoreQAProvider
+	reprocessor SessionReprocessor
+	mux         *http.ServeMux
 	httpServer *http.Server
 }
 

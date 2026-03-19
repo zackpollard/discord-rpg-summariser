@@ -21,6 +21,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/sessions", s.handleListSessions)
 	s.mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	s.mux.HandleFunc("GET /api/sessions/{id}/transcript", s.handleGetTranscript)
+	s.mux.HandleFunc("POST /api/sessions/{id}/reprocess", s.handleReprocessSession)
 
 	s.mux.HandleFunc("GET /api/characters", s.handleListCharacters)
 	s.mux.HandleFunc("PUT /api/characters", s.handleUpsertCharacter)

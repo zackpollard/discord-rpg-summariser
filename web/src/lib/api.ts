@@ -79,6 +79,14 @@ export async function fetchTranscript(sessionId: number): Promise<TranscriptSegm
 	return request<TranscriptSegment[]>(`/api/sessions/${sessionId}/transcript`);
 }
 
+export async function reprocessSession(sessionId: number, retranscribe: boolean = false): Promise<void> {
+	await request<void>(`/api/sessions/${sessionId}/reprocess`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ retranscribe })
+	});
+}
+
 export async function fetchCharacters(): Promise<CharacterMapping[]> {
 	return request<CharacterMapping[]>('/api/characters');
 }
@@ -262,9 +270,16 @@ export interface TimelineEvent {
 	quest_id: number | null;
 }
 
+export interface LoreSource {
+	type: string;
+	id: number;
+	name: string;
+	content: string;
+}
+
 export interface LoreAnswer {
 	answer: string;
-	sources: string[];
+	sources: LoreSource[];
 }
 
 export interface LoreSearchResult {

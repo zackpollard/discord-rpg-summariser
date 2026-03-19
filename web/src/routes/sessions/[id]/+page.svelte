@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchSession, fetchTranscript, type Session, type TranscriptSegment } from '$lib/api';
+	import { fetchSession, fetchTranscript, reprocessSession, type Session, type TranscriptSegment } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
 
@@ -9,6 +9,24 @@
 	let transcript = $state<TranscriptSegment[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let reprocessing = $state(false);
+	let reprocessMessage = $state<string | null>(null);
+
+	async function handleReprocess(retranscribe: boolean) {
+		if (!session) return;
+		reprocessing = true;
+		reprocessMessage = null;
+		try {
+			await reprocessSession(session.id, retranscribe);
+			reprocessMessage = retranscribe
+				? 'Re-transcription and processing started. Refresh the page in a few minutes.'
+				: 'Reprocessing started. Refresh the page in a few minutes.';
+		} catch (e) {
+			reprocessMessage = e instanceof Error ? e.message : 'Failed to start reprocessing';
+		} finally {
+			reprocessing = false;
+		}
+	}
 
 	function formatDate(dateStr: string): string {
 		return new Date(dateStr).toLocaleDateString('en-GB', {
@@ -98,6 +116,26 @@
 				This session is still being processed ({session.status}). Content may be incomplete.
 			</div>
 		{/if}
+
+		<div class="reprocess-actions">
+			<button
+				class="btn btn-secondary"
+				disabled={reprocessing}
+				onclick={() => handleReprocess(false)}
+			>
+				{reprocessing ? 'Processing...' : 'Re-run Summary & Extraction'}
+			</button>
+			<button
+				class="btn btn-secondary"
+				disabled={reprocessing}
+				onclick={() => handleReprocess(true)}
+			>
+				{reprocessing ? 'Processing...' : 'Re-run Full Pipeline (incl. Transcription)'}
+			</button>
+			{#if reprocessMessage}
+				<span class="reprocess-message">{reprocessMessage}</span>
+			{/if}
+		</div>
 
 		{#if summaryParagraphs.length > 0}
 			<section class="card">
@@ -200,6 +238,39 @@
 		border-radius: var(--radius);
 		font-size: 0.85rem;
 		margin-bottom: 1.25rem;
+	}
+
+	.reprocess-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+		margin-bottom: 1.25rem;
+	}
+	.btn {
+		padding: 0.5rem 1rem;
+		border-radius: var(--radius);
+		font-size: 0.85rem;
+		font-weight: 500;
+		cursor: pointer;
+		border: 1px solid var(--border);
+		transition: background 0.15s, border-color 0.15s;
+	}
+	.btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.btn-secondary {
+		background: var(--bg-surface);
+		color: var(--text-primary);
+	}
+	.btn-secondary:hover:not(:disabled) {
+		background: var(--border);
+		border-color: var(--text-muted);
+	}
+	.reprocess-message {
+		font-size: 0.85rem;
+		color: var(--accent-gold);
 	}
 
 	.card {
