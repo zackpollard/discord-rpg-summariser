@@ -166,7 +166,7 @@ jobs:
       - name: Run integration tests
         run: |
           TEST_DATABASE_URL="postgres://rpg:rpg@localhost:5432/rpg_summariser_test?sslmode=disable" \
-            go test -tags nolibopusfile -count=1 -v ./internal/api/ ./internal/storage/
+            go test -tags nolibopusfile -count=1 -p 1 -v ./internal/storage/ ./internal/api/
         env:
           CGO_ENABLED: "1"
           CGO_LDFLAGS: "-L${{ github.workspace }}/_deps/whisper.cpp/build/src -L${{ github.workspace }}/_deps/whisper.cpp/build/ggml/src -lwhisper -lggml -lggml-base -lggml-cpu -lm -lstdc++ -fopenmp"
