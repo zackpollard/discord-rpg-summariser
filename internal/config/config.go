@@ -10,6 +10,7 @@ type Config struct {
 	Discord    DiscordConfig    `yaml:"discord"`
 	Telegram   TelegramConfig   `yaml:"telegram"`
 	Transcribe TranscribeConfig `yaml:"transcribe"`
+	Diarize    DiarizeConfig    `yaml:"diarize"`
 	LLM        LLMConfig        `yaml:"llm"`
 	Storage    StorageConfig    `yaml:"storage"`
 	Web        WebConfig        `yaml:"web"`
@@ -27,6 +28,11 @@ type TranscribeConfig struct {
 	Language string `yaml:"language"`
 	Threads  int    `yaml:"threads"`
 	GPU      bool   `yaml:"gpu"`
+}
+
+type DiarizeConfig struct {
+	ModelDir string `yaml:"model_dir"` // defaults to transcribe.model_dir if empty
+	Threads  int    `yaml:"threads"`   // defaults to transcribe.threads if 0
 }
 
 type LLMConfig struct {

@@ -84,6 +84,25 @@ In Discord:
 
 The bot will transcribe the audio, generate a summary, extract entities and quests, and post a notification in Discord.
 
+## Shared Microphone Support
+
+If two people share a microphone (e.g., the DM and their partner in the same room), the bot can use speaker diarization to separate their voices and attribute transcript segments correctly.
+
+Uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (pyannote segmentation + speaker embeddings) for diarization. Models are downloaded automatically on first use (~40MB total).
+
+### Setup
+
+1. Set the DM for your campaign: `/campaign dm`
+2. Configure the shared mic: `/campaign shared-mic user:@DMUser partner-name:Alice`
+
+That's it. The next time a session is recorded, the bot will automatically:
+- Detect the shared mic user's audio
+- Run speaker diarization to identify two speakers
+- Determine which speaker is the DM (by speaking time — the DM typically narrates more)
+- Attribute each transcript segment to the correct character
+
+The configuration persists across sessions — you only need to set it up once per campaign.
+
 ## Docker Deployment
 
 ### Build and run with Docker Compose
@@ -169,6 +188,7 @@ Telegram messages from the DM are filtered for relevance (short chatter is exclu
 | `/campaign list` | List all campaigns |
 | `/campaign set` | Set the active campaign |
 | `/campaign dm` | Set the Dungeon Master |
+| `/campaign shared-mic` | Configure a shared microphone (two speakers) |
 | `/campaign telegram-dm` | Set the DM's Telegram user ID |
 | `/campaign recap` | Generate or view the story recap |
 | `/character set` | Set a character name mapping |
@@ -198,6 +218,7 @@ internal/
   api/                HTTP API handlers
   bot/                Discord bot, command handlers, pipeline
   config/             Configuration loading
+  diarize/            Speaker diarization (sherpa-onnx)
   storage/            PostgreSQL storage layer
   summarise/          LLM prompts and clients (Claude CLI, Ollama)
   telegram/           Telegram Bot API client

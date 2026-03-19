@@ -14,6 +14,11 @@ transcribe:
   language: "en"
   threads: 4
 
+# Speaker diarization for shared microphones (auto-downloads models on first use)
+# diarize:
+#   model_dir: "models"  # defaults to transcribe.model_dir
+#   threads: 4           # defaults to transcribe.threads
+
 llm:
   provider: "claude-cli"  # claude-cli or ollama
   # ollama_url: "http://localhost:11434"

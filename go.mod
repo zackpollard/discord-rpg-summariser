@@ -18,6 +18,10 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/k2-fsa/sherpa-onnx-go v1.12.30 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-linux v1.12.30 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-macos v1.12.30 // indirect
+	github.com/k2-fsa/sherpa-onnx-go-windows v1.12.30 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	golang.org/x/crypto v0.32.0 // indirect

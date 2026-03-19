@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"discord-rpg-summariser/internal/config"
+	"discord-rpg-summariser/internal/diarize"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/telegram"
@@ -45,6 +46,10 @@ type Bot struct {
 	// Telegram integration (nil if not configured).
 	telegramClient   *telegram.Client
 	telegramListener *telegram.Listener
+
+	// Speaker diarization (lazy-initialized on first shared-mic session).
+	diarizer     *diarize.Diarizer
+	diarizerOnce sync.Once
 }
 
 // LiveTranscriptWorker returns the current live transcription worker, or nil.
@@ -197,6 +202,27 @@ func NewBot(cfg *config.Config, store *storage.Store, transcriber *transcribe.Tr
 	return b, nil
 }
 
+// getDiarizer returns the speaker diarizer, initializing it on first use.
+func (b *Bot) getDiarizer() *diarize.Diarizer {
+	b.diarizerOnce.Do(func() {
+		modelDir := b.config.Diarize.ModelDir
+		if modelDir == "" {
+			modelDir = b.config.Transcribe.ModelDir
+		}
+		threads := b.config.Diarize.Threads
+		if threads == 0 {
+			threads = b.config.Transcribe.Threads
+		}
+		d, err := diarize.NewDiarizer(modelDir, threads)
+		if err != nil {
+			log.Printf("Failed to initialize diarizer: %v", err)
+			return
+		}
+		b.diarizer = d
+	})
+	return b.diarizer
+}
+
 // SetTelegramClient sets the Telegram client for capturing group chat messages.
 func (b *Bot) SetTelegramClient(c *telegram.Client) {
 	b.telegramClient = c
@@ -245,6 +271,9 @@ func (b *Bot) Stop() error {
 			log.Printf("Error disconnecting voice during shutdown: %v", err)
 		}
 		b.activeVC = nil
+	}
+	if b.diarizer != nil {
+		b.diarizer.Close()
 	}
 	b.mu.Unlock()
 

@@ -128,6 +128,25 @@ var commands = []*discordgo.ApplicationCommand{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 			},
 			{
+				Name:        "shared-mic",
+				Description: "Configure a shared microphone (two speakers on one mic)",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "user",
+						Description: "The Discord user sharing the microphone",
+						Type:        discordgo.ApplicationCommandOptionUser,
+						Required:    true,
+					},
+					{
+						Name:        "partner-name",
+						Description: "Character name of the second person on the mic",
+						Type:        discordgo.ApplicationCommandOptionString,
+						Required:    true,
+					},
+				},
+			},
+			{
 				Name:        "telegram-dm",
 				Description: "Set the Telegram user ID of the DM for Telegram integration",
 				Type:        discordgo.ApplicationCommandOptionSubCommand,

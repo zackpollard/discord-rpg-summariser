@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"discord-rpg-summariser/internal/audio"
+	"discord-rpg-summariser/internal/diarize"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/telegram"
@@ -62,6 +64,8 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleCampaignDM(s, i)
 		case "recap":
 			b.handleCampaignRecap(s, i)
+		case "shared-mic":
+			b.handleCampaignSharedMic(s, i)
 		case "telegram-dm":
 			b.handleCampaignTelegramDM(s, i)
 		}
@@ -475,6 +479,45 @@ func (b *Bot) handleCampaignTelegramDM(s *discordgo.Session, i *discordgo.Intera
 	respond(s, i, fmt.Sprintf("Telegram DM user ID set to **%d** for **%s**.", telegramUserID, campaign.Name))
 }
 
+func (b *Bot) handleCampaignSharedMic(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	ctx := context.Background()
+	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, i.GuildID)
+	if err != nil {
+		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		return
+	}
+
+	if campaign.DMUserID == nil {
+		respondEphemeral(s, i, "Set the DM first with `/campaign dm` before configuring shared mic.")
+		return
+	}
+
+	opts := subcommandOptions(i)
+	micUser := opts["user"].UserValue(s)
+	partnerName := opts["partner-name"].StringValue()
+
+	partnerID := storage.SyntheticPartnerID(micUser.ID)
+
+	// Save the shared mic mapping.
+	if err := b.store.SetSharedMic(ctx, campaign.ID, micUser.ID, *campaign.DMUserID, partnerID); err != nil {
+		respondEphemeral(s, i, "Failed to save shared mic config.")
+		log.Printf("SetSharedMic error: %v", err)
+		return
+	}
+
+	// Auto-create character mapping for the partner.
+	if err := b.store.SetCharacterMapping(ctx, storage.CharacterMapping{
+		UserID:        partnerID,
+		GuildID:       i.GuildID,
+		CampaignID:    campaign.ID,
+		CharacterName: partnerName,
+	}); err != nil {
+		log.Printf("SetCharacterMapping for partner error: %v", err)
+	}
+
+	respond(s, i, fmt.Sprintf("Shared mic configured: <@%s>'s audio will be split between the DM and **%s**.", micUser.ID, partnerName))
+}
+
 // ---------------------------------------------------------------------------
 // Pipeline
 // ---------------------------------------------------------------------------
@@ -500,17 +543,30 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 		return
 	}
 
-	// Transcribe each user's WAV.
+	// Transcribe each user's WAV, with diarization for shared mics.
 	b.store.UpdateSessionStatus(ctx, sessionID, "transcribing")
+
+	// Load shared mic config for this campaign.
+	sharedMics, _ := b.store.GetSharedMics(ctx, session.CampaignID)
+	sharedMicMap := make(map[string]storage.SharedMic, len(sharedMics))
+	for _, m := range sharedMics {
+		sharedMicMap[m.DiscordUserID] = m
+	}
 
 	userSegments := make(map[string][]transcribe.Segment, len(userFiles))
 	for userID, wavPath := range userFiles {
-		segments, err := b.transcriber.TranscribeFile(ctx, wavPath)
-		if err != nil {
-			log.Printf("pipeline: transcribe user %s: %v", userID, err)
-			continue
+		if mic, ok := sharedMicMap[userID]; ok {
+			// Shared mic: diarize then attribute segments.
+			b.transcribeSharedMic(ctx, wavPath, mic, userSegments)
+		} else {
+			// Normal single-user transcription.
+			segments, err := b.transcriber.TranscribeFile(ctx, wavPath)
+			if err != nil {
+				log.Printf("pipeline: transcribe user %s: %v", userID, err)
+				continue
+			}
+			userSegments[userID] = segments
 		}
-		userSegments[userID] = segments
 	}
 
 	if len(userSegments) == 0 {
@@ -666,6 +722,62 @@ func (b *Bot) buildTranscriptWithTelegram(
 
 	log.Printf("pipeline: interleaving %d Telegram messages into transcript", len(entries))
 	return transcribe.FormatTranscriptWithTelegram(merged, entries)
+}
+
+// transcribeSharedMic diarizes a shared-mic WAV file and attributes each
+// transcription segment to the correct speaker.
+func (b *Bot) transcribeSharedMic(ctx context.Context, wavPath string, mic storage.SharedMic, userSegments map[string][]transcribe.Segment) {
+	d := b.getDiarizer()
+	if d == nil {
+		log.Printf("pipeline: diarizer not available, treating shared mic user %s as single speaker", mic.DiscordUserID)
+		segments, err := b.transcriber.TranscribeFile(ctx, wavPath)
+		if err != nil {
+			log.Printf("pipeline: transcribe shared mic user %s: %v", mic.DiscordUserID, err)
+			return
+		}
+		userSegments[mic.SpeakerAUserID] = segments
+		return
+	}
+
+	// Resample to 16kHz for diarization.
+	samples, err := audio.LoadAndResample(wavPath)
+	if err != nil {
+		log.Printf("pipeline: resample for diarization %s: %v", mic.DiscordUserID, err)
+		return
+	}
+
+	// Run speaker diarization.
+	diarSegments, err := d.Diarize(samples)
+	if err != nil {
+		log.Printf("pipeline: diarize %s: %v", mic.DiscordUserID, err)
+		// Fall back to single speaker.
+		segments, _ := b.transcriber.TranscribeFile(ctx, wavPath)
+		if segments != nil {
+			userSegments[mic.SpeakerAUserID] = segments
+		}
+		return
+	}
+
+	// Identify which diarized speaker is the DM (most speaking time).
+	dmSpeakerID := diarize.IdentifyDMSpeaker(diarSegments)
+	log.Printf("pipeline: diarized %s: %d segments, DM is speaker %d", mic.DiscordUserID, len(diarSegments), dmSpeakerID)
+
+	// Transcribe the full audio with whisper.
+	allSegments, err := b.transcriber.TranscribeFile(ctx, wavPath)
+	if err != nil {
+		log.Printf("pipeline: transcribe shared mic %s: %v", mic.DiscordUserID, err)
+		return
+	}
+
+	// Attribute each whisper segment to a speaker based on diarization overlap.
+	for _, seg := range allSegments {
+		speaker := diarize.AttributeSegment(seg.StartTime, seg.EndTime, diarSegments)
+		if speaker == dmSpeakerID {
+			userSegments[mic.SpeakerAUserID] = append(userSegments[mic.SpeakerAUserID], seg)
+		} else {
+			userSegments[mic.SpeakerBUserID] = append(userSegments[mic.SpeakerBUserID], seg)
+		}
+	}
 }
 
 func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary, dmName string) {
