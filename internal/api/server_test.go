@@ -18,7 +18,8 @@ func testStore(t *testing.T) *storage.Store {
 	if dbURL == "" {
 		t.Skip("TEST_DATABASE_URL not set, skipping integration test")
 	}
-	store, err := storage.New(context.Background(), dbURL, nil)
+	migrationsFS := os.DirFS("../../migrations")
+	store, err := storage.New(context.Background(), dbURL, migrationsFS)
 	if err != nil {
 		t.Fatalf("connect to test database: %v", err)
 	}
