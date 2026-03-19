@@ -134,7 +134,22 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	}
 
 	rec := voice.NewRecorder(audioDir, guildID)
-	rec.Start(vc)
+	rec.Start(vc, func(userID string) string {
+		member, err := s.GuildMember(guildID, userID)
+		if err != nil {
+			return userID
+		}
+		if member.Nick != "" {
+			return member.Nick
+		}
+		if member.User != nil {
+			if member.User.GlobalName != "" {
+				return member.User.GlobalName
+			}
+			return member.User.Username
+		}
+		return userID
+	})
 
 	b.mu.Lock()
 	b.activeVC = vc

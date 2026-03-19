@@ -9,7 +9,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-replace github.com/bwmarrin/discordgo => github.com/yeongaori/discordgo-fork v0.0.0-20260316044635-6e7c94f657fb
+replace github.com/bwmarrin/discordgo => ./_deps/discordgo-fork
 
 require (
 	github.com/cloudflare/circl v1.6.3 // indirect

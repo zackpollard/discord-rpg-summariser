@@ -99,7 +99,7 @@
 				{#each voiceUsers as user (user.user_id)}
 					<div class="voice-user" class:speaking={user.speaking}>
 						<span class="voice-dot" class:active={user.speaking}></span>
-						<span class="voice-name">{user.user_id}</span>
+						<span class="voice-name">{user.display_name || user.user_id}</span>
 						<span class="voice-packets">{formatPackets(user.packet_count)} pkts</span>
 					</div>
 				{/each}

@@ -92,6 +92,7 @@ export async function fetchStatus(): Promise<Status> {
 
 export interface VoiceUser {
 	user_id: string;
+	display_name: string;
 	speaking: boolean;
 	packet_count: number;
 	last_packet_at: string;

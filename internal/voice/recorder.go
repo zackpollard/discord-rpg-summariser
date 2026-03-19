@@ -21,6 +21,7 @@ const (
 // UserActivity tracks live voice activity for a single user.
 type UserActivity struct {
 	UserID       string    `json:"user_id"`
+	DisplayName  string    `json:"display_name"`
 	Speaking     bool      `json:"speaking"`
 	PacketCount  int64     `json:"packet_count"`
 	LastPacketAt time.Time `json:"last_packet_at"`
@@ -57,17 +58,20 @@ func NewRecorder(outputDir, guildID string) *Recorder {
 
 // HandleSpeakingUpdate maps an SSRC to a user ID, creates a UserStream if
 // needed, and flushes any buffered packets for that SSRC.
-func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint32, userID string) {
+// displayName is the resolved Discord display name (may be empty).
+func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint32, userID, displayName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	log.Printf("Speaking update: SSRC=%d user=%s", ssrc, userID)
+	log.Printf("Speaking update: SSRC=%d user=%s (%s)", ssrc, userID, displayName)
 
 	r.ssrcToUser[ssrc] = userID
 	r.userToSSRC[userID] = ssrc
 
 	if _, ok := r.activity[userID]; !ok {
-		r.activity[userID] = &UserActivity{UserID: userID}
+		r.activity[userID] = &UserActivity{UserID: userID, DisplayName: displayName}
+	} else if displayName != "" {
+		r.activity[userID].DisplayName = displayName
 	}
 
 	if _, ok := r.streams[ssrc]; ok {
@@ -121,11 +125,19 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 	r.pendingPackets[packet.SSRC] = append(buf, packet)
 }
 
+// NameResolver resolves a Discord user ID to a display name.
+type NameResolver func(userID string) string
+
 // Start registers the speaking handler on the voice connection and launches a
 // goroutine that reads from vc.OpusRecv until Stop is called.
-func (r *Recorder) Start(vc *discordgo.VoiceConnection) {
+// nameResolver is optional — if provided, it resolves user IDs to display names.
+func (r *Recorder) Start(vc *discordgo.VoiceConnection, nameResolver NameResolver) {
 	vc.AddHandler(func(vc *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
-		r.HandleSpeakingUpdate(vc, uint32(vs.SSRC), vs.UserID)
+		name := ""
+		if nameResolver != nil {
+			name = nameResolver(vs.UserID)
+		}
+		r.HandleSpeakingUpdate(vc, uint32(vs.SSRC), vs.UserID, name)
 	})
 
 	log.Printf("Recorder started, waiting for OpusRecv packets...")

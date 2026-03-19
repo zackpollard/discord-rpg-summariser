@@ -1,7 +1,9 @@
 data/
 *.env
 config.local.yaml
+config.yaml
 web/node_modules/
 web/.svelte-kit/
 web/build/
 models/
+bot
