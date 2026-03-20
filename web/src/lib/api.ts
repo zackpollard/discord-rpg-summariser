@@ -331,8 +331,11 @@ export async function fetchRecap(campaignId: number): Promise<CampaignRecap> {
 	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`);
 }
 
-export async function regenerateRecap(campaignId: number): Promise<CampaignRecap> {
-	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`, {
+export async function regenerateRecap(campaignId: number, last?: number): Promise<CampaignRecap> {
+	const params = new URLSearchParams();
+	if (last !== undefined && last > 0) params.set('last', String(last));
+	const qs = params.toString();
+	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap${qs ? '?' + qs : ''}`, {
 		method: 'POST'
 	});
 }

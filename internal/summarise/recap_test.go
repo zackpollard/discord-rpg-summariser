@@ -84,3 +84,45 @@ func TestBuildRecapPrompt_NoDMName(t *testing.T) {
 		t.Error("prompt should not contain DM section when dmName is empty")
 	}
 }
+
+func TestBuildRecapPrompt_PartialLastN(t *testing.T) {
+	summaries := []string{
+		"Session four: the party found the lost temple.",
+		"Session five: the party confronted the lich.",
+	}
+
+	prompt := BuildRecapPrompt(summaries, "Matt", 2)
+
+	if !strings.Contains(prompt, "most recent 2 sessions") {
+		t.Error("partial prompt should mention 'most recent 2 sessions'")
+	}
+	if !strings.Contains(prompt, "recent events") {
+		t.Error("partial prompt should mention 'recent events'")
+	}
+	// Should NOT contain the full "Story So Far" preamble.
+	if strings.Contains(prompt, "Story So Far") {
+		t.Error("partial prompt should not contain 'Story So Far'")
+	}
+	// All summaries should still appear.
+	for i, s := range summaries {
+		if !strings.Contains(prompt, s) {
+			t.Errorf("prompt should contain session summary %d", i+1)
+		}
+	}
+	// DM name should still appear.
+	if !strings.Contains(prompt, "The Dungeon Master is: Matt") {
+		t.Error("prompt should contain DM name")
+	}
+}
+
+func TestBuildRecapPrompt_ZeroLastN(t *testing.T) {
+	// lastN=0 should behave the same as the default (full recap).
+	prompt := BuildRecapPrompt([]string{"A session happened."}, "", 0)
+
+	if !strings.Contains(prompt, "Story So Far") {
+		t.Error("prompt with lastN=0 should contain 'Story So Far'")
+	}
+	if strings.Contains(prompt, "most recent") {
+		t.Error("prompt with lastN=0 should not contain 'most recent'")
+	}
+}

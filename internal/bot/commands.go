@@ -126,6 +126,15 @@ var commands = []*discordgo.ApplicationCommand{
 				Name:        "recap",
 				Description: "Generate or view the story so far",
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "last",
+						Description: "Only recap the last N sessions",
+						Type:        discordgo.ApplicationCommandOptionInteger,
+						Required:    false,
+						MinValue:    floatPtr(1),
+					},
+				},
 			},
 			{
 				Name:        "shared-mic",
@@ -224,3 +233,6 @@ var commands = []*discordgo.ApplicationCommand{
 		},
 	},
 }
+
+// floatPtr returns a pointer to a float64 value (used for Discord command option MinValue).
+func floatPtr(v float64) *float64 { return &v }

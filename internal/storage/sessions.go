@@ -100,6 +100,42 @@ func (s *Store) UpdateSessionSummary(ctx context.Context, id int64, summary stri
 	return err
 }
 
+// GetLatestCompleteSessions returns the N most recent sessions with status
+// 'complete' and a non-null summary for the given campaign, ordered
+// chronologically (oldest first).
+func (s *Store) GetLatestCompleteSessions(ctx context.Context, campaignID int64, n int) ([]Session, error) {
+	rows, err := s.Pool.Query(ctx,
+		`SELECT `+sessionColumns+`
+		 FROM sessions
+		 WHERE campaign_id = $1 AND status = 'complete' AND summary IS NOT NULL
+		 ORDER BY started_at DESC
+		 LIMIT $2`,
+		campaignID, n,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get latest complete sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []Session
+	for rows.Next() {
+		sess, err := scanSessionRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, *sess)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Reverse to chronological order (oldest first).
+	for i, j := 0, len(sessions)-1; i < j; i, j = i+1, j-1 {
+		sessions[i], sessions[j] = sessions[j], sessions[i]
+	}
+	return sessions, nil
+}
+
 func (s *Store) CleanupStaleSessions(ctx context.Context) (int64, error) {
 	tag, err := s.Pool.Exec(ctx,
 		`UPDATE sessions SET status = 'failed', ended_at = NOW()

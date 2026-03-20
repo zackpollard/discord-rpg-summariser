@@ -60,30 +60,62 @@ func (s *Server) handleRegenerateRecap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gather session summaries as context for recap generation.
-	sessions, err := s.store.ListSessions(r.Context(), campaign.GuildID, campaignID, 100, 0)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list sessions")
-		return
+	// Check for optional "last" query parameter.
+	var lastN int
+	if v := r.URL.Query().Get("last"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "last must be a positive integer")
+			return
+		}
+		lastN = n
 	}
 
-	var context string
-	for _, sess := range sessions {
-		if sess.Summary != nil {
-			context += "Session #" + strconv.FormatInt(sess.ID, 10) + ": " + *sess.Summary + "\n\n"
+	// Gather session summaries as context for recap generation.
+	var summaryContext string
+	if lastN > 0 {
+		sessions, err := s.store.GetLatestCompleteSessions(r.Context(), campaignID, lastN)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list sessions")
+			return
+		}
+		for _, sess := range sessions {
+			if sess.Summary != nil {
+				summaryContext += "Session #" + strconv.FormatInt(sess.ID, 10) + ": " + *sess.Summary + "\n\n"
+			}
+		}
+	} else {
+		sessions, err := s.store.ListSessions(r.Context(), campaign.GuildID, campaignID, 100, 0)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list sessions")
+			return
+		}
+		for _, sess := range sessions {
+			if sess.Summary != nil {
+				summaryContext += "Session #" + strconv.FormatInt(sess.ID, 10) + ": " + *sess.Summary + "\n\n"
+			}
 		}
 	}
 
-	recap, err := s.loreQA.AskLore(r.Context(), campaignID,
-		"Generate a comprehensive story recap for this campaign based on the session summaries.", context)
+	var prompt string
+	if lastN > 0 {
+		prompt = "Generate a narrative recap of the most recent " + strconv.Itoa(lastN) + " sessions based on the session summaries."
+	} else {
+		prompt = "Generate a comprehensive story recap for this campaign based on the session summaries."
+	}
+
+	recap, err := s.loreQA.AskLore(r.Context(), campaignID, prompt, summaryContext)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate recap")
 		return
 	}
 
-	if err := s.store.UpdateCampaignRecap(r.Context(), campaignID, recap); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save recap")
-		return
+	// Only persist to campaigns.recap when generating a full recap (no "last" filter).
+	if lastN == 0 {
+		if err := s.store.UpdateCampaignRecap(r.Context(), campaignID, recap); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save recap")
+			return
+		}
 	}
 
 	now := time.Now()

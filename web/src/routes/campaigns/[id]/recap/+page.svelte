@@ -9,6 +9,7 @@
 	let loading = $state(true);
 	let generating = $state(false);
 	let error = $state<string | null>(null);
+	let lastN = $state<number | undefined>(undefined);
 
 	function formatDate(dateStr: string): string {
 		return new Date(dateStr).toLocaleDateString('en-GB', {
@@ -36,7 +37,7 @@
 		generating = true;
 		error = null;
 		try {
-			recap = await regenerateRecap(campaignId);
+			recap = await regenerateRecap(campaignId, lastN);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to generate recap';
 		} finally {
@@ -60,6 +61,18 @@
 		<div class="empty-state">
 			<p>No recap has been generated yet.</p>
 			<p class="muted">Generate a narrative recap of your campaign so far.</p>
+			<div class="last-n-row">
+				<label class="last-n-label">
+					Last N sessions:
+					<input
+						class="last-n-input"
+						type="number"
+						min="1"
+						placeholder="All"
+						oninput={(e) => { const v = parseInt((e.target as HTMLInputElement).value); lastN = Number.isNaN(v) ? undefined : v; }}
+					/>
+				</label>
+			</div>
 			<button class="generate-btn" onclick={handleRegenerate} disabled={generating}>
 				{#if generating}
 					<span class="spinner"></span>
@@ -76,14 +89,26 @@
 					<span class="recap-date">Last generated: {formatDate(recap.recap_generated_at)}</span>
 				{/if}
 			</div>
-			<button class="regenerate-btn" onclick={handleRegenerate} disabled={generating}>
-				{#if generating}
-					<span class="spinner"></span>
-					Regenerating...
-				{:else}
-					Regenerate
-				{/if}
-			</button>
+			<div class="recap-actions">
+				<label class="last-n-label">
+					Last N sessions:
+					<input
+						class="last-n-input"
+						type="number"
+						min="1"
+						placeholder="All"
+						oninput={(e) => { const v = parseInt((e.target as HTMLInputElement).value); lastN = Number.isNaN(v) ? undefined : v; }}
+					/>
+				</label>
+				<button class="regenerate-btn" onclick={handleRegenerate} disabled={generating}>
+					{#if generating}
+						<span class="spinner"></span>
+						Regenerating...
+					{:else}
+						Regenerate
+					{/if}
+				</button>
+			</div>
 		</div>
 
 		<div class="recap-body">
@@ -111,6 +136,37 @@
 	.recap-date {
 		color: var(--text-muted);
 		font-size: 0.8rem;
+	}
+
+	.recap-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.last-n-row {
+		margin-bottom: 0.75rem;
+	}
+
+	.last-n-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		color: var(--text-muted);
+		font-size: 0.85rem;
+	}
+
+	.last-n-input {
+		width: 5rem;
+		padding: 0.3rem 0.5rem;
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		color: var(--text-primary);
+		font-size: 0.85rem;
+	}
+	.last-n-input::placeholder {
+		color: var(--text-muted);
 	}
 
 	.regenerate-btn {

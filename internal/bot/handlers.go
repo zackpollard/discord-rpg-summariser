@@ -1369,8 +1369,15 @@ func (b *Bot) handleCampaignRecap(s *discordgo.Session, i *discordgo.Interaction
 		return
 	}
 
-	// If a recap already exists, show it.
-	if campaign.Recap != "" {
+	// Check for optional "last" parameter.
+	opts := subcommandOptions(i)
+	var lastN int
+	if opt, ok := opts["last"]; ok {
+		lastN = int(opt.IntValue())
+	}
+
+	// If no "last" filter and a cached recap already exists, show it.
+	if lastN == 0 && campaign.Recap != "" {
 		respond(s, i, fmt.Sprintf("**The Story So Far — %s**\n\n%s", campaign.Name, campaign.Recap))
 		return
 	}
@@ -1381,20 +1388,34 @@ func (b *Bot) handleCampaignRecap(s *discordgo.Session, i *discordgo.Interaction
 		return
 	}
 
-	// Fetch all completed sessions for this campaign.
-	sessions, err := b.store.ListSessions(ctx, i.GuildID, campaign.ID, 1000, 0)
-	if err != nil {
-		respondEphemeral(s, i, "Failed to fetch sessions.")
-		log.Printf("ListSessions error: %v", err)
-		return
-	}
-
-	// Collect summaries in chronological order (ListSessions returns DESC).
 	var summaries []string
-	for idx := len(sessions) - 1; idx >= 0; idx-- {
-		sess := sessions[idx]
-		if sess.Status == "complete" && sess.Summary != nil && *sess.Summary != "" {
-			summaries = append(summaries, *sess.Summary)
+	if lastN > 0 {
+		// Fetch only the last N complete sessions.
+		sessions, err := b.store.GetLatestCompleteSessions(ctx, campaign.ID, lastN)
+		if err != nil {
+			respondEphemeral(s, i, "Failed to fetch sessions.")
+			log.Printf("GetLatestCompleteSessions error: %v", err)
+			return
+		}
+		for _, sess := range sessions {
+			if sess.Summary != nil && *sess.Summary != "" {
+				summaries = append(summaries, *sess.Summary)
+			}
+		}
+	} else {
+		// Fetch all completed sessions for this campaign.
+		sessions, err := b.store.ListSessions(ctx, i.GuildID, campaign.ID, 1000, 0)
+		if err != nil {
+			respondEphemeral(s, i, "Failed to fetch sessions.")
+			log.Printf("ListSessions error: %v", err)
+			return
+		}
+		// Collect summaries in chronological order (ListSessions returns DESC).
+		for idx := len(sessions) - 1; idx >= 0; idx-- {
+			sess := sessions[idx]
+			if sess.Status == "complete" && sess.Summary != nil && *sess.Summary != "" {
+				summaries = append(summaries, *sess.Summary)
+			}
 		}
 	}
 
@@ -1427,13 +1448,21 @@ func (b *Bot) handleCampaignRecap(s *discordgo.Session, i *discordgo.Interaction
 		return
 	}
 
-	// Persist recap.
-	if err := b.store.UpdateCampaignRecap(ctx, campaign.ID, result.Recap); err != nil {
-		log.Printf("UpdateCampaignRecap error: %v", err)
+	// Only persist recap when generating a full campaign recap (no "last" filter).
+	if lastN == 0 {
+		if err := b.store.UpdateCampaignRecap(ctx, campaign.ID, result.Recap); err != nil {
+			log.Printf("UpdateCampaignRecap error: %v", err)
+		}
 	}
 
 	recap := result.Recap
-	content := fmt.Sprintf("**The Story So Far — %s**\n\n%s", campaign.Name, recap)
+	var title string
+	if lastN > 0 {
+		title = fmt.Sprintf("**Recent Recap (last %d sessions) — %s**", lastN, campaign.Name)
+	} else {
+		title = fmt.Sprintf("**The Story So Far — %s**", campaign.Name)
+	}
+	content := fmt.Sprintf("%s\n\n%s", title, recap)
 	// Discord message limit is 2000 characters.
 	if len(content) > 2000 {
 		content = content[:1997] + "..."

@@ -18,7 +18,14 @@ type RecapGenerator interface {
 
 // BuildRecapPrompt constructs the LLM prompt for generating a "story so far"
 // narrative recap from chronological session summaries.
-func BuildRecapPrompt(sessionSummaries []string, dmName string) string {
+// If lastN > 0, the prompt is adjusted to indicate a partial recap covering
+// only the most recent N sessions.
+func BuildRecapPrompt(sessionSummaries []string, dmName string, lastN ...int) string {
+	partial := 0
+	if len(lastN) > 0 && lastN[0] > 0 {
+		partial = lastN[0]
+	}
+
 	var b strings.Builder
 
 	b.WriteString("You are an expert storyteller and lore-keeper for tabletop RPG campaigns (Dungeons & Dragons 5th Edition).\n\n")
@@ -27,8 +34,13 @@ func BuildRecapPrompt(sessionSummaries []string, dmName string) string {
 		b.WriteString("The Dungeon Master is: " + dmName + "\n\n")
 	}
 
-	b.WriteString("Below are summaries of each session played so far, in chronological order. ")
-	b.WriteString("Synthesise them into a cohesive \"Story So Far\" narrative recap.\n\n")
+	if partial > 0 {
+		fmt.Fprintf(&b, "Below are summaries of the most recent %d sessions, in chronological order. ", partial)
+		b.WriteString("Synthesise them into a cohesive narrative recap of recent events.\n\n")
+	} else {
+		b.WriteString("Below are summaries of each session played so far, in chronological order. ")
+		b.WriteString("Synthesise them into a cohesive \"Story So Far\" narrative recap.\n\n")
+	}
 
 	b.WriteString("Guidelines:\n")
 	b.WriteString("- Write in past tense, third person.\n")

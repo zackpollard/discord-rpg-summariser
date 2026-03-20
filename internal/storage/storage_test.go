@@ -1020,3 +1020,77 @@ func TestInsertAndGetTranscript(t *testing.T) {
 		t.Fatalf("expected 0 segments for non-existent session, got %d", len(empty))
 	}
 }
+
+func TestGetLatestCompleteSessions(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create 5 sessions: 3 complete with summaries, 1 complete without summary, 1 recording.
+	var completeIDs []int64
+	for i := 0; i < 3; i++ {
+		id, err := store.CreateSession(ctx, guildID, campID, "ch-1", fmt.Sprintf("/tmp/latest-%d", i))
+		if err != nil {
+			t.Fatalf("CreateSession %d: %v", i, err)
+		}
+		summary := fmt.Sprintf("Summary for session %d", i+1)
+		if err := store.UpdateSessionSummary(ctx, id, summary, []string{"event"}); err != nil {
+			t.Fatalf("UpdateSessionSummary %d: %v", i, err)
+		}
+		completeIDs = append(completeIDs, id)
+		// Small sleep to ensure distinct started_at ordering.
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Session 4: complete but no summary (just status change).
+	id4, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/latest-nosummary")
+	store.UpdateSessionStatus(ctx, id4, "complete")
+
+	// Session 5: still recording.
+	store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/latest-recording")
+
+	// Request last 2 — should return the 2 most recent complete sessions with summaries.
+	sessions, err := store.GetLatestCompleteSessions(ctx, campID, 2)
+	if err != nil {
+		t.Fatalf("GetLatestCompleteSessions: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(sessions))
+	}
+	// Should be in chronological order (oldest first).
+	if sessions[0].ID != completeIDs[1] {
+		t.Errorf("expected first session ID %d, got %d", completeIDs[1], sessions[0].ID)
+	}
+	if sessions[1].ID != completeIDs[2] {
+		t.Errorf("expected second session ID %d, got %d", completeIDs[2], sessions[1].ID)
+	}
+	// Summaries should be non-nil.
+	for i, s := range sessions {
+		if s.Summary == nil || *s.Summary == "" {
+			t.Errorf("session %d: expected non-empty summary", i)
+		}
+	}
+
+	// Request more than available — should return all 3 complete sessions with summaries.
+	all, err := store.GetLatestCompleteSessions(ctx, campID, 100)
+	if err != nil {
+		t.Fatalf("GetLatestCompleteSessions all: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 sessions, got %d", len(all))
+	}
+	// Chronological order check.
+	if all[0].ID >= all[1].ID || all[1].ID >= all[2].ID {
+		t.Error("sessions should be in chronological order (oldest first)")
+	}
+
+	// Request 0 — edge case, should return empty.
+	zero, err := store.GetLatestCompleteSessions(ctx, campID, 0)
+	if err != nil {
+		t.Fatalf("GetLatestCompleteSessions zero: %v", err)
+	}
+	if len(zero) != 0 {
+		t.Fatalf("expected 0 sessions for n=0, got %d", len(zero))
+	}
+}
