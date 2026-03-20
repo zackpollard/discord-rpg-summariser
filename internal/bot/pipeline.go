@@ -168,6 +168,9 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 
 	// Extract combat encounters (non-fatal on error).
 	b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
+
+	// Generate vector embeddings for RAG (non-fatal on error).
+	b.generateEmbeddings(ctx, session, sessionID, merged, result.Summary, dmName)
 }
 
 // buildTranscriptWithTelegram persists Telegram messages to the DB, filters

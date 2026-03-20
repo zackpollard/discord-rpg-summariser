@@ -10,6 +10,7 @@ import (
 
 	"discord-rpg-summariser/internal/auth"
 	"discord-rpg-summariser/internal/config"
+	"discord-rpg-summariser/internal/embed"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/voice"
 )
@@ -28,6 +29,7 @@ type Server struct {
 	memberP       MemberProvider
 	loreQA        LoreQAProvider
 	reprocessor   SessionReprocessor
+	embedder      embed.Embedder
 	mux           *http.ServeMux
 	httpServer    *http.Server
 	sessions      *auth.SessionManager
@@ -111,6 +113,11 @@ func (s *Server) SetMemberProvider(mp MemberProvider) {
 // SetLoreQAProvider sets the provider for lore Q&A and recap generation.
 func (s *Server) SetLoreQAProvider(lqp LoreQAProvider) {
 	s.loreQA = lqp
+}
+
+// SetEmbedder sets the embedding generator for RAG-powered features.
+func (s *Server) SetEmbedder(e embed.Embedder) {
+	s.embedder = e
 }
 
 func (s *Server) Start() error {

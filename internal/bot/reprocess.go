@@ -112,6 +112,12 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
 	b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
 
+	// Regenerate embeddings: delete old ones first, then generate fresh.
+	if err := b.store.DeleteEmbeddingsForSession(ctx, sessionID); err != nil {
+		log.Printf("reprocess: DeleteEmbeddingsForSession: %v", err)
+	}
+	b.generateEmbeddings(ctx, session, sessionID, merged, result.Summary, dmName)
+
 	log.Printf("reprocess: session %d completed successfully", sessionID)
 	return nil
 }

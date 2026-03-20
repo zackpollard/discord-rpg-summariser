@@ -12,6 +12,7 @@ import (
 	"discord-rpg-summariser/internal/api"
 	"discord-rpg-summariser/internal/bot"
 	"discord-rpg-summariser/internal/config"
+	"discord-rpg-summariser/internal/embed"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/telegram"
@@ -87,11 +88,22 @@ func main() {
 		discordBot.SetTelegramClient(telegram.NewClient(cfg.Telegram.BotToken))
 	}
 
+	// Set up embedder for RAG if Ollama URL and embedding model are configured.
+	var embedder embed.Embedder
+	if cfg.LLM.OllamaURL != "" && cfg.LLM.EmbeddingModel != "" {
+		embedder = embed.NewOllamaEmbedder(cfg.LLM.OllamaURL, cfg.LLM.EmbeddingModel)
+		discordBot.SetEmbedder(embedder)
+		log.Printf("Embedding model enabled: %s via %s", cfg.LLM.EmbeddingModel, cfg.LLM.OllamaURL)
+	}
+
 	srv.SetVoiceActivityProvider(discordBot)
 	srv.SetLiveTranscriptProvider(discordBot)
 	srv.SetMemberProvider(discordBot)
 	srv.SetLoreQAProvider(discordBot)
 	srv.SetSessionReprocessor(discordBot)
+	if embedder != nil {
+		srv.SetEmbedder(embedder)
+	}
 
 	go func() {
 		log.Printf("API server listening on %s", cfg.Web.ListenAddr)

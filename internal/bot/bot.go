@@ -12,6 +12,7 @@ import (
 
 	"discord-rpg-summariser/internal/config"
 	"discord-rpg-summariser/internal/diarize"
+	"discord-rpg-summariser/internal/embed"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/telegram"
@@ -50,6 +51,9 @@ type Bot struct {
 	// Speaker diarization (lazy-initialized on first shared-mic session).
 	diarizer     *diarize.Diarizer
 	diarizerOnce sync.Once
+
+	// Embedding generation for RAG (nil if not configured).
+	embedder embed.Embedder
 }
 
 // LiveTranscriptWorker returns the current live transcription worker, or nil.
@@ -226,6 +230,11 @@ func (b *Bot) getDiarizer() *diarize.Diarizer {
 // SetTelegramClient sets the Telegram client for capturing group chat messages.
 func (b *Bot) SetTelegramClient(c *telegram.Client) {
 	b.telegramClient = c
+}
+
+// SetEmbedder sets the embedding generator for RAG-powered features.
+func (b *Bot) SetEmbedder(e embed.Embedder) {
+	b.embedder = e
 }
 
 // Start opens the Discord connection, registers slash commands, and installs
