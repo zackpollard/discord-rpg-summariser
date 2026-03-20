@@ -19,7 +19,7 @@ A Discord bot that records D&D voice sessions, transcribes them with whisper.cpp
 
 *Storm King's Thunder campaign with 10 sessions of generated transcript, summary, entity, and quest data.*
 
-https://github.com/zackpollard/discord-rpg-summariser/raw/main/docs/demo.webm
+<video src="docs/demo.webm" autoplay loop muted playsinline></video>
 
 <details>
 <summary>Screenshots</summary>
