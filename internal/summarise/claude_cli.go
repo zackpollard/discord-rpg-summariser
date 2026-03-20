@@ -17,11 +17,10 @@ func NewClaudeCLI() *ClaudeCLI {
 	return &ClaudeCLI{}
 }
 
-// Summarise runs the claude CLI with the built prompt piped via stdin and
-// parses the JSON response into a SummaryResult.
-func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSummary string, dmName string) (*SummaryResult, error) {
-	prompt := BuildPrompt(transcript, previousSummary, dmName)
-
+// runPrompt executes the claude CLI with the given prompt and unmarshals the
+// JSON response into result. This eliminates duplication across all extraction
+// methods which follow the identical pattern: build prompt, run CLI, parse JSON.
+func (c *ClaudeCLI) runPrompt(ctx context.Context, prompt string, result any) error {
 	cmd := exec.CommandContext(ctx, "claude", "--print")
 	cmd.Stdin = strings.NewReader(prompt)
 
@@ -30,19 +29,26 @@ func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSu
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
+		return fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
 	}
 
-	output := stdout.Bytes()
+	output := StripCodeFences(stdout.Bytes())
 
-	// The CLI may wrap the JSON in markdown fences; strip them.
-	output = StripCodeFences(output)
+	if err := json.Unmarshal(output, result); err != nil {
+		return fmt.Errorf("parse claude CLI JSON response: %w\nraw output: %s", err, stdout.String())
+	}
 
+	return nil
+}
+
+// Summarise runs the claude CLI with the built prompt piped via stdin and
+// parses the JSON response into a SummaryResult.
+func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSummary string, dmName string) (*SummaryResult, error) {
+	prompt := BuildPrompt(transcript, previousSummary, dmName)
 	var result SummaryResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("parse claude CLI JSON response: %w\nraw output: %s", err, stdout.String())
+	if err := c.runPrompt(ctx, prompt, &result); err != nil {
+		return nil, err
 	}
-
 	return &result, nil
 }
 
@@ -50,26 +56,10 @@ func (c *ClaudeCLI) Summarise(ctx context.Context, transcript string, previousSu
 // the JSON response into an ExtractionResult.
 func (c *ClaudeCLI) ExtractEntities(ctx context.Context, transcript, summary string, existingEntities []string, dmName string, playerCharacters []string) (*ExtractionResult, error) {
 	prompt := BuildExtractionPrompt(transcript, summary, existingEntities, dmName, playerCharacters)
-
-	cmd := exec.CommandContext(ctx, "claude", "--print")
-	cmd.Stdin = strings.NewReader(prompt)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
-	}
-
-	output := stdout.Bytes()
-	output = StripCodeFences(output)
-
 	var result ExtractionResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("parse claude CLI extraction JSON: %w\nraw output: %s", err, stdout.String())
+	if err := c.runPrompt(ctx, prompt, &result); err != nil {
+		return nil, err
 	}
-
 	return &result, nil
 }
 
@@ -77,26 +67,10 @@ func (c *ClaudeCLI) ExtractEntities(ctx context.Context, transcript, summary str
 // parses the JSON response into a QuestExtractionResult.
 func (c *ClaudeCLI) ExtractQuests(ctx context.Context, transcript, summary string, existingQuests []string, dmName string) (*QuestExtractionResult, error) {
 	prompt := BuildQuestExtractionPrompt(transcript, summary, existingQuests, dmName)
-
-	cmd := exec.CommandContext(ctx, "claude", "--print")
-	cmd.Stdin = strings.NewReader(prompt)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
-	}
-
-	output := stdout.Bytes()
-	output = StripCodeFences(output)
-
 	var result QuestExtractionResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("parse claude CLI quest extraction JSON: %w\nraw output: %s", err, stdout.String())
+	if err := c.runPrompt(ctx, prompt, &result); err != nil {
+		return nil, err
 	}
-
 	return &result, nil
 }
 
@@ -104,26 +78,10 @@ func (c *ClaudeCLI) ExtractQuests(ctx context.Context, transcript, summary strin
 // JSON response into a RecapResult.
 func (c *ClaudeCLI) GenerateRecap(ctx context.Context, sessionSummaries []string, dmName string) (*RecapResult, error) {
 	prompt := BuildRecapPrompt(sessionSummaries, dmName)
-
-	cmd := exec.CommandContext(ctx, "claude", "--print")
-	cmd.Stdin = strings.NewReader(prompt)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
-	}
-
-	output := stdout.Bytes()
-	output = StripCodeFences(output)
-
 	var result RecapResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("parse claude CLI recap JSON: %w\nraw output: %s", err, stdout.String())
+	if err := c.runPrompt(ctx, prompt, &result); err != nil {
+		return nil, err
 	}
-
 	return &result, nil
 }
 
@@ -131,26 +89,10 @@ func (c *ClaudeCLI) GenerateRecap(ctx context.Context, sessionSummaries []string
 // parses the JSON response into a CombatExtractionResult.
 func (c *ClaudeCLI) ExtractCombat(ctx context.Context, transcript, summary, dmName string, playerCharacters []string) (*CombatExtractionResult, error) {
 	prompt := BuildCombatExtractionPrompt(transcript, summary, dmName, playerCharacters)
-
-	cmd := exec.CommandContext(ctx, "claude", "--print")
-	cmd.Stdin = strings.NewReader(prompt)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
-	}
-
-	output := stdout.Bytes()
-	output = StripCodeFences(output)
-
 	var result CombatExtractionResult
-	if err := json.Unmarshal(output, &result); err != nil {
-		return nil, fmt.Errorf("parse claude CLI combat extraction JSON: %w\nraw output: %s", err, stdout.String())
+	if err := c.runPrompt(ctx, prompt, &result); err != nil {
+		return nil, err
 	}
-
 	return &result, nil
 }
 
