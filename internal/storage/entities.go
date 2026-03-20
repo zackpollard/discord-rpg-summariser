@@ -195,3 +195,147 @@ func (s *Store) GetEntityByName(ctx context.Context, campaignID int64, name, typ
 	}
 	return &e, nil
 }
+
+// MergeEntities merges the entity identified by mergeID into keepID within a
+// single transaction. Notes, references, and relationships are moved to the
+// kept entity, the merged entity's description is appended when it differs,
+// an audit row is inserted into entity_merges, and the merged entity is deleted.
+func (s *Store) MergeEntities(ctx context.Context, campaignID, keepID, mergeID int64) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin merge tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Fetch both entities to record audit info and merge descriptions.
+	var keepDesc, mergeDesc, mergeName, mergeType string
+	err = tx.QueryRow(ctx,
+		`SELECT description FROM entities WHERE id = $1 AND campaign_id = $2`, keepID, campaignID,
+	).Scan(&keepDesc)
+	if err != nil {
+		return fmt.Errorf("fetch kept entity: %w", err)
+	}
+	err = tx.QueryRow(ctx,
+		`SELECT name, type, description FROM entities WHERE id = $1 AND campaign_id = $2`, mergeID, campaignID,
+	).Scan(&mergeName, &mergeType, &mergeDesc)
+	if err != nil {
+		return fmt.Errorf("fetch merged entity: %w", err)
+	}
+
+	// 1. Move entity_notes from mergeID to keepID.
+	if _, err := tx.Exec(ctx,
+		`UPDATE entity_notes SET entity_id = $1 WHERE entity_id = $2`,
+		keepID, mergeID,
+	); err != nil {
+		return fmt.Errorf("move entity notes: %w", err)
+	}
+
+	// 2. Move entity_references from mergeID to keepID (skip duplicates).
+	if _, err := tx.Exec(ctx,
+		`UPDATE entity_references SET entity_id = $1
+		 WHERE entity_id = $2
+		   AND id NOT IN (
+		     SELECT er.id FROM entity_references er
+		     JOIN entity_references existing ON existing.entity_id = $1 AND existing.segment_id = er.segment_id
+		     WHERE er.entity_id = $2 AND er.segment_id IS NOT NULL
+		   )`,
+		keepID, mergeID,
+	); err != nil {
+		return fmt.Errorf("move entity references: %w", err)
+	}
+	// Delete any remaining references that couldn't be moved (duplicates).
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM entity_references WHERE entity_id = $1`, mergeID,
+	); err != nil {
+		return fmt.Errorf("delete duplicate entity references: %w", err)
+	}
+
+	// 3. Move entity_relationships: update source_id and target_id.
+	// Delete conflicting relationships first (same source, target, relationship combo),
+	// then move the rest.
+
+	// Remove relationships that would conflict when updating source_id.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM entity_relationships
+		 WHERE source_id = $1
+		   AND EXISTS (
+		     SELECT 1 FROM entity_relationships r2
+		     WHERE r2.source_id = $2
+		       AND r2.target_id = entity_relationships.target_id
+		       AND r2.relationship = entity_relationships.relationship
+		   )`,
+		mergeID, keepID,
+	); err != nil {
+		return fmt.Errorf("delete conflicting source relationships: %w", err)
+	}
+	// Move remaining source relationships.
+	if _, err := tx.Exec(ctx,
+		`UPDATE entity_relationships SET source_id = $1 WHERE source_id = $2`,
+		keepID, mergeID,
+	); err != nil {
+		return fmt.Errorf("move source relationships: %w", err)
+	}
+
+	// Remove relationships that would conflict when updating target_id.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM entity_relationships
+		 WHERE target_id = $1
+		   AND EXISTS (
+		     SELECT 1 FROM entity_relationships r2
+		     WHERE r2.target_id = $2
+		       AND r2.source_id = entity_relationships.source_id
+		       AND r2.relationship = entity_relationships.relationship
+		   )`,
+		mergeID, keepID,
+	); err != nil {
+		return fmt.Errorf("delete conflicting target relationships: %w", err)
+	}
+	// Move remaining target relationships.
+	if _, err := tx.Exec(ctx,
+		`UPDATE entity_relationships SET target_id = $1 WHERE target_id = $2`,
+		keepID, mergeID,
+	); err != nil {
+		return fmt.Errorf("move target relationships: %w", err)
+	}
+
+	// Remove any self-referential relationships that may have been created.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM entity_relationships WHERE source_id = $1 AND target_id = $1`,
+		keepID,
+	); err != nil {
+		return fmt.Errorf("delete self-referential relationships: %w", err)
+	}
+
+	// 4. Append merged entity's description to kept entity's description if they differ.
+	if mergeDesc != "" && mergeDesc != keepDesc {
+		newDesc := keepDesc
+		if newDesc != "" {
+			newDesc += "\n\n"
+		}
+		newDesc += mergeDesc
+		if _, err := tx.Exec(ctx,
+			`UPDATE entities SET description = $1, updated_at = NOW() WHERE id = $2`,
+			newDesc, keepID,
+		); err != nil {
+			return fmt.Errorf("update kept entity description: %w", err)
+		}
+	}
+
+	// 5. Insert audit row into entity_merges.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO entity_merges (campaign_id, kept_id, merged_id, merged_name, merged_type)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		campaignID, keepID, mergeID, mergeName, mergeType,
+	); err != nil {
+		return fmt.Errorf("insert entity merge audit: %w", err)
+	}
+
+	// 6. Delete the merged entity.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM entities WHERE id = $1`, mergeID,
+	); err != nil {
+		return fmt.Errorf("delete merged entity: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}

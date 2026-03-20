@@ -1488,3 +1488,162 @@ func TestSearchTranscripts_CampaignIsolation(t *testing.T) {
 		t.Fatalf("expected session_id %d, got %d", sessA, results[0].SessionID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Entity Merge
+// ---------------------------------------------------------------------------
+
+func TestMergeEntities(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/merge")
+
+	// Create two entities that represent the same thing.
+	keepID, _ := store.UpsertEntity(ctx, campID, "Strahd", "npc", "Vampire lord")
+	mergeID, _ := store.UpsertEntity(ctx, campID, "Strahd von Zarovich", "npc", "Ancient vampire overlord of Barovia")
+
+	// Create a third entity for relationship targets.
+	thirdID, _ := store.UpsertEntity(ctx, campID, "Ireena", "npc", "Barovian noble")
+
+	// Add notes to both entities.
+	store.AddEntityNote(ctx, keepID, sessID, "Encountered in Castle Ravenloft")
+	store.AddEntityNote(ctx, mergeID, sessID, "Revealed his full name")
+
+	// Add relationships to both.
+	store.UpsertEntityRelationship(ctx, campID, keepID, thirdID, "enemy_of", "Strahd hunts Ireena", nil)
+	store.UpsertEntityRelationship(ctx, campID, mergeID, thirdID, "obsessed_with", "He wants to make her his bride", nil)
+
+	// Add entity references.
+	store.InsertSegments(ctx, []TranscriptSegment{
+		{SessionID: sessID, UserID: "u1", StartTime: 0, EndTime: 5, Text: "Strahd appeared"},
+		{SessionID: sessID, UserID: "u1", StartTime: 5, EndTime: 10, Text: "Strahd von Zarovich revealed himself"},
+	})
+	// Get the segment IDs.
+	segments, _ := store.GetTranscript(ctx, sessID)
+	seg1ID := segments[0].ID
+	seg2ID := segments[1].ID
+
+	store.InsertEntityReferences(ctx, []EntityReference{
+		{EntityID: keepID, SessionID: sessID, SegmentID: &seg1ID, Context: "Strahd appeared"},
+	})
+	store.InsertEntityReferences(ctx, []EntityReference{
+		{EntityID: mergeID, SessionID: sessID, SegmentID: &seg2ID, Context: "Strahd von Zarovich revealed himself"},
+	})
+
+	// Perform the merge.
+	err := store.MergeEntities(ctx, campID, keepID, mergeID)
+	if err != nil {
+		t.Fatalf("MergeEntities: %v", err)
+	}
+
+	// Verify notes moved to keepID.
+	notes, err := store.GetEntityNotes(ctx, keepID)
+	if err != nil {
+		t.Fatalf("GetEntityNotes after merge: %v", err)
+	}
+	if len(notes) != 2 {
+		t.Fatalf("expected 2 notes on kept entity, got %d", len(notes))
+	}
+
+	// Verify references moved to keepID.
+	refs, err := store.GetEntityReferences(ctx, keepID, 100, 0)
+	if err != nil {
+		t.Fatalf("GetEntityReferences after merge: %v", err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("expected 2 references on kept entity, got %d", len(refs))
+	}
+
+	// Verify relationships moved to keepID.
+	rels, err := store.GetEntityRelationships(ctx, keepID)
+	if err != nil {
+		t.Fatalf("GetEntityRelationships after merge: %v", err)
+	}
+	if len(rels) != 2 {
+		t.Fatalf("expected 2 relationships on kept entity, got %d", len(rels))
+	}
+
+	// Verify description was appended.
+	kept, err := store.GetEntity(ctx, keepID)
+	if err != nil {
+		t.Fatalf("GetEntity after merge: %v", err)
+	}
+	if kept.Description != "Vampire lord\n\nAncient vampire overlord of Barovia" {
+		t.Fatalf("expected merged description, got %q", kept.Description)
+	}
+
+	// Verify merged entity is deleted.
+	_, err = store.GetEntity(ctx, mergeID)
+	if err == nil {
+		t.Fatal("expected error when getting deleted merged entity")
+	}
+
+	// Verify audit row.
+	var auditCount int
+	err = store.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM entity_merges WHERE campaign_id = $1 AND kept_id = $2 AND merged_id = $3`,
+		campID, keepID, mergeID,
+	).Scan(&auditCount)
+	if err != nil {
+		t.Fatalf("query entity_merges: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("expected 1 audit row, got %d", auditCount)
+	}
+}
+
+func TestMergeEntitiesConflictingRelationships(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	keepID, _ := store.UpsertEntity(ctx, campID, "Keep", "npc", "")
+	mergeID, _ := store.UpsertEntity(ctx, campID, "Merge", "npc", "")
+	thirdID, _ := store.UpsertEntity(ctx, campID, "Third", "npc", "")
+
+	// Both entities have the same relationship type to the same target — a conflict.
+	store.UpsertEntityRelationship(ctx, campID, keepID, thirdID, "ally", "Old friends", nil)
+	store.UpsertEntityRelationship(ctx, campID, mergeID, thirdID, "ally", "New friends", nil)
+
+	// Also test target-side conflicts.
+	store.UpsertEntityRelationship(ctx, campID, thirdID, keepID, "serves", "Serves the keep entity", nil)
+	store.UpsertEntityRelationship(ctx, campID, thirdID, mergeID, "serves", "Serves the merge entity", nil)
+
+	err := store.MergeEntities(ctx, campID, keepID, mergeID)
+	if err != nil {
+		t.Fatalf("MergeEntities with conflicts: %v", err)
+	}
+
+	// Should have the kept entity's relationships without duplicates.
+	rels, err := store.GetEntityRelationships(ctx, keepID)
+	if err != nil {
+		t.Fatalf("GetEntityRelationships after merge: %v", err)
+	}
+
+	// Should have exactly 2: keepID->thirdID (ally) and thirdID->keepID (serves).
+	if len(rels) != 2 {
+		t.Fatalf("expected 2 relationships (no duplicates), got %d", len(rels))
+	}
+
+	// Verify merged entity deleted.
+	_, err = store.GetEntity(ctx, mergeID)
+	if err == nil {
+		t.Fatal("expected error when getting deleted merged entity")
+	}
+
+	// Verify audit row exists.
+	var auditCount int
+	err = store.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM entity_merges WHERE campaign_id = $1 AND kept_id = $2 AND merged_id = $3`,
+		campID, keepID, mergeID,
+	).Scan(&auditCount)
+	if err != nil {
+		t.Fatalf("query entity_merges: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("expected 1 audit row, got %d", auditCount)
+	}
+}

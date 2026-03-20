@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -217,4 +218,61 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
 		Sessions:      sessResp,
 		References:    refResp,
 	})
+}
+
+func (s *Server) handleMergeEntity(w http.ResponseWriter, r *http.Request) {
+	keepID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid entity id")
+		return
+	}
+
+	var body struct {
+		MergeID int64 `json:"merge_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.MergeID == 0 {
+		writeError(w, http.StatusBadRequest, "merge_id is required")
+		return
+	}
+	if body.MergeID == keepID {
+		writeError(w, http.StatusBadRequest, "cannot merge an entity with itself")
+		return
+	}
+
+	// Validate both entities exist and belong to the same campaign.
+	keepEntity, err := s.store.GetEntity(r.Context(), keepID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "kept entity not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get kept entity")
+		return
+	}
+
+	mergeEntity, err := s.store.GetEntity(r.Context(), body.MergeID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "merge entity not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get merge entity")
+		return
+	}
+
+	if keepEntity.CampaignID != mergeEntity.CampaignID {
+		writeError(w, http.StatusBadRequest, "entities must belong to the same campaign")
+		return
+	}
+
+	if err := s.store.MergeEntities(r.Context(), keepEntity.CampaignID, keepID, body.MergeID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to merge entities")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

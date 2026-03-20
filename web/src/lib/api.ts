@@ -235,6 +235,14 @@ export async function fetchEntity(id: number): Promise<EntityDetail> {
 	return request<EntityDetail>(`/api/entities/${id}`);
 }
 
+export async function mergeEntity(keepId: number, mergeId: number): Promise<void> {
+	await request<void>(`/api/entities/${keepId}/merge`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ merge_id: mergeId })
+	});
+}
+
 // Quest types and functions
 
 export interface Quest {

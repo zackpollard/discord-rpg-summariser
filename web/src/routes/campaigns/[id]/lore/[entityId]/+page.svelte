@@ -1,12 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchEntity, type EntityDetail } from '$lib/api';
+	import { fetchEntity, fetchEntities, mergeEntity, type EntityDetail, type Entity } from '$lib/api';
 
 	let entity = $state<EntityDetail | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let expandedSessions = $state<Set<number>>(new Set());
+
+	// Merge state
+	let showMergePanel = $state(false);
+	let mergeLoading = $state(false);
+	let mergeError = $state<string | null>(null);
+	let mergeTargets = $state<Entity[]>([]);
+	let mergeTargetsLoading = $state(false);
+	let selectedMergeId = $state<number | null>(null);
+	let showMergeConfirm = $state(false);
 
 	function typeBadgeClass(type: string): string {
 		return `type-badge type-${type}`;
@@ -38,6 +47,51 @@
 			next.add(sessionId);
 		}
 		expandedSessions = next;
+	}
+
+	async function openMergePanel() {
+		if (!entity) return;
+		showMergePanel = true;
+		mergeError = null;
+		selectedMergeId = null;
+		showMergeConfirm = false;
+		mergeTargetsLoading = true;
+		try {
+			const allEntities = await fetchEntities(entity.campaign_id);
+			mergeTargets = allEntities.filter(e => e.id !== entity!.id);
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : 'Failed to load entities';
+		} finally {
+			mergeTargetsLoading = false;
+		}
+	}
+
+	function closeMergePanel() {
+		showMergePanel = false;
+		mergeError = null;
+		selectedMergeId = null;
+		showMergeConfirm = false;
+	}
+
+	function requestMergeConfirm() {
+		if (!selectedMergeId) return;
+		showMergeConfirm = true;
+	}
+
+	async function confirmMerge() {
+		if (!entity || !selectedMergeId) return;
+		mergeLoading = true;
+		mergeError = null;
+		try {
+			await mergeEntity(entity.id, selectedMergeId);
+			// Refresh entity data after merge
+			entity = await fetchEntity(entity.id);
+			closeMergePanel();
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : 'Failed to merge entities';
+		} finally {
+			mergeLoading = false;
+		}
 	}
 
 	onMount(() => {
@@ -77,9 +131,48 @@
 		<div class="entity-header">
 			<h1>{entity.name}</h1>
 			<span class={typeBadgeClass(entity.type)}>{entity.type}</span>
+			<button class="merge-btn" onclick={openMergePanel}>Merge with...</button>
 		</div>
 
 		<p class="entity-description">{entity.description}</p>
+
+		{#if showMergePanel}
+			<section class="section-card merge-panel">
+				<div class="merge-header">
+					<h2>Merge Entity</h2>
+					<button class="merge-close" onclick={closeMergePanel}>&times;</button>
+				</div>
+				<p class="merge-hint">Select another entity to merge into <strong>{entity.name}</strong>. The selected entity will be deleted and its notes, relationships, and references will be moved here.</p>
+				{#if mergeTargetsLoading}
+					<p class="muted">Loading entities...</p>
+				{:else if mergeTargets.length === 0}
+					<p class="muted">No other entities available to merge.</p>
+				{:else}
+					<select class="merge-select" bind:value={selectedMergeId}>
+						<option value={null}>-- Select an entity --</option>
+						{#each mergeTargets as target (target.id)}
+							<option value={target.id}>{target.name} ({target.type})</option>
+						{/each}
+					</select>
+					{#if !showMergeConfirm}
+						<button class="merge-confirm-btn" disabled={!selectedMergeId} onclick={requestMergeConfirm}>Merge</button>
+					{:else}
+						<div class="merge-confirm-box">
+							<p>Are you sure you want to merge <strong>{mergeTargets.find(t => t.id === selectedMergeId)?.name}</strong> into <strong>{entity.name}</strong>? This cannot be undone.</p>
+							<div class="merge-confirm-actions">
+								<button class="merge-confirm-yes" disabled={mergeLoading} onclick={confirmMerge}>
+									{mergeLoading ? 'Merging...' : 'Yes, merge'}
+								</button>
+								<button class="merge-confirm-no" onclick={() => showMergeConfirm = false}>Cancel</button>
+							</div>
+						</div>
+					{/if}
+				{/if}
+				{#if mergeError}
+					<div class="error-box">{mergeError}</div>
+				{/if}
+			</section>
+		{/if}
 
 		{#if entity.notes && entity.notes.length > 0}
 			<section class="section-card">
@@ -186,6 +279,129 @@
 	.entity-header h1 {
 		color: var(--accent-gold);
 		font-size: 1.5rem;
+	}
+
+	.merge-btn {
+		margin-left: auto;
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		color: var(--text-secondary);
+		padding: 0.35rem 0.75rem;
+		border-radius: var(--radius);
+		cursor: pointer;
+		font-size: 0.8rem;
+		transition: all 0.15s;
+	}
+	.merge-btn:hover {
+		border-color: var(--accent-gold-dim);
+		color: var(--accent-gold);
+	}
+
+	.merge-panel {
+		border-color: var(--accent-gold-dim);
+	}
+	.merge-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.5rem;
+	}
+	.merge-close {
+		background: none;
+		border: none;
+		color: var(--text-muted);
+		font-size: 1.25rem;
+		cursor: pointer;
+		padding: 0;
+		line-height: 1;
+	}
+	.merge-close:hover {
+		color: var(--text-primary);
+	}
+	.merge-hint {
+		color: var(--text-secondary);
+		font-size: 0.85rem;
+		margin-bottom: 0.75rem;
+		line-height: 1.5;
+	}
+	.merge-select {
+		width: 100%;
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		color: var(--text-primary);
+		padding: 0.5rem 0.75rem;
+		border-radius: var(--radius);
+		font-size: 0.85rem;
+		margin-bottom: 0.75rem;
+	}
+	.merge-select:focus {
+		outline: none;
+		border-color: var(--accent-gold-dim);
+	}
+	.merge-confirm-btn {
+		background: var(--accent-gold-dim);
+		color: var(--bg-dark);
+		border: 1px solid var(--accent-gold);
+		padding: 0.4rem 1rem;
+		border-radius: var(--radius);
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.merge-confirm-btn:hover:not(:disabled) {
+		background: var(--accent-gold);
+	}
+	.merge-confirm-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.merge-confirm-box {
+		background: rgba(185, 28, 28, 0.1);
+		border: 1px solid rgba(185, 28, 28, 0.3);
+		border-radius: var(--radius);
+		padding: 0.75rem;
+		margin-bottom: 0.5rem;
+	}
+	.merge-confirm-box p {
+		color: var(--text-primary);
+		font-size: 0.85rem;
+		margin-bottom: 0.5rem;
+		line-height: 1.5;
+	}
+	.merge-confirm-actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+	.merge-confirm-yes {
+		background: rgba(185, 28, 28, 0.6);
+		color: #fca5a5;
+		border: 1px solid rgba(185, 28, 28, 0.8);
+		padding: 0.35rem 0.75rem;
+		border-radius: var(--radius);
+		font-size: 0.8rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.merge-confirm-yes:hover:not(:disabled) {
+		background: rgba(185, 28, 28, 0.8);
+	}
+	.merge-confirm-yes:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.merge-confirm-no {
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		color: var(--text-secondary);
+		padding: 0.35rem 0.75rem;
+		border-radius: var(--radius);
+		font-size: 0.8rem;
+		cursor: pointer;
+	}
+	.merge-confirm-no:hover {
+		border-color: var(--accent-gold-dim);
+		color: var(--text-primary);
 	}
 
 	.entity-description {
