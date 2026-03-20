@@ -87,13 +87,24 @@ func (p *ParakeetTranscriber) Close() error {
 }
 
 // TranscribeFile transcribes a 48kHz WAV file and returns timestamped segments.
+// It streams the file in silence-delimited chunks to avoid loading the entire
+// file into memory.
 func (p *ParakeetTranscriber) TranscribeFile(ctx context.Context, wavPath string) ([]Segment, error) {
-	samples, err := audio.LoadAndResample(wavPath)
-	if err != nil {
-		return nil, fmt.Errorf("load and resample audio: %w", err)
-	}
+	var allSegments []Segment
 
-	return p.transcribe(samples, 0)
+	err := audio.StreamResample(wavPath, func(samples []float32, offsetSeconds float64) error {
+		segs, err := p.TranscribeChunk(ctx, samples,
+			time.Duration(offsetSeconds*float64(time.Second)), "")
+		if err != nil {
+			return err
+		}
+		allSegments = append(allSegments, segs...)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("stream resample: %w", err)
+	}
+	return allSegments, nil
 }
 
 // TranscribeChunk transcribes pre-resampled 16kHz float32 mono samples.

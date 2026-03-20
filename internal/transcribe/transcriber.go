@@ -63,52 +63,32 @@ func (t *WhisperTranscriber) Close() error {
 }
 
 // TranscribeFile transcribes a 48kHz WAV file and returns timestamped segments.
+// It streams the file in silence-delimited chunks to avoid loading the entire
+// file into memory, and passes the last chunk's text as a prompt for continuity.
 func (t *WhisperTranscriber) TranscribeFile(ctx context.Context, wavPath string) ([]Segment, error) {
-	// Resample 48kHz → 16kHz float32 for whisper
-	samples, err := audio.LoadAndResample(wavPath)
-	if err != nil {
-		return nil, fmt.Errorf("load and resample audio: %w", err)
-	}
+	var allSegments []Segment
+	var lastText string
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	wctx, err := t.model.NewContext()
-	if err != nil {
-		return nil, fmt.Errorf("create whisper context: %w", err)
-	}
-
-	if err := wctx.SetLanguage(t.language); err != nil {
-		return nil, fmt.Errorf("set language %s: %w", t.language, err)
-	}
-	wctx.SetThreads(uint(t.threads))
-	wctx.SetInitialPrompt("Dungeons and Dragons RPG session with fantasy names and places")
-
-	if err := wctx.Process(samples, nil, nil, nil); err != nil {
-		return nil, fmt.Errorf("whisper process: %w", err)
-	}
-
-	var segments []Segment
-	for {
-		seg, err := wctx.NextSegment()
-		if err == io.EOF {
-			break
+	err := audio.StreamResample(wavPath, func(samples []float32, offsetSeconds float64) error {
+		prompt := "Dungeons and Dragons RPG session with fantasy names and places"
+		if lastText != "" {
+			prompt = lastText
 		}
+		segs, err := t.TranscribeChunk(ctx, samples,
+			time.Duration(offsetSeconds*float64(time.Second)), prompt)
 		if err != nil {
-			return nil, fmt.Errorf("read segment: %w", err)
+			return err
 		}
-		text := strings.TrimSpace(seg.Text)
-		if text == "" {
-			continue
+		allSegments = append(allSegments, segs...)
+		if len(segs) > 0 {
+			lastText = segs[len(segs)-1].Text
 		}
-		segments = append(segments, Segment{
-			StartTime: seg.Start.Seconds(),
-			EndTime:   seg.End.Seconds(),
-			Text:      text,
-		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("stream resample: %w", err)
 	}
-
-	return segments, nil
+	return allSegments, nil
 }
 
 // TranscribeChunk transcribes pre-resampled 16kHz float32 mono samples.
