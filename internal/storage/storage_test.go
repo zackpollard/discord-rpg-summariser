@@ -1303,3 +1303,188 @@ func TestDeleteEntityReferencesForSession(t *testing.T) {
 		t.Fatalf("expected 0 references after delete, got %d", len(got))
 	}
 }
+// ---------------------------------------------------------------------------
+// Transcript Full-Text Search
+// ---------------------------------------------------------------------------
+
+func TestSearchTranscripts(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/fts")
+
+	segments := []TranscriptSegment{
+		{SessionID: sessID, UserID: "u1", StartTime: 0.0, EndTime: 3.5, Text: "The dragon swooped down from the mountain and attacked the village"},
+		{SessionID: sessID, UserID: "u2", StartTime: 4.0, EndTime: 7.0, Text: "I draw my sword and charge towards the goblin horde"},
+		{SessionID: sessID, UserID: "u1", StartTime: 8.0, EndTime: 12.0, Text: "The wizard casts a fireball at the dragon destroying it completely"},
+	}
+
+	if err := store.InsertSegments(ctx, segments); err != nil {
+		t.Fatalf("InsertSegments: %v", err)
+	}
+
+	// Search for "dragon" — should match 2 segments.
+	results, total, err := store.SearchTranscripts(ctx, campID, "dragon", 20, 0)
+	if err != nil {
+		t.Fatalf("SearchTranscripts dragon: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected 2 results for 'dragon', got %d", total)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results returned, got %d", len(results))
+	}
+
+	// Check that headlines contain <mark> tags.
+	for _, r := range results {
+		if r.Headline == "" {
+			t.Fatal("expected non-empty headline")
+		}
+		if r.SessionID != sessID {
+			t.Fatalf("expected session_id %d, got %d", sessID, r.SessionID)
+		}
+	}
+
+	// Search for "goblin" — should match 1 segment.
+	results, total, err = store.SearchTranscripts(ctx, campID, "goblin", 20, 0)
+	if err != nil {
+		t.Fatalf("SearchTranscripts goblin: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected 1 result for 'goblin', got %d", total)
+	}
+	if results[0].UserID != "u2" {
+		t.Fatalf("expected user_id 'u2', got %q", results[0].UserID)
+	}
+}
+
+func TestSearchTranscripts_EmptyQuery(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	results, total, err := store.SearchTranscripts(ctx, campID, "", 20, 0)
+	if err != nil {
+		t.Fatalf("SearchTranscripts empty: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("expected 0 total for empty query, got %d", total)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results for empty query, got %d", len(results))
+	}
+}
+
+func TestSearchTranscripts_NoResults(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/fts-nr")
+
+	segments := []TranscriptSegment{
+		{SessionID: sessID, UserID: "u1", StartTime: 0.0, EndTime: 3.5, Text: "The party enters the tavern"},
+	}
+	if err := store.InsertSegments(ctx, segments); err != nil {
+		t.Fatalf("InsertSegments: %v", err)
+	}
+
+	results, total, err := store.SearchTranscripts(ctx, campID, "spaceship", 20, 0)
+	if err != nil {
+		t.Fatalf("SearchTranscripts no results: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("expected 0 total for 'spaceship', got %d", total)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results for 'spaceship', got %d", len(results))
+	}
+}
+
+func TestSearchTranscripts_Pagination(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/fts-pg")
+
+	// Insert many segments containing the keyword "adventure".
+	segments := make([]TranscriptSegment, 5)
+	for i := range segments {
+		segments[i] = TranscriptSegment{
+			SessionID: sessID,
+			UserID:    "u1",
+			StartTime: float64(i * 10),
+			EndTime:   float64(i*10 + 5),
+			Text:      fmt.Sprintf("The adventure continues in chapter %d of the great adventure", i+1),
+		}
+	}
+	if err := store.InsertSegments(ctx, segments); err != nil {
+		t.Fatalf("InsertSegments: %v", err)
+	}
+
+	// Page 1: limit 2, offset 0.
+	results, total, err := store.SearchTranscripts(ctx, campID, "adventure", 2, 0)
+	if err != nil {
+		t.Fatalf("SearchTranscripts page 1: %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("expected total 5, got %d", total)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results on page 1, got %d", len(results))
+	}
+
+	// Page 2: limit 2, offset 2.
+	results2, total2, err := store.SearchTranscripts(ctx, campID, "adventure", 2, 2)
+	if err != nil {
+		t.Fatalf("SearchTranscripts page 2: %v", err)
+	}
+	if total2 != 5 {
+		t.Fatalf("expected total still 5, got %d", total2)
+	}
+	if len(results2) != 2 {
+		t.Fatalf("expected 2 results on page 2, got %d", len(results2))
+	}
+
+	// Page 3: limit 2, offset 4.
+	results3, _, err := store.SearchTranscripts(ctx, campID, "adventure", 2, 4)
+	if err != nil {
+		t.Fatalf("SearchTranscripts page 3: %v", err)
+	}
+	if len(results3) != 1 {
+		t.Fatalf("expected 1 result on page 3, got %d", len(results3))
+	}
+}
+
+func TestSearchTranscripts_CampaignIsolation(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campA := createTestCampaign(t, store, guildID)
+	campB, _ := store.CreateCampaign(ctx, guildID, "Campaign B", "")
+
+	sessA, _ := store.CreateSession(ctx, guildID, campA, "ch-1", "/tmp/fts-a")
+	sessB, _ := store.CreateSession(ctx, guildID, campB, "ch-1", "/tmp/fts-b")
+
+	store.InsertSegments(ctx, []TranscriptSegment{
+		{SessionID: sessA, UserID: "u1", StartTime: 0, EndTime: 5, Text: "The unicorn galloped across the meadow"},
+	})
+	store.InsertSegments(ctx, []TranscriptSegment{
+		{SessionID: sessB, UserID: "u1", StartTime: 0, EndTime: 5, Text: "A unicorn appeared in the forest"},
+	})
+
+	// Search in campaign A only.
+	results, total, err := store.SearchTranscripts(ctx, campA, "unicorn", 20, 0)
+	if err != nil {
+		t.Fatalf("SearchTranscripts campA: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected 1 result in campaign A, got %d", total)
+	}
+	if results[0].SessionID != sessA {
+		t.Fatalf("expected session_id %d, got %d", sessA, results[0].SessionID)
+	}
+}

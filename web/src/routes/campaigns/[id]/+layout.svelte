@@ -35,6 +35,7 @@
 		<a href="/campaigns/{campaignId}/quests" class="nav-tab" class:active={$page.url.pathname.includes('/quests')}>Quests</a>
 		<a href="/campaigns/{campaignId}/timeline" class="nav-tab" class:active={$page.url.pathname.includes('/timeline')}>Timeline</a>
 		<a href="/campaigns/{campaignId}/recap" class="nav-tab" class:active={$page.url.pathname.includes('/recap')}>Recap</a>
+		<a href="/campaigns/{campaignId}/search" class="nav-tab" class:active={$page.url.pathname.includes('/search')}>Search</a>
 	</nav>
 
 	{@render children()}

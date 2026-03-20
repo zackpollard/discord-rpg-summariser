@@ -185,24 +185,9 @@ export interface Entity {
 	updated_at: string;
 }
 
-export interface EntitySessionAppearance {
-	session_id: number;
-	started_at: string;
-	mention_count: number;
-}
-
-export interface EntityReferenceDisplay {
-	session_id: number;
-	segment_id: number | null;
-	start_time: number;
-	context: string;
-}
-
 export interface EntityDetail extends Entity {
 	notes: EntityNote[];
 	relationships: EntityRelationshipDisplay[];
-	sessions: EntitySessionAppearance[];
-	references: EntityReferenceDisplay[];
 }
 
 export interface EntityNote {
@@ -346,11 +331,42 @@ export async function fetchRecap(campaignId: number): Promise<CampaignRecap> {
 	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`);
 }
 
-export async function regenerateRecap(campaignId: number, last?: number): Promise<CampaignRecap> {
-	const params = new URLSearchParams();
-	if (last !== undefined && last > 0) params.set('last', String(last));
-	const qs = params.toString();
-	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap${qs ? '?' + qs : ''}`, {
+export async function regenerateRecap(campaignId: number): Promise<CampaignRecap> {
+	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`, {
 		method: 'POST'
 	});
+}
+
+// Transcript search types and functions
+
+export interface TranscriptSearchResult {
+	segment_id: number;
+	session_id: number;
+	user_id: string;
+	display_name: string;
+	character_name: string | null;
+	start_time: number;
+	end_time: number;
+	text: string;
+	headline: string;
+	session_started_at: string;
+}
+
+export interface TranscriptSearchResponse {
+	results: TranscriptSearchResult[];
+	total: number;
+	limit: number;
+	offset: number;
+}
+
+export async function searchTranscripts(
+	campaignId: number,
+	query: string,
+	limit = 20,
+	offset = 0
+): Promise<TranscriptSearchResponse> {
+	const params = new URLSearchParams({ q: query, limit: String(limit), offset: String(offset) });
+	return request<TranscriptSearchResponse>(
+		`/api/campaigns/${campaignId}/transcript-search?${params.toString()}`
+	);
 }
