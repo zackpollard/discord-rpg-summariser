@@ -1777,3 +1777,89 @@ func TestDeleteCombatForSession(t *testing.T) {
 		t.Fatalf("expected 0 actions after delete, got %d", len(actions))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Relationship Graph
+// ---------------------------------------------------------------------------
+
+func TestGetCampaignRelationshipGraph(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create entities.
+	id1, err := store.UpsertEntity(ctx, campID, "Strahd", "npc", "Vampire lord")
+	if err != nil {
+		t.Fatalf("UpsertEntity Strahd: %v", err)
+	}
+	id2, err := store.UpsertEntity(ctx, campID, "Ireena", "npc", "Burgomasters daughter")
+	if err != nil {
+		t.Fatalf("UpsertEntity Ireena: %v", err)
+	}
+	id3, err := store.UpsertEntity(ctx, campID, "Barovia", "place", "Cursed land")
+	if err != nil {
+		t.Fatalf("UpsertEntity Barovia: %v", err)
+	}
+
+	// Create relationships.
+	if err := store.UpsertEntityRelationship(ctx, campID, id1, id2, "obsessed_with", "Strahd seeks Ireena", nil); err != nil {
+		t.Fatalf("UpsertEntityRelationship 1->2: %v", err)
+	}
+	if err := store.UpsertEntityRelationship(ctx, campID, id1, id3, "rules", "Strahd rules Barovia", nil); err != nil {
+		t.Fatalf("UpsertEntityRelationship 1->3: %v", err)
+	}
+
+	// Fetch graph.
+	entities, rels, err := store.GetCampaignRelationshipGraph(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetCampaignRelationshipGraph: %v", err)
+	}
+
+	if len(entities) != 3 {
+		t.Fatalf("expected 3 entities, got %d", len(entities))
+	}
+	if len(rels) != 2 {
+		t.Fatalf("expected 2 relationships, got %d", len(rels))
+	}
+
+	// Entities should be ordered by name.
+	if entities[0].Name != "Barovia" {
+		t.Fatalf("expected first entity 'Barovia', got %q", entities[0].Name)
+	}
+	if entities[1].Name != "Ireena" {
+		t.Fatalf("expected second entity 'Ireena', got %q", entities[1].Name)
+	}
+	if entities[2].Name != "Strahd" {
+		t.Fatalf("expected third entity 'Strahd', got %q", entities[2].Name)
+	}
+
+	// Relationships should be ordered by created_at.
+	if rels[0].Relationship != "obsessed_with" {
+		t.Fatalf("expected first relationship 'obsessed_with', got %q", rels[0].Relationship)
+	}
+	if rels[1].Relationship != "rules" {
+		t.Fatalf("expected second relationship 'rules', got %q", rels[1].Relationship)
+	}
+
+	// Verify IDs.
+	if rels[0].SourceID != id1 || rels[0].TargetID != id2 {
+		t.Fatalf("expected relationship source=%d target=%d, got source=%d target=%d", id1, id2, rels[0].SourceID, rels[0].TargetID)
+	}
+
+	// Verify a campaign with no data returns empty slices (no error).
+	campID2, err := store.CreateCampaign(ctx, guildID, "Empty Campaign", "")
+	if err != nil {
+		t.Fatalf("CreateCampaign empty: %v", err)
+	}
+	entities2, rels2, err := store.GetCampaignRelationshipGraph(ctx, campID2)
+	if err != nil {
+		t.Fatalf("GetCampaignRelationshipGraph empty: %v", err)
+	}
+	if len(entities2) != 0 {
+		t.Fatalf("expected 0 entities for empty campaign, got %d", len(entities2))
+	}
+	if len(rels2) != 0 {
+		t.Fatalf("expected 0 relationships for empty campaign, got %d", len(rels2))
+	}
+}

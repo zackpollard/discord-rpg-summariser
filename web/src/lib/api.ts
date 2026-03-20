@@ -406,3 +406,27 @@ export interface CombatEncounter {
 export async function fetchSessionCombat(sessionId: number): Promise<CombatEncounter[]> {
 	return request<CombatEncounter[]>(`/api/sessions/${sessionId}/combat`);
 }
+
+// Relationship graph types and functions
+
+export interface GraphNode {
+	id: number;
+	name: string;
+	type: string;
+}
+
+export interface GraphEdge {
+	source: number;
+	target: number;
+	relationship: string;
+	description: string;
+}
+
+export interface RelationshipGraphData {
+	nodes: GraphNode[];
+	edges: GraphEdge[];
+}
+
+export async function fetchRelationshipGraph(campaignId: number): Promise<RelationshipGraphData> {
+	return request<RelationshipGraphData>(`/api/campaigns/${campaignId}/relationship-graph`);
+}

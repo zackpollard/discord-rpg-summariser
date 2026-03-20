@@ -196,6 +196,54 @@ func (s *Store) GetEntityByName(ctx context.Context, campaignID int64, name, typ
 	return &e, nil
 }
 
+// GetCampaignRelationshipGraph returns all entities and all relationships for a campaign,
+// suitable for rendering a relationship graph.
+func (s *Store) GetCampaignRelationshipGraph(ctx context.Context, campaignID int64) ([]Entity, []EntityRelationship, error) {
+	rows, err := s.Pool.Query(ctx,
+		`SELECT id, campaign_id, name, type, description, created_at, updated_at
+		 FROM entities WHERE campaign_id = $1 ORDER BY name`, campaignID,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get campaign entities for graph: %w", err)
+	}
+	defer rows.Close()
+
+	var entities []Entity
+	for rows.Next() {
+		var e Entity
+		if err := rows.Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, nil, err
+		}
+		entities = append(entities, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	relRows, err := s.Pool.Query(ctx,
+		`SELECT id, campaign_id, source_id, target_id, relationship, description, session_id, created_at
+		 FROM entity_relationships WHERE campaign_id = $1 ORDER BY created_at`, campaignID,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get campaign relationships for graph: %w", err)
+	}
+	defer relRows.Close()
+
+	var rels []EntityRelationship
+	for relRows.Next() {
+		var r EntityRelationship
+		if err := relRows.Scan(&r.ID, &r.CampaignID, &r.SourceID, &r.TargetID, &r.Relationship, &r.Description, &r.SessionID, &r.CreatedAt); err != nil {
+			return nil, nil, err
+		}
+		rels = append(rels, r)
+	}
+	if err := relRows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	return entities, rels, nil
+}
+
 // MergeEntities merges the entity identified by mergeID into keepID within a
 // single transaction. Notes, references, and relationships are moved to the
 // kept entity, the merged entity's description is appended when it differs,

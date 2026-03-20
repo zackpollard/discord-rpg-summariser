@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchEntities, askLore, type Entity, type LoreAnswer } from '$lib/api';
+	import { fetchEntities, askLore, fetchRelationshipGraph, type Entity, type LoreAnswer, type RelationshipGraphData } from '$lib/api';
+	import RelationshipGraph from '$lib/components/RelationshipGraph.svelte';
 
 	const campaignId = $derived(Number($page.params.id));
 
@@ -17,6 +18,11 @@
 	let loreAnswer = $state<LoreAnswer | null>(null);
 	let loreLoading = $state(false);
 	let loreError = $state<string | null>(null);
+
+	let viewMode = $state<'grid' | 'graph'>('grid');
+	let graphData = $state<RelationshipGraphData | null>(null);
+	let graphLoading = $state(false);
+	let graphError = $state<string | null>(null);
 
 	async function handleAskLore() {
 		if (!loreQuestion.trim()) return;
@@ -61,6 +67,19 @@
 		}
 	}
 
+	async function loadGraphData() {
+		if (graphData) return; // Already loaded
+		graphLoading = true;
+		graphError = null;
+		try {
+			graphData = await fetchRelationshipGraph(campaignId);
+		} catch (e) {
+			graphError = e instanceof Error ? e.message : 'Failed to load relationship graph';
+		} finally {
+			graphLoading = false;
+		}
+	}
+
 	function handleSearch(value: string) {
 		searchQuery = value;
 		if (searchTimeout) clearTimeout(searchTimeout);
@@ -70,6 +89,13 @@
 	function selectType(type: string) {
 		activeType = type;
 		loadEntities();
+	}
+
+	function switchView(mode: 'grid' | 'graph') {
+		viewMode = mode;
+		if (mode === 'graph') {
+			loadGraphData();
+		}
 	}
 
 	onMount(() => { loadEntities(); });
@@ -121,47 +147,75 @@
 	</section>
 
 	<div class="controls">
-		<div class="type-filters">
-			{#each entityTypes as t (t.value)}
-				<button
-					class="filter-btn"
-					class:active={activeType === t.value}
-					onclick={() => selectType(t.value)}
-				>{t.label}</button>
-			{/each}
+		<div class="view-toggle">
+			<button
+				class="toggle-btn"
+				class:active={viewMode === 'grid'}
+				onclick={() => switchView('grid')}
+			>Grid</button>
+			<button
+				class="toggle-btn"
+				class:active={viewMode === 'graph'}
+				onclick={() => switchView('graph')}
+			>Graph</button>
 		</div>
-		<input
-			type="text"
-			placeholder="Search entities..."
-			value={searchQuery}
-			oninput={(e) => handleSearch(e.currentTarget.value)}
-			class="search-input"
-		/>
+		{#if viewMode === 'grid'}
+			<div class="type-filters">
+				{#each entityTypes as t (t.value)}
+					<button
+						class="filter-btn"
+						class:active={activeType === t.value}
+						onclick={() => selectType(t.value)}
+					>{t.label}</button>
+				{/each}
+			</div>
+			<input
+				type="text"
+				placeholder="Search entities..."
+				value={searchQuery}
+				oninput={(e) => handleSearch(e.currentTarget.value)}
+				class="search-input"
+			/>
+		{/if}
 	</div>
 
-	{#if loading}
-		<p class="muted">Loading entities...</p>
-	{:else if error}
-		<div class="error-box">{error}</div>
-	{:else if entities.length === 0}
-		<div class="empty-state">
-			<p>No entities found.</p>
-			<p class="muted">Entities are automatically extracted from session transcripts.</p>
-		</div>
+	{#if viewMode === 'grid'}
+		{#if loading}
+			<p class="muted">Loading entities...</p>
+		{:else if error}
+			<div class="error-box">{error}</div>
+		{:else if entities.length === 0}
+			<div class="empty-state">
+				<p>No entities found.</p>
+				<p class="muted">Entities are automatically extracted from session transcripts.</p>
+			</div>
+		{:else}
+			<div class="entity-grid">
+				{#each entities as entity (entity.id)}
+					<a href="/campaigns/{campaignId}/lore/{entity.id}" class="entity-card">
+						<div class="card-top">
+							<span class={typeBadgeClass(entity.type)}>{entity.type}</span>
+						</div>
+						<h3>{entity.name}</h3>
+						{#if entity.description}
+							<p class="entity-desc">{entity.description.slice(0, 120)}{entity.description.length > 120 ? '...' : ''}</p>
+						{/if}
+					</a>
+				{/each}
+			</div>
+		{/if}
 	{:else}
-		<div class="entity-grid">
-			{#each entities as entity (entity.id)}
-				<a href="/campaigns/{campaignId}/lore/{entity.id}" class="entity-card">
-					<div class="card-top">
-						<span class={typeBadgeClass(entity.type)}>{entity.type}</span>
-					</div>
-					<h3>{entity.name}</h3>
-					{#if entity.description}
-						<p class="entity-desc">{entity.description.slice(0, 120)}{entity.description.length > 120 ? '...' : ''}</p>
-					{/if}
-				</a>
-			{/each}
-		</div>
+		{#if graphLoading}
+			<p class="muted">Loading relationship graph...</p>
+		{:else if graphError}
+			<div class="error-box">{graphError}</div>
+		{:else if graphData}
+			<RelationshipGraph
+				nodes={graphData.nodes}
+				edges={graphData.edges}
+				{campaignId}
+			/>
+		{/if}
 	{/if}
 </div>
 
@@ -265,6 +319,20 @@
 	}
 
 	.controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
+	.view-toggle { display: flex; gap: 0; }
+	.toggle-btn {
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		color: var(--text-secondary);
+		padding: 0.35rem 0.85rem;
+		cursor: pointer;
+		font-size: 0.8rem;
+		transition: all 0.15s;
+	}
+	.toggle-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+	.toggle-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; border-left: none; }
+	.toggle-btn:hover { border-color: var(--accent-gold-dim); color: var(--accent-gold); }
+	.toggle-btn.active { background: var(--accent-gold-dim); color: var(--bg-dark); border-color: var(--accent-gold); font-weight: 600; }
 	.type-filters { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 	.filter-btn { background: var(--bg-surface-2); border: 1px solid var(--border); color: var(--text-secondary); padding: 0.35rem 0.75rem; border-radius: var(--radius); cursor: pointer; font-size: 0.8rem; transition: all 0.15s; }
 	.filter-btn:hover { border-color: var(--accent-gold-dim); color: var(--accent-gold); }

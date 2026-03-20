@@ -15,6 +15,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/campaigns/{id}/recap", s.handleGetRecap)
 	s.mux.HandleFunc("POST /api/campaigns/{id}/recap", s.handleRegenerateRecap)
 	s.mux.HandleFunc("GET /api/campaigns/{id}/transcript-search", s.handleTranscriptSearch)
+	s.mux.HandleFunc("GET /api/campaigns/{id}/relationship-graph", s.handleRelationshipGraph)
 
 	s.mux.HandleFunc("GET /api/entities/{id}", s.handleGetEntity)
 	s.mux.HandleFunc("POST /api/entities/{id}/merge", s.handleMergeEntity)
