@@ -209,10 +209,10 @@ func ExtractSpeakerAudio(samples []float32, segments []SpeakerSegment, speakerID
 func IdentifySpeakerByEmbedding(emb0, emb1, micOwnerEmb, partnerEmb []float32) int {
 	if micOwnerEmb != nil && partnerEmb != nil {
 		// Both enrolled: find the assignment that maximises total similarity.
-		sim00 := cosineSimilarity(emb0, micOwnerEmb) // speaker0=owner
-		sim11 := cosineSimilarity(emb1, partnerEmb)  // speaker1=partner
-		sim01 := cosineSimilarity(emb0, partnerEmb)  // speaker0=partner
-		sim10 := cosineSimilarity(emb1, micOwnerEmb) // speaker1=owner
+		sim00 := CosineSimilarity(emb0, micOwnerEmb) // speaker0=owner
+		sim11 := CosineSimilarity(emb1, partnerEmb)  // speaker1=partner
+		sim01 := CosineSimilarity(emb0, partnerEmb)  // speaker0=partner
+		sim10 := CosineSimilarity(emb1, micOwnerEmb) // speaker1=owner
 
 		if sim00+sim11 >= sim10+sim01 {
 			return 0
@@ -222,7 +222,7 @@ func IdentifySpeakerByEmbedding(emb0, emb1, micOwnerEmb, partnerEmb []float32) i
 
 	if micOwnerEmb != nil {
 		// Only mic owner enrolled.
-		if cosineSimilarity(emb0, micOwnerEmb) >= cosineSimilarity(emb1, micOwnerEmb) {
+		if CosineSimilarity(emb0, micOwnerEmb) >= CosineSimilarity(emb1, micOwnerEmb) {
 			return 0
 		}
 		return 1
@@ -230,7 +230,7 @@ func IdentifySpeakerByEmbedding(emb0, emb1, micOwnerEmb, partnerEmb []float32) i
 
 	if partnerEmb != nil {
 		// Only partner enrolled — find partner, return the other speaker.
-		if cosineSimilarity(emb0, partnerEmb) >= cosineSimilarity(emb1, partnerEmb) {
+		if CosineSimilarity(emb0, partnerEmb) >= CosineSimilarity(emb1, partnerEmb) {
 			return 1 // speaker 0 is partner → speaker 1 is owner
 		}
 		return 0
@@ -239,7 +239,8 @@ func IdentifySpeakerByEmbedding(emb0, emb1, micOwnerEmb, partnerEmb []float32) i
 	return -1 // no enrollments
 }
 
-func cosineSimilarity(a, b []float32) float64 {
+// CosineSimilarity computes the cosine similarity between two embedding vectors.
+func CosineSimilarity(a, b []float32) float64 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}

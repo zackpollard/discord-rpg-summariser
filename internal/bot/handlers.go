@@ -177,6 +177,10 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	liveCh := make(chan voice.ChunkReady, 16)
 	rec := voice.NewRecorder(audioDir, guildID, liveCh)
 	liveWorker := voice.NewLiveWorker(b.transcriber, liveCh)
+
+	// Configure shared mic support for live transcription.
+	b.configureLiveSharedMics(ctx, liveWorker, campaign.ID)
+
 	go liveWorker.Run(ctx)
 
 	rec.Start(vc, func(userID string) string {
@@ -542,6 +546,98 @@ func (b *Bot) handleCampaignSharedMic(s *discordgo.Session, i *discordgo.Interac
 	}
 
 	respond(s, i, displayMsg)
+}
+
+// ---------------------------------------------------------------------------
+// Live shared mic support
+// ---------------------------------------------------------------------------
+
+// configureLiveSharedMics loads shared mic configs and enrollments for the
+// campaign and configures the live worker to identify speakers.
+func (b *Bot) configureLiveSharedMics(ctx context.Context, lw *voice.LiveWorker, campaignID int64) {
+	mics, err := b.store.GetSharedMics(ctx, campaignID)
+	if err != nil || len(mics) == 0 {
+		return
+	}
+
+	micInfos := make(map[string]voice.SharedMicInfo, len(mics))
+	for _, m := range mics {
+		ownerName, _ := b.store.GetCharacterName(ctx, m.DiscordUserID, campaignID)
+		if ownerName == "" {
+			ownerName = b.ResolveUsername(m.DiscordUserID)
+		}
+		partnerName, _ := b.store.GetCharacterName(ctx, m.PartnerUserID, campaignID)
+		if partnerName == "" {
+			partnerName = m.PartnerUserID
+		}
+		micInfos[m.DiscordUserID] = voice.SharedMicInfo{
+			PartnerUserID:      m.PartnerUserID,
+			OwnerDisplayName:   ownerName,
+			PartnerDisplayName: partnerName,
+		}
+	}
+	lw.SetSharedMics(micInfos)
+
+	// Set up embedding-based speaker identification if diarizer is available.
+	d := b.getDiarizer()
+	if d == nil {
+		return
+	}
+
+	// Load enrolled embeddings for all shared mic users.
+	enrollments := make(map[string][]float32)
+	for _, m := range mics {
+		if e, err := b.store.GetSpeakerEnrollment(ctx, campaignID, m.DiscordUserID); err == nil {
+			enrollments[m.DiscordUserID] = e.Embedding
+		}
+		if e, err := b.store.GetSpeakerEnrollment(ctx, campaignID, m.PartnerUserID); err == nil {
+			enrollments[m.PartnerUserID] = e.Embedding
+		}
+	}
+
+	if len(enrollments) > 0 {
+		lw.SetSpeakerIdentifier(&embeddingSpeakerIdentifier{
+			diarizer:    d,
+			enrollments: enrollments,
+		})
+		log.Printf("Live transcription: shared mic speaker identification enabled with %d enrollment(s)", len(enrollments))
+	}
+}
+
+// embeddingSpeakerIdentifier implements voice.SpeakerIdentifier using
+// voice enrollment embeddings and cosine similarity.
+type embeddingSpeakerIdentifier struct {
+	diarizer    *diarize.Diarizer
+	enrollments map[string][]float32 // userID -> embedding
+}
+
+func (id *embeddingSpeakerIdentifier) IdentifySpeaker(samples []float32, mic voice.SharedMicInfo) (string, string) {
+	fallback := mic.OwnerDisplayName + " & " + mic.PartnerDisplayName
+
+	emb, err := id.diarizer.ExtractEmbedding(samples)
+	if err != nil {
+		return "", fallback
+	}
+
+	// Compare against all enrolled embeddings and pick the best match.
+	var bestID string
+	bestSim := -1.0
+	for uid, enrolled := range id.enrollments {
+		sim := diarize.CosineSimilarity(emb, enrolled)
+		if sim > bestSim {
+			bestSim = sim
+			bestID = uid
+		}
+	}
+
+	if bestSim < 0.3 {
+		return "", fallback
+	}
+
+	if bestID == mic.PartnerUserID {
+		return bestID, mic.PartnerDisplayName
+	}
+	return bestID, mic.OwnerDisplayName
 }
 
 // ---------------------------------------------------------------------------
