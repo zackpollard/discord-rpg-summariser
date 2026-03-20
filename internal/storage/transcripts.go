@@ -52,7 +52,7 @@ func (s *Store) SearchTranscripts(ctx context.Context, campaignID int64, query s
 		 JOIN sessions s ON s.id = ts.session_id
 		 WHERE s.campaign_id = $1
 		   AND ts.tsv @@ websearch_to_tsquery('english', $2)
-		 ORDER BY ts_rank(ts.tsv, websearch_to_tsquery('english', $2)) DESC
+		 ORDER BY s.started_at ASC, ts.start_time ASC
 		 LIMIT $3 OFFSET $4`,
 		campaignID, query, limit, offset,
 	)

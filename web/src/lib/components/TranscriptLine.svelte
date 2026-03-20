@@ -24,7 +24,7 @@
 	const nameColor = $derived(hashColor(displayName));
 </script>
 
-<div class="line">
+<div class="line" id="seg-{Math.floor(segment.start_time)}">
 	<span class="timestamp">[{formatTime(segment.start_time)}]</span>
 	<span class="name" style:color={nameColor}>{displayName}:</span>
 	<span class="text">{segment.text}</span>
@@ -38,6 +38,11 @@
 	}
 	.line:hover {
 		background: var(--surface-hover);
+	}
+	.line:target {
+		background: rgba(234, 179, 8, 0.15);
+		border-left: 3px solid var(--accent-gold);
+		padding-left: 0.5rem;
 	}
 	.timestamp {
 		color: var(--text-muted);

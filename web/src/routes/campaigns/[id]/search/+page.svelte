@@ -126,14 +126,18 @@
 
 		<div class="results-list">
 			{#each results as result (result.segment_id)}
-				<a href="/sessions/{result.session_id}?t={Math.floor(result.start_time)}" class="result-card">
+				<div class="result-card">
 					<div class="result-meta">
+						<a href="/sessions/{result.session_id}" class="session-link">Session #{result.session_id}</a>
+						<span class="session-date">{formatDate(result.session_started_at)}</span>
 						<span class="speaker" style="color: {charColor(speakerLabel(result))}">{speakerLabel(result)}</span>
 						<span class="timestamp">[{formatTimestamp(result.start_time)}]</span>
-						<span class="session-date">{formatDate(result.session_started_at)}</span>
 					</div>
 					<div class="result-headline">{@html result.headline}</div>
-				</a>
+					<div class="result-actions">
+						<a href="/sessions/{result.session_id}#seg-{Math.floor(result.start_time)}" class="view-link">View in transcript</a>
+					</div>
+				</div>
 			{/each}
 		</div>
 
@@ -226,7 +230,6 @@
 	}
 	.result-card:hover {
 		border-color: var(--accent-gold-dim);
-		text-decoration: none;
 	}
 
 	.result-meta {
@@ -235,6 +238,14 @@
 		gap: 0.5rem;
 		margin-bottom: 0.35rem;
 		flex-wrap: wrap;
+	}
+	.session-link {
+		font-weight: 600;
+		font-size: 0.85rem;
+		color: var(--accent-gold);
+	}
+	.session-link:hover {
+		text-decoration: underline;
 	}
 	.speaker {
 		font-weight: 600;
@@ -248,7 +259,18 @@
 	.session-date {
 		font-size: 0.8rem;
 		color: var(--text-muted);
-		margin-left: auto;
+	}
+
+	.result-actions {
+		margin-top: 0.35rem;
+	}
+	.view-link {
+		font-size: 0.8rem;
+		color: var(--accent-gold-dim);
+	}
+	.view-link:hover {
+		color: var(--accent-gold);
+		text-decoration: underline;
 	}
 
 	.result-headline {
