@@ -423,6 +423,10 @@ export async function fetchSessionCombat(sessionId: number): Promise<CombatEncou
 	return request<CombatEncounter[]>(`/api/sessions/${sessionId}/combat`);
 }
 
+export function sessionAudioURL(sessionId: number): string {
+	return `/api/sessions/${sessionId}/audio`;
+}
+
 // Relationship graph types and functions
 
 export interface GraphNode {

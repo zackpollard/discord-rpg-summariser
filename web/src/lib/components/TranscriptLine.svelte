@@ -1,7 +1,15 @@
 <script lang="ts">
 	import type { TranscriptSegment } from '$lib/api';
 
-	let { segment }: { segment: TranscriptSegment } = $props();
+	let {
+		segment,
+		active = false,
+		onclick
+	}: {
+		segment: TranscriptSegment;
+		active?: boolean;
+		onclick?: () => void;
+	} = $props();
 
 	function hashColor(name: string): string {
 		let hash = 0;
@@ -24,7 +32,15 @@
 	const nameColor = $derived(hashColor(displayName));
 </script>
 
-<div class="line" id="seg-{Math.floor(segment.start_time)}">
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+	class="line"
+	class:active
+	class:clickable={!!onclick}
+	id="seg-{Math.floor(segment.start_time)}"
+	onclick={onclick}
+>
 	<span class="timestamp">[{formatTime(segment.start_time)}]</span>
 	<span class="name" style:color={nameColor}>{displayName}:</span>
 	<span class="text">{segment.text}</span>
@@ -32,12 +48,22 @@
 
 <style>
 	.line {
-		padding: 0.25rem 0;
+		padding: 0.25rem 0.4rem;
 		line-height: 1.5;
 		font-size: 0.9rem;
+		border-left: 3px solid transparent;
+		border-radius: 2px;
+		transition: background 0.15s, border-color 0.15s;
 	}
 	.line:hover {
 		background: var(--surface-hover);
+	}
+	.line.clickable {
+		cursor: pointer;
+	}
+	.line.active {
+		background: rgba(212, 175, 125, 0.1);
+		border-left-color: var(--accent-gold);
 	}
 	:global(.line.highlighted) {
 		background: rgba(234, 179, 8, 0.15);

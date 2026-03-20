@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchSession, fetchTranscript, fetchSessionCombat, reprocessSession, type Session, type TranscriptSegment, type CombatEncounter } from '$lib/api';
+	import { fetchSession, fetchTranscript, fetchSessionCombat, reprocessSession, sessionAudioURL, type Session, type TranscriptSegment, type CombatEncounter } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
+	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 
 	let session = $state<Session | null>(null);
 	let transcript = $state<TranscriptSegment[]>([]);
@@ -13,6 +14,46 @@
 	let error = $state<string | null>(null);
 	let reprocessing = $state(false);
 	let reprocessMessage = $state<string | null>(null);
+	let audioCurrentTime = $state(0);
+	let audioPlayer = $state<AudioPlayer | null>(null);
+	let transcriptScrollEl = $state<HTMLDivElement | null>(null);
+	let userScrolling = $state(false);
+	let userScrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Find the transcript segment that contains the current playback time.
+	const activeSegmentId = $derived.by(() => {
+		if (transcript.length === 0) return null;
+		for (const seg of transcript) {
+			if (seg.start_time <= audioCurrentTime && audioCurrentTime < seg.end_time) {
+				return seg.id;
+			}
+		}
+		return null;
+	});
+
+	// Auto-scroll to the active segment when it changes (unless user is scrolling).
+	$effect(() => {
+		const id = activeSegmentId;
+		if (id === null || userScrolling || !transcriptScrollEl) return;
+		const el = transcriptScrollEl.querySelector(`[data-seg-id="${id}"]`);
+		if (el) {
+			el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+		}
+	});
+
+	function handleTranscriptScroll() {
+		userScrolling = true;
+		if (userScrollTimer) clearTimeout(userScrollTimer);
+		userScrollTimer = setTimeout(() => {
+			userScrolling = false;
+		}, 3000);
+	}
+
+	function handleSegmentClick(startTime: number) {
+		if (audioPlayer) {
+			audioPlayer.seekTo(startTime);
+		}
+	}
 
 	function toggleEncounter(id: number) {
 		const next = new Set(expandedEncounters);
@@ -265,14 +306,30 @@
 			</section>
 		{/if}
 
+		<AudioPlayer
+			bind:this={audioPlayer}
+			src={sessionAudioURL(session.id)}
+			bind:currentTime={audioCurrentTime}
+		/>
+
 		<section class="card transcript-section">
 			<h2>Transcript</h2>
 			{#if transcript.length === 0}
 				<p class="muted">No transcript segments available.</p>
 			{:else}
-				<div class="transcript-scroll">
+				<div
+					class="transcript-scroll"
+					bind:this={transcriptScrollEl}
+					onscroll={handleTranscriptScroll}
+				>
 					{#each transcript as segment (segment.id)}
-						<TranscriptLine {segment} />
+						<div data-seg-id={segment.id}>
+							<TranscriptLine
+								{segment}
+								active={activeSegmentId === segment.id}
+								onclick={() => handleSegmentClick(segment.start_time)}
+							/>
+						</div>
 					{/each}
 				</div>
 			{/if}

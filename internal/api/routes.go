@@ -39,6 +39,7 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/sessions/{id}/transcript", s.handleGetTranscript)
 	s.handle("POST /api/sessions/{id}/reprocess", s.handleReprocessSession)
 	s.handle("GET /api/sessions/{id}/combat", s.handleGetSessionCombat)
+	s.handle("GET /api/sessions/{id}/audio", s.handleGetSessionAudio)
 
 	s.handle("GET /api/characters", s.handleListCharacters)
 	s.handle("PUT /api/characters", s.handleUpsertCharacter)
