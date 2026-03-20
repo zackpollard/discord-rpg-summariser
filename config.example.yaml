@@ -28,6 +28,7 @@ llm:
   provider: "claude-cli"  # claude-cli or ollama
   # ollama_url: "http://localhost:11434"
   # ollama_model: "llama3"
+  # embedding_model: "nomic-embed-text"  # Ollama model for vector embeddings (RAG)
 
 storage:
   database_url: "postgres://rpg:rpg@localhost:5432/rpg_summariser?sslmode=disable"
