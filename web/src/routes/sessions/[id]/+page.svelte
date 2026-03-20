@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { fetchSession, fetchTranscript, fetchSessionCombat, reprocessSession, type Session, type TranscriptSegment, type CombatEncounter } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -106,15 +106,24 @@
 		}
 
 		Promise.all([fetchSession(id), fetchTranscript(id), fetchSessionCombat(id)])
-			.then(([sess, trans, combat]) => {
+			.then(async ([sess, trans, combat]) => {
 				session = sess;
 				transcript = trans;
 				combatEncounters = combat;
+				loading = false;
+
+				// After data loads and DOM renders, scroll to the hash fragment
+				// (e.g. #seg-123 from transcript search links).
+				if (window.location.hash) {
+					await tick();
+					const el = document.querySelector(window.location.hash);
+					if (el) {
+						el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+					}
+				}
 			})
 			.catch((e) => {
 				error = e instanceof Error ? e.message : 'Failed to load session';
-			})
-			.finally(() => {
 				loading = false;
 			});
 	});
