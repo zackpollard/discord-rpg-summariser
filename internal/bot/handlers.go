@@ -291,6 +291,11 @@ func (b *Bot) handleCharacterSet(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
+	// Ensure a PC entity exists for this character.
+	if _, err := b.store.UpsertEntity(ctx, campaign.ID, name, "pc", ""); err != nil {
+		log.Printf("UpsertEntity (pc) error: %v", err)
+	}
+
 	respond(s, i, fmt.Sprintf("<@%s> is now **%s**.", targetUserID, name))
 }
 
@@ -1167,6 +1172,12 @@ func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, ses
 		playerCharacters = append(playerCharacters, m.CharacterName)
 	}
 
+	// Ensure PC entities exist for all player characters before extraction.
+	pcEntityIDs, err := b.store.EnsurePCEntities(ctx, session.CampaignID, playerCharacters)
+	if err != nil {
+		log.Printf("pipeline: ensure PC entities: %v", err)
+	}
+
 	extraction, err := extractor.ExtractEntities(ctx, transcript, summary, existingNames, dmName, playerCharacters)
 	if err != nil {
 		log.Printf("pipeline: entity extraction: %v", err)
@@ -1187,6 +1198,11 @@ func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, ses
 				log.Printf("pipeline: add note for %q: %v", e.Name, err)
 			}
 		}
+	}
+
+	// Add PC entity IDs so relationships referencing PCs can be resolved.
+	for name, id := range pcEntityIDs {
+		entityIDs[name+"|pc"] = id
 	}
 
 	// Persist relationships

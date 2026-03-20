@@ -244,6 +244,11 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
+	.type-pc {
+		background: rgba(236, 72, 153, 0.2);
+		color: #f472b6;
+		border: 1px solid rgba(236, 72, 153, 0.3);
+	}
 	.type-npc {
 		background: rgba(139, 92, 246, 0.2);
 		color: #a78bfa;

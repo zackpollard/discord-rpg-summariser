@@ -687,6 +687,63 @@ func TestGetEntityByName(t *testing.T) {
 	}
 }
 
+func TestEnsurePCEntities(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	names := []string{"Thordak", "Elara", "Grimjaw"}
+	ids, err := store.EnsurePCEntities(ctx, campID, names)
+	if err != nil {
+		t.Fatalf("EnsurePCEntities: %v", err)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("expected 3 IDs, got %d", len(ids))
+	}
+
+	// All returned IDs should be non-zero and correspond to pc entities.
+	for _, name := range names {
+		id, ok := ids[name]
+		if !ok {
+			t.Fatalf("missing ID for %q", name)
+		}
+		if id == 0 {
+			t.Fatalf("expected non-zero ID for %q", name)
+		}
+		e, err := store.GetEntity(ctx, id)
+		if err != nil {
+			t.Fatalf("GetEntity(%d): %v", id, err)
+		}
+		if e.Type != "pc" {
+			t.Fatalf("expected type 'pc' for %q, got %q", name, e.Type)
+		}
+		if e.Name != name {
+			t.Fatalf("expected name %q, got %q", name, e.Name)
+		}
+	}
+
+	// Calling again should return the same IDs (idempotent).
+	ids2, err := store.EnsurePCEntities(ctx, campID, names)
+	if err != nil {
+		t.Fatalf("EnsurePCEntities second call: %v", err)
+	}
+	for _, name := range names {
+		if ids[name] != ids2[name] {
+			t.Fatalf("expected same ID for %q on second call: %d vs %d", name, ids[name], ids2[name])
+		}
+	}
+
+	// Empty list should return empty map without error.
+	empty, err := store.EnsurePCEntities(ctx, campID, nil)
+	if err != nil {
+		t.Fatalf("EnsurePCEntities empty: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected empty map, got %d entries", len(empty))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Quests
 // ---------------------------------------------------------------------------

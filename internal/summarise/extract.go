@@ -50,7 +50,9 @@ func BuildExtractionPrompt(transcript, summary string, existingEntities []string
 	b.WriteString("Analyse them carefully and extract all notable entities and their relationships.\n\n")
 
 	if len(playerCharacters) > 0 {
-		b.WriteString("The following are PLAYER CHARACTERS — do NOT extract them as entities (they are not NPCs):\n")
+		b.WriteString("The following are PLAYER CHARACTERS — Do NOT extract player characters as entities (they already exist as type 'pc'). ")
+		b.WriteString("However, DO include relationships where a player character is the source or target. ")
+		b.WriteString("Use the exact character names listed below for source/target fields:\n")
 		for _, name := range playerCharacters {
 			fmt.Fprintf(&b, "- %s\n", name)
 		}
@@ -59,11 +61,11 @@ func BuildExtractionPrompt(transcript, summary string, existingEntities []string
 
 	b.WriteString("Guidelines:\n")
 	b.WriteString("- Extract NPCs, places, organisations, items, and events mentioned in the session.\n")
-	b.WriteString("- Do NOT extract player characters as NPCs.\n")
+	b.WriteString("- Do NOT extract player characters as entities — they already exist.\n")
 	b.WriteString("- Use character names, not player names.\n")
 	b.WriteString("- For each entity, write a concise description (what it IS) and notes (what happened THIS session).\n")
 	b.WriteString("- Identify relationships between entities: allied_with, enemy_of, located_in, member_of, owns, related_to.\n")
-	b.WriteString("- Source and target in relationships must exactly match entity names.\n")
+	b.WriteString("- Source and target in relationships must exactly match entity names or player character names.\n")
 
 	if len(existingEntities) > 0 {
 		b.WriteString("\nThe following entities already exist in the knowledge base. ")

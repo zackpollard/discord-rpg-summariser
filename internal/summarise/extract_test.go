@@ -78,8 +78,17 @@ func TestBuildExtractionPrompt_WithPlayerCharacters(t *testing.T) {
 			t.Errorf("prompt should contain player character %q", name)
 		}
 	}
-	if !strings.Contains(prompt, "Do NOT extract player characters as NPCs") {
-		t.Error("prompt should instruct not to extract PCs as NPCs")
+	if !strings.Contains(prompt, "already exist as type 'pc'") {
+		t.Error("prompt should mention PCs already exist as type 'pc'")
+	}
+	if !strings.Contains(prompt, "DO include relationships where a player character is the source or target") {
+		t.Error("prompt should instruct to include PC relationships")
+	}
+	if !strings.Contains(prompt, "exact character names") {
+		t.Error("prompt should instruct to use exact character names for relationship source/target")
+	}
+	if !strings.Contains(prompt, "Do NOT extract player characters as entities") {
+		t.Error("prompt should instruct not to extract PCs as entities")
 	}
 }
 

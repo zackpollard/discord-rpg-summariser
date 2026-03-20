@@ -166,6 +166,20 @@ func (s *Store) GetEntityRelationships(ctx context.Context, entityID int64) ([]E
 	return rels, rows.Err()
 }
 
+// EnsurePCEntities upserts a "pc" entity for each character name and returns
+// a map from character name to entity ID.
+func (s *Store) EnsurePCEntities(ctx context.Context, campaignID int64, characterNames []string) (map[string]int64, error) {
+	result := make(map[string]int64, len(characterNames))
+	for _, name := range characterNames {
+		id, err := s.UpsertEntity(ctx, campaignID, name, "pc", "")
+		if err != nil {
+			return nil, fmt.Errorf("ensure PC entity %q: %w", name, err)
+		}
+		result[name] = id
+	}
+	return result, nil
+}
+
 // GetEntityByName finds an entity by campaign, name and type.
 func (s *Store) GetEntityByName(ctx context.Context, campaignID int64, name, typ string) (*Entity, error) {
 	var e Entity
