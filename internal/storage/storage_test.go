@@ -1078,7 +1078,7 @@ func TestInsertAndGetTranscript(t *testing.T) {
 	}
 }
 
-func TestGetLatestCompleteSessions(t *testing.T) {
+func TestInsertEntityReferences(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	guildID := uniqueGuild(t)
@@ -1861,5 +1861,255 @@ func TestGetCampaignRelationshipGraph(t *testing.T) {
 	}
 	if len(rels2) != 0 {
 		t.Fatalf("expected 0 relationships for empty campaign, got %d", len(rels2))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shared Mics
+// ---------------------------------------------------------------------------
+
+func TestSetSharedMic(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Insert a new shared mic.
+	if err := store.SetSharedMic(ctx, campID, "discord-user-1", "partner-user-1"); err != nil {
+		t.Fatalf("SetSharedMic insert: %v", err)
+	}
+
+	mics, err := store.GetSharedMics(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetSharedMics after insert: %v", err)
+	}
+	if len(mics) != 1 {
+		t.Fatalf("expected 1 mic, got %d", len(mics))
+	}
+	if mics[0].DiscordUserID != "discord-user-1" {
+		t.Fatalf("expected discord_user_id 'discord-user-1', got %q", mics[0].DiscordUserID)
+	}
+	if mics[0].PartnerUserID != "partner-user-1" {
+		t.Fatalf("expected partner_user_id 'partner-user-1', got %q", mics[0].PartnerUserID)
+	}
+	if mics[0].CampaignID != campID {
+		t.Fatalf("expected campaign_id %d, got %d", campID, mics[0].CampaignID)
+	}
+
+	// Upsert (update) the same discord user with a new partner.
+	if err := store.SetSharedMic(ctx, campID, "discord-user-1", "partner-user-2"); err != nil {
+		t.Fatalf("SetSharedMic upsert: %v", err)
+	}
+
+	mics, err = store.GetSharedMics(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetSharedMics after upsert: %v", err)
+	}
+	if len(mics) != 1 {
+		t.Fatalf("expected 1 mic after upsert, got %d", len(mics))
+	}
+	if mics[0].PartnerUserID != "partner-user-2" {
+		t.Fatalf("expected partner_user_id 'partner-user-2' after upsert, got %q", mics[0].PartnerUserID)
+	}
+}
+
+func TestGetSharedMics(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Empty campaign should return empty slice.
+	mics, err := store.GetSharedMics(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetSharedMics empty: %v", err)
+	}
+	if len(mics) != 0 {
+		t.Fatalf("expected 0 mics for empty campaign, got %d", len(mics))
+	}
+
+	// Add multiple mics.
+	if err := store.SetSharedMic(ctx, campID, "user-a", "partner-a"); err != nil {
+		t.Fatalf("SetSharedMic A: %v", err)
+	}
+	if err := store.SetSharedMic(ctx, campID, "user-b", "partner-b"); err != nil {
+		t.Fatalf("SetSharedMic B: %v", err)
+	}
+
+	mics, err = store.GetSharedMics(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetSharedMics: %v", err)
+	}
+	if len(mics) != 2 {
+		t.Fatalf("expected 2 mics, got %d", len(mics))
+	}
+
+	// Mics for a different campaign should not appear.
+	campID2 := createTestCampaign(t, store, guildID)
+	mics2, err := store.GetSharedMics(ctx, campID2)
+	if err != nil {
+		t.Fatalf("GetSharedMics other campaign: %v", err)
+	}
+	if len(mics2) != 0 {
+		t.Fatalf("expected 0 mics for other campaign, got %d", len(mics2))
+	}
+}
+
+func TestDeleteSharedMic(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Set up a mic to delete.
+	if err := store.SetSharedMic(ctx, campID, "user-del", "partner-del"); err != nil {
+		t.Fatalf("SetSharedMic: %v", err)
+	}
+
+	mics, _ := store.GetSharedMics(ctx, campID)
+	if len(mics) != 1 {
+		t.Fatalf("expected 1 mic before delete, got %d", len(mics))
+	}
+
+	// Delete it.
+	if err := store.DeleteSharedMic(ctx, campID, "user-del"); err != nil {
+		t.Fatalf("DeleteSharedMic: %v", err)
+	}
+
+	mics, err := store.GetSharedMics(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetSharedMics after delete: %v", err)
+	}
+	if len(mics) != 0 {
+		t.Fatalf("expected 0 mics after delete, got %d", len(mics))
+	}
+
+	// Deleting a non-existent mic should not error.
+	if err := store.DeleteSharedMic(ctx, campID, "nonexistent"); err != nil {
+		t.Fatalf("DeleteSharedMic nonexistent: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Speaker Enrollments
+// ---------------------------------------------------------------------------
+
+func TestUpsertSpeakerEnrollment(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	embedding1 := []float32{0.1, 0.2, 0.3, 0.4}
+
+	// Insert.
+	if err := store.UpsertSpeakerEnrollment(ctx, campID, "speaker-1", embedding1); err != nil {
+		t.Fatalf("UpsertSpeakerEnrollment insert: %v", err)
+	}
+
+	got, err := store.GetSpeakerEnrollment(ctx, campID, "speaker-1")
+	if err != nil {
+		t.Fatalf("GetSpeakerEnrollment after insert: %v", err)
+	}
+	if got.UserID != "speaker-1" {
+		t.Fatalf("expected user_id 'speaker-1', got %q", got.UserID)
+	}
+	if got.CampaignID != campID {
+		t.Fatalf("expected campaign_id %d, got %d", campID, got.CampaignID)
+	}
+	if len(got.Embedding) != 4 {
+		t.Fatalf("expected embedding length 4, got %d", len(got.Embedding))
+	}
+	if got.Embedding[0] != 0.1 || got.Embedding[3] != 0.4 {
+		t.Fatalf("unexpected embedding values: %v", got.Embedding)
+	}
+
+	// Update (upsert with new embedding).
+	embedding2 := []float32{0.5, 0.6, 0.7, 0.8}
+	if err := store.UpsertSpeakerEnrollment(ctx, campID, "speaker-1", embedding2); err != nil {
+		t.Fatalf("UpsertSpeakerEnrollment update: %v", err)
+	}
+
+	got, err = store.GetSpeakerEnrollment(ctx, campID, "speaker-1")
+	if err != nil {
+		t.Fatalf("GetSpeakerEnrollment after update: %v", err)
+	}
+	if got.Embedding[0] != 0.5 || got.Embedding[3] != 0.8 {
+		t.Fatalf("expected updated embedding, got %v", got.Embedding)
+	}
+}
+
+func TestGetSpeakerEnrollment(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Not found case: should return error.
+	_, err := store.GetSpeakerEnrollment(ctx, campID, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for non-existent enrollment, got nil")
+	}
+
+	// Found case.
+	embedding := []float32{1.0, 2.0, 3.0}
+	if err := store.UpsertSpeakerEnrollment(ctx, campID, "found-user", embedding); err != nil {
+		t.Fatalf("UpsertSpeakerEnrollment: %v", err)
+	}
+
+	got, err := store.GetSpeakerEnrollment(ctx, campID, "found-user")
+	if err != nil {
+		t.Fatalf("GetSpeakerEnrollment found: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil enrollment")
+	}
+	if got.UserID != "found-user" {
+		t.Fatalf("expected user_id 'found-user', got %q", got.UserID)
+	}
+	if len(got.Embedding) != 3 {
+		t.Fatalf("expected embedding length 3, got %d", len(got.Embedding))
+	}
+}
+
+func TestGetSpeakerEnrollments(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Empty campaign should return empty slice.
+	enrollments, err := store.GetSpeakerEnrollments(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetSpeakerEnrollments empty: %v", err)
+	}
+	if len(enrollments) != 0 {
+		t.Fatalf("expected 0 enrollments, got %d", len(enrollments))
+	}
+
+	// Add multiple enrollments.
+	if err := store.UpsertSpeakerEnrollment(ctx, campID, "user-x", []float32{0.1, 0.2}); err != nil {
+		t.Fatalf("UpsertSpeakerEnrollment X: %v", err)
+	}
+	if err := store.UpsertSpeakerEnrollment(ctx, campID, "user-y", []float32{0.3, 0.4}); err != nil {
+		t.Fatalf("UpsertSpeakerEnrollment Y: %v", err)
+	}
+
+	enrollments, err = store.GetSpeakerEnrollments(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetSpeakerEnrollments: %v", err)
+	}
+	if len(enrollments) != 2 {
+		t.Fatalf("expected 2 enrollments, got %d", len(enrollments))
+	}
+
+	// Enrollments for a different campaign should not appear.
+	campID2 := createTestCampaign(t, store, guildID)
+	enrollments2, err := store.GetSpeakerEnrollments(ctx, campID2)
+	if err != nil {
+		t.Fatalf("GetSpeakerEnrollments other campaign: %v", err)
+	}
+	if len(enrollments2) != 0 {
+		t.Fatalf("expected 0 enrollments for other campaign, got %d", len(enrollments2))
 	}
 }

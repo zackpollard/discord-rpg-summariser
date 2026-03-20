@@ -103,6 +103,7 @@ test-unit: whisper ## Run unit tests (no database required)
 		./internal/config/ \
 		./internal/audio/ \
 		./internal/bot/ \
+		./internal/diarize/ \
 		./internal/summarise/ \
 		./internal/transcribe/ \
 		./internal/voice/

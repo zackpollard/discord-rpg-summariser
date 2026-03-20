@@ -20,6 +20,11 @@ import {
 	fetchRecap,
 	createCampaign,
 	setActiveCampaign,
+	searchTranscripts,
+	fetchSessionCombat,
+	mergeEntity,
+	fetchRelationshipGraph,
+	reprocessSession,
 } from './api';
 
 function mockFetch(body: unknown, status = 200, statusText = 'OK') {
@@ -367,5 +372,113 @@ describe('setActiveCampaign', () => {
 		await setActiveCampaign(3);
 
 		expect(fetch).toHaveBeenCalledWith('/api/campaigns/3/active', { method: 'PUT' });
+	});
+});
+
+describe('searchTranscripts', () => {
+	it('builds URL with default limit and offset', async () => {
+		const response = { results: [], total: 0, limit: 20, offset: 0 };
+		globalThis.fetch = mockFetch(response);
+
+		const result = await searchTranscripts(5, 'dragon');
+
+		expect(result).toEqual(response);
+		expect(fetch).toHaveBeenCalledWith(
+			'/api/campaigns/5/transcript-search?q=dragon&limit=20&offset=0',
+			undefined,
+		);
+	});
+
+	it('builds URL with custom limit and offset', async () => {
+		const response = { results: [], total: 50, limit: 10, offset: 30 };
+		globalThis.fetch = mockFetch(response);
+
+		const result = await searchTranscripts(3, 'tavern', 10, 30);
+
+		expect(result).toEqual(response);
+		expect(fetch).toHaveBeenCalledWith(
+			'/api/campaigns/3/transcript-search?q=tavern&limit=10&offset=30',
+			undefined,
+		);
+	});
+
+	it('encodes special characters in the query', async () => {
+		globalThis.fetch = mockFetch({ results: [], total: 0, limit: 20, offset: 0 });
+
+		await searchTranscripts(1, 'fire & ice');
+
+		expect(fetch).toHaveBeenCalledWith(
+			'/api/campaigns/1/transcript-search?q=fire+%26+ice&limit=20&offset=0',
+			undefined,
+		);
+	});
+});
+
+describe('fetchSessionCombat', () => {
+	it('fetches combat encounters for a session', async () => {
+		const encounters = [
+			{ id: 1, session_id: 5, name: 'Goblin Ambush', actions: [] },
+		];
+		globalThis.fetch = mockFetch(encounters);
+
+		const result = await fetchSessionCombat(5);
+
+		expect(result).toEqual(encounters);
+		expect(fetch).toHaveBeenCalledWith('/api/sessions/5/combat', undefined);
+	});
+});
+
+describe('mergeEntity', () => {
+	it('sends POST with merge_id in body', async () => {
+		globalThis.fetch = mockFetch(undefined, 204);
+
+		await mergeEntity(10, 20);
+
+		expect(fetch).toHaveBeenCalledWith('/api/entities/10/merge', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ merge_id: 20 }),
+		});
+	});
+});
+
+describe('fetchRelationshipGraph', () => {
+	it('fetches relationship graph for a campaign', async () => {
+		const graph = {
+			nodes: [{ id: 1, name: 'Strahd', type: 'npc' }],
+			edges: [{ source: 1, target: 2, relationship: 'enemy', description: 'Mortal enemies' }],
+		};
+		globalThis.fetch = mockFetch(graph);
+
+		const result = await fetchRelationshipGraph(7);
+
+		expect(result).toEqual(graph);
+		expect(fetch).toHaveBeenCalledWith('/api/campaigns/7/relationship-graph', undefined);
+	});
+});
+
+describe('reprocessSession', () => {
+	it('sends POST with retranscribe false by default', async () => {
+		globalThis.fetch = mockFetch(undefined, 204);
+
+		await reprocessSession(42);
+
+		expect(fetch).toHaveBeenCalledWith('/api/sessions/42/reprocess', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ retranscribe: false }),
+		});
+	});
+
+	it('sends POST with retranscribe true when specified', async () => {
+		globalThis.fetch = mockFetch(undefined, 204);
+
+		await reprocessSession(42, true);
+
+		expect(fetch).toHaveBeenCalledWith('/api/sessions/42/reprocess', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ retranscribe: true }),
+		});
 	});
 });
