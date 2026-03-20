@@ -76,7 +76,7 @@ func main() {
 		log.Println("Telegram integration enabled")
 	}
 
-	srv := api.NewServer(store, cfg.Web.ListenAddr, cfg.Discord.GuildID, webDir)
+	srv := api.NewServer(store, cfg.Web.ListenAddr, cfg.Discord.GuildID, webDir, api.WithAuth(cfg))
 
 	discordBot, err := bot.NewBot(cfg, store, transcriber, sum)
 	if err != nil {

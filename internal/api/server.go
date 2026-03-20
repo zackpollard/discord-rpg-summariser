@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	"discord-rpg-summariser/internal/auth"
+	"discord-rpg-summariser/internal/config"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/voice"
 )
@@ -18,24 +20,32 @@ type VoiceActivityProvider interface {
 }
 
 type Server struct {
-	store       *storage.Store
-	listenAddr  string
-	guildID     string
-	voiceAP     VoiceActivityProvider
-	liveTP      LiveTranscriptProvider
-	memberP     MemberProvider
-	loreQA      LoreQAProvider
-	reprocessor SessionReprocessor
-	mux         *http.ServeMux
-	httpServer  *http.Server
+	store         *storage.Store
+	listenAddr    string
+	guildID       string
+	voiceAP       VoiceActivityProvider
+	liveTP        LiveTranscriptProvider
+	memberP       MemberProvider
+	loreQA        LoreQAProvider
+	reprocessor   SessionReprocessor
+	mux           *http.ServeMux
+	httpServer    *http.Server
+	sessions      *auth.SessionManager
+	oauthCfg      *auth.OAuthConfig
+	secureCookies bool
+	authEnabled   bool
 }
 
-func NewServer(store *storage.Store, listenAddr, guildID, webDir string) *Server {
+func NewServer(store *storage.Store, listenAddr, guildID, webDir string, opts ...Option) *Server {
 	s := &Server{
 		store:      store,
 		listenAddr: listenAddr,
 		guildID:    guildID,
 		mux:        http.NewServeMux(),
+	}
+
+	for _, opt := range opts {
+		opt(s)
 	}
 
 	s.setupRoutes()
@@ -47,6 +57,42 @@ func NewServer(store *storage.Store, listenAddr, guildID, webDir string) *Server
 	}
 
 	return s
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithAuth configures Discord OAuth2 authentication for the server.
+func WithAuth(cfg *config.Config) Option {
+	return func(s *Server) {
+		disc := cfg.Discord
+		web := cfg.Web
+
+		// If client ID / secret are not configured, skip auth.
+		if disc.ClientID == "" || disc.ClientSecret == "" {
+			log.Println("OAuth2 client_id/client_secret not set — auth disabled")
+			return
+		}
+
+		secureCookies := !strings.HasPrefix(disc.RedirectURL, "http://localhost") &&
+			!strings.HasPrefix(disc.RedirectURL, "http://127.0.0.1")
+
+		sm, err := auth.NewSessionManager(web.SessionSecret, secureCookies)
+		if err != nil {
+			log.Fatalf("Failed to create session manager: %v", err)
+		}
+
+		s.sessions = sm
+		s.secureCookies = secureCookies
+		s.authEnabled = true
+		s.oauthCfg = &auth.OAuthConfig{
+			ClientID:     disc.ClientID,
+			ClientSecret: disc.ClientSecret,
+			RedirectURL:  disc.RedirectURL,
+		}
+
+		log.Println("Discord OAuth2 authentication enabled")
+	}
 }
 
 // SetVoiceActivityProvider sets the provider for live voice activity data.
@@ -119,6 +165,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 
 		if r.Method == http.MethodOptions {
@@ -128,7 +175,9 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		if strings.HasPrefix(r.URL.Path, "/api/") &&
 			!strings.HasSuffix(r.URL.Path, "/voice-activity") &&
-			!strings.HasSuffix(r.URL.Path, "/live-transcript") {
+			!strings.HasSuffix(r.URL.Path, "/live-transcript") &&
+			!strings.HasPrefix(r.URL.Path, "/api/auth/login") &&
+			!strings.HasPrefix(r.URL.Path, "/api/auth/callback") {
 			w.Header().Set("Content-Type", "application/json")
 		}
 

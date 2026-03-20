@@ -2,6 +2,10 @@ discord:
   token: "your-discord-bot-token"
   guild_id: "your-discord-guild-id"
   notification_channel_id: "" # optional: channel to post session summaries
+  # OAuth2 settings for web panel authentication (leave blank to disable auth)
+  client_id: ""       # Discord application client ID
+  client_secret: ""   # Discord application client secret
+  redirect_url: "http://localhost:8080/api/auth/callback"
 
 # Optional: Telegram integration for capturing DM text messages during sessions
 # telegram:
@@ -31,3 +35,4 @@ storage:
 
 web:
   listen_addr: ":8080"
+  # session_secret: "your-random-secret-here"  # for cookie encryption (auto-generated if empty)

@@ -1,40 +1,100 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
+	import { fetchAuthMe, logout, type AuthUser } from '$lib/api';
 
 	let { children }: { children: Snippet } = $props();
 
 	let navOpen = $state(false);
+	let user = $state<AuthUser | null>(null);
+	let authChecked = $state(false);
+
+	const isLoginPage = $derived($page.url.pathname === '/login');
+
+	onMount(async () => {
+		if (isLoginPage) {
+			authChecked = true;
+			return;
+		}
+		try {
+			user = await fetchAuthMe();
+		} catch {
+			// 401 or network error — redirect to login
+			goto('/login');
+			return;
+		}
+		authChecked = true;
+	});
+
+	function avatarURL(u: AuthUser): string {
+		if (u.avatar) {
+			return `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png?size=64`;
+		}
+		// Default Discord avatar
+		const index = (BigInt(u.id) >> 22n) % 6n;
+		return `https://cdn.discordapp.com/embed/avatars/${index}.png`;
+	}
+
+	async function handleLogout() {
+		try {
+			await logout();
+		} catch {
+			// ignore
+		}
+		user = null;
+		goto('/login');
+	}
 </script>
 
-<div class="app">
-	<nav class="sidebar" class:open={navOpen}>
-		<div class="brand">
-			<span class="brand-icon">&#x1f3b2;</span>
-			<span class="brand-text">RPG Summariser</span>
-		</div>
-
-		<ul class="nav-links">
-			<li><a href="/" onclick={() => (navOpen = false)}>Campaigns</a></li>
-		</ul>
-	</nav>
-
-	<div class="main-area">
-		<header class="topbar">
-			<button class="menu-toggle" onclick={() => (navOpen = !navOpen)} aria-label="Toggle menu">
-				&#9776;
-			</button>
-			<span class="topbar-title">RPG Session Summariser</span>
-		</header>
-
-		<main class="content">
-			{@render children()}
-		</main>
+{#if isLoginPage}
+	{@render children()}
+{:else if !authChecked}
+	<div class="loading-screen">
+		<p>Loading...</p>
 	</div>
-</div>
+{:else}
+	<div class="app">
+		<nav class="sidebar" class:open={navOpen}>
+			<div class="brand">
+				<span class="brand-icon">&#x1f3b2;</span>
+				<span class="brand-text">RPG Summariser</span>
+			</div>
 
-{#if navOpen}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="overlay" onclick={() => (navOpen = false)} onkeydown={() => {}}></div>
+			<ul class="nav-links">
+				<li><a href="/" onclick={() => (navOpen = false)}>Campaigns</a></li>
+			</ul>
+
+			{#if user}
+				<div class="sidebar-user">
+					<img src={avatarURL(user)} alt={user.username} class="user-avatar" />
+					<span class="user-name">{user.username}</span>
+					<button class="logout-btn" onclick={handleLogout} title="Logout">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+					</button>
+				</div>
+			{/if}
+		</nav>
+
+		<div class="main-area">
+			<header class="topbar">
+				<button class="menu-toggle" onclick={() => (navOpen = !navOpen)} aria-label="Toggle menu">
+					&#9776;
+				</button>
+				<span class="topbar-title">RPG Session Summariser</span>
+			</header>
+
+			<main class="content">
+				{@render children()}
+			</main>
+		</div>
+	</div>
+
+	{#if navOpen}
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="overlay" onclick={() => (navOpen = false)} onkeydown={() => {}}></div>
+	{/if}
 {/if}
 
 <style>
@@ -77,6 +137,14 @@
 		text-decoration: underline;
 	}
 
+	.loading-screen {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 100vh;
+		color: var(--text-muted);
+	}
+
 	.app {
 		display: flex;
 		min-height: 100vh;
@@ -112,6 +180,7 @@
 
 	.nav-links {
 		list-style: none;
+		flex: 1;
 	}
 	.nav-links li a {
 		display: block;
@@ -126,6 +195,42 @@
 		color: var(--accent-gold);
 		text-decoration: none;
 		border-left-color: var(--accent-gold);
+	}
+
+	.sidebar-user {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.75rem 1.25rem;
+		border-top: 1px solid var(--border);
+		margin-top: auto;
+	}
+	.user-avatar {
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+	.user-name {
+		font-size: 0.85rem;
+		color: var(--text-secondary);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		flex: 1;
+	}
+	.logout-btn {
+		background: none;
+		border: none;
+		color: var(--text-muted);
+		cursor: pointer;
+		padding: 0.2rem;
+		display: flex;
+		align-items: center;
+		flex-shrink: 0;
+	}
+	.logout-btn:hover {
+		color: var(--accent-gold);
 	}
 
 	.main-area {

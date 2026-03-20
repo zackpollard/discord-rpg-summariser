@@ -20,6 +20,9 @@ type DiscordConfig struct {
 	Token               string `yaml:"token"`
 	GuildID             string `yaml:"guild_id"`
 	NotificationChannel string `yaml:"notification_channel_id"`
+	ClientID            string `yaml:"client_id"`
+	ClientSecret        string `yaml:"client_secret"`
+	RedirectURL         string `yaml:"redirect_url"`
 }
 
 type TranscribeConfig struct {
@@ -53,7 +56,8 @@ type TelegramConfig struct {
 }
 
 type WebConfig struct {
-	ListenAddr string `yaml:"listen_addr"`
+	ListenAddr    string `yaml:"listen_addr"`
+	SessionSecret string `yaml:"session_secret"`
 }
 
 func Load(path string) (*Config, error) {
@@ -92,6 +96,15 @@ func Load(path string) (*Config, error) {
 	}
 	if guildID := os.Getenv("DISCORD_GUILD_ID"); guildID != "" {
 		cfg.Discord.GuildID = guildID
+	}
+	if clientID := os.Getenv("DISCORD_CLIENT_ID"); clientID != "" {
+		cfg.Discord.ClientID = clientID
+	}
+	if clientSecret := os.Getenv("DISCORD_CLIENT_SECRET"); clientSecret != "" {
+		cfg.Discord.ClientSecret = clientSecret
+	}
+	if sessionSecret := os.Getenv("WEB_SESSION_SECRET"); sessionSecret != "" {
+		cfg.Web.SessionSecret = sessionSecret
 	}
 	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
 		cfg.Storage.DatabaseURL = dbURL

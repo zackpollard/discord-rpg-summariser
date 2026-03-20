@@ -100,6 +100,7 @@ test: test-unit test-integration test-web ## Run all tests
 
 test-unit: whisper ## Run unit tests (no database required)
 	go test -tags $(BUILD_TAGS) -count=1 \
+		./internal/auth/ \
 		./internal/config/ \
 		./internal/audio/ \
 		./internal/bot/ \

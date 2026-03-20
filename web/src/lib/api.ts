@@ -66,6 +66,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	return res.json();
 }
 
+// Auth types and functions
+
+export interface AuthUser {
+	id: string;
+	username: string;
+	avatar: string;
+}
+
+export async function fetchAuthMe(): Promise<AuthUser> {
+	return request<AuthUser>('/api/auth/me');
+}
+
+export async function logout(): Promise<void> {
+	await request<void>('/api/auth/logout', { method: 'POST' });
+}
+
 export async function fetchSessions(limit = 20, offset = 0, campaignId?: number): Promise<Session[]> {
 	let url = `/api/sessions?limit=${limit}&offset=${offset}`;
 	if (campaignId !== undefined) url += `&campaign_id=${campaignId}`;
