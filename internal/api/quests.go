@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"discord-rpg-summariser/internal/storage"
@@ -49,9 +48,8 @@ func toQuestResponse(q *storage.Quest) questResponse {
 }
 
 func (s *Server) handleListQuests(w http.ResponseWriter, r *http.Request) {
-	campaignID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid campaign id")
+	campaignID, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 
@@ -72,9 +70,8 @@ func (s *Server) handleListQuests(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetQuest(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid quest id")
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 

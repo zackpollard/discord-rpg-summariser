@@ -43,19 +43,7 @@ func toSessionResponse(sess *storage.Session) sessionResponse {
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	limit := 20
-	offset := 0
-
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
+	limit, offset := parsePagination(r, 20)
 
 	guildID := r.URL.Query().Get("guild_id")
 	if guildID == "" {
@@ -84,10 +72,8 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid session id")
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 

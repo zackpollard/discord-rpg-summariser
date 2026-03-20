@@ -2,30 +2,17 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 
 	"discord-rpg-summariser/internal/storage"
 )
 
 func (s *Server) handleGetTimeline(w http.ResponseWriter, r *http.Request) {
-	campaignID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid campaign id")
+	campaignID, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 
-	limit := 50
-	offset := 0
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
+	limit, offset := parsePagination(r, 50)
 
 	events, err := s.store.GetCampaignTimeline(r.Context(), campaignID, limit, offset)
 	if err != nil {

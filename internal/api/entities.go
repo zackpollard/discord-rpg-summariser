@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -58,27 +57,14 @@ type entityRelationshipResponse struct {
 }
 
 func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request) {
-	campaignID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid campaign id")
+	campaignID, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 
 	typeFilter := r.URL.Query().Get("type")
 	search := r.URL.Query().Get("search")
-
-	limit := 50
-	offset := 0
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
+	limit, offset := parsePagination(r, 50)
 
 	entities, err := s.store.ListEntities(r.Context(), campaignID, typeFilter, search, limit, offset)
 	if err != nil {
@@ -104,9 +90,8 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid entity id")
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 
@@ -221,9 +206,8 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMergeEntity(w http.ResponseWriter, r *http.Request) {
-	keepID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid entity id")
+	keepID, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 

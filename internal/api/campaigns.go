@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
 
 	"discord-rpg-summariser/internal/storage"
@@ -82,9 +81,8 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetCampaign(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid campaign id")
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 
@@ -102,9 +100,8 @@ func (s *Server) handleGetCampaign(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetActiveCampaign(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid campaign id")
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 

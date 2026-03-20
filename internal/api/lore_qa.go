@@ -25,9 +25,8 @@ type loreAskResponse struct {
 }
 
 func (s *Server) handleLoreAsk(w http.ResponseWriter, r *http.Request) {
-	campaignID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid campaign id")
+	campaignID, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 
@@ -81,9 +80,8 @@ func (s *Server) handleLoreAsk(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLoreSearch(w http.ResponseWriter, r *http.Request) {
-	campaignID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid campaign id")
+	campaignID, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 

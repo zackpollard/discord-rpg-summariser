@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -25,9 +24,8 @@ type reprocessRequest struct {
 }
 
 func (s *Server) handleReprocessSession(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid session id")
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 

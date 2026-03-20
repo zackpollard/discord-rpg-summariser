@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -19,10 +18,8 @@ type transcriptSegmentResponse struct {
 }
 
 func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid session id")
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
 		return
 	}
 
