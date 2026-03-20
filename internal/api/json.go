@@ -30,6 +30,23 @@ func parsePathID(w http.ResponseWriter, r *http.Request, param string) (int64, b
 	return id, true
 }
 
+// displayNameResolver returns a function that caches resolved display names
+// for user IDs using the server's member provider.
+func (s *Server) displayNameResolver() func(string) string {
+	cache := make(map[string]string)
+	return func(userID string) string {
+		if name, ok := cache[userID]; ok {
+			return name
+		}
+		name := userID
+		if s.memberP != nil {
+			name = s.memberP.ResolveUsername(userID)
+		}
+		cache[userID] = name
+		return name
+	}
+}
+
 // parsePagination extracts limit and offset query parameters with defaults.
 func parsePagination(r *http.Request, defaultLimit int) (limit, offset int) {
 	limit = defaultLimit

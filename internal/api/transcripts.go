@@ -42,19 +42,7 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 		charMap[m.UserID] = m.CharacterName
 	}
 
-	// Resolve display names once per unique user
-	nameCache := make(map[string]string)
-	resolveDisplay := func(userID string) string {
-		if name, ok := nameCache[userID]; ok {
-			return name
-		}
-		name := userID
-		if s.memberP != nil {
-			name = s.memberP.ResolveUsername(userID)
-		}
-		nameCache[userID] = name
-		return name
-	}
+	resolveDisplay := s.displayNameResolver()
 
 	resp := make([]transcriptSegmentResponse, len(segments))
 	for i := range segments {
