@@ -39,7 +39,7 @@
 	.line:hover {
 		background: var(--surface-hover);
 	}
-	.line:target {
+	:global(.line.highlighted) {
 		background: rgba(234, 179, 8, 0.15);
 		border-left: 3px solid var(--accent-gold);
 		padding-left: 0.5rem;

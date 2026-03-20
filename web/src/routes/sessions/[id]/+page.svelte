@@ -118,6 +118,7 @@
 					await tick();
 					const el = document.querySelector(window.location.hash);
 					if (el) {
+						el.classList.add('highlighted');
 						el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 					}
 				}
