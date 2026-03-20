@@ -1,16 +1,60 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchSession, fetchTranscript, reprocessSession, type Session, type TranscriptSegment } from '$lib/api';
+	import { fetchSession, fetchTranscript, fetchSessionCombat, reprocessSession, type Session, type TranscriptSegment, type CombatEncounter } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
 
 	let session = $state<Session | null>(null);
 	let transcript = $state<TranscriptSegment[]>([]);
+	let combatEncounters = $state<CombatEncounter[]>([]);
+	let expandedEncounters = $state<Set<number>>(new Set());
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let reprocessing = $state(false);
 	let reprocessMessage = $state<string | null>(null);
+
+	function toggleEncounter(id: number) {
+		const next = new Set(expandedEncounters);
+		if (next.has(id)) {
+			next.delete(id);
+		} else {
+			next.add(id);
+		}
+		expandedEncounters = next;
+	}
+
+	function formatTime(seconds: number): string {
+		const m = Math.floor(seconds / 60);
+		const s = Math.floor(seconds % 60);
+		return `${m}:${s.toString().padStart(2, '0')}`;
+	}
+
+	function actionTypeLabel(type: string): string {
+		const labels: Record<string, string> = {
+			attack: 'Attack',
+			spell: 'Spell',
+			ability: 'Ability',
+			heal: 'Heal',
+			damage_taken: 'Damage Taken',
+			save: 'Save',
+			skill: 'Skill'
+		};
+		return labels[type] || type;
+	}
+
+	function actionTypeClass(type: string): string {
+		const classes: Record<string, string> = {
+			attack: 'action-attack',
+			spell: 'action-spell',
+			ability: 'action-ability',
+			heal: 'action-heal',
+			damage_taken: 'action-damage',
+			save: 'action-save',
+			skill: 'action-skill'
+		};
+		return classes[type] || '';
+	}
 
 	async function handleReprocess(retranscribe: boolean) {
 		if (!session) return;
@@ -61,10 +105,11 @@
 			return;
 		}
 
-		Promise.all([fetchSession(id), fetchTranscript(id)])
-			.then(([sess, trans]) => {
+		Promise.all([fetchSession(id), fetchTranscript(id), fetchSessionCombat(id)])
+			.then(([sess, trans, combat]) => {
 				session = sess;
 				transcript = trans;
+				combatEncounters = combat;
 			})
 			.catch((e) => {
 				error = e instanceof Error ? e.message : 'Failed to load session';
@@ -156,6 +201,57 @@
 						<li>{event}</li>
 					{/each}
 				</ul>
+			</section>
+		{/if}
+
+		{#if combatEncounters.length > 0}
+			<section class="card combat-section">
+				<h2>Combat Encounters</h2>
+				{#each combatEncounters as encounter (encounter.id)}
+					<div class="encounter-card">
+						<button class="encounter-header" onclick={() => toggleEncounter(encounter.id)}>
+							<span class="encounter-indicator"></span>
+							<span class="encounter-name">{encounter.name}</span>
+							<span class="encounter-time">{formatTime(encounter.start_time)} - {formatTime(encounter.end_time)}</span>
+							<span class="encounter-toggle">{expandedEncounters.has(encounter.id) ? '\u25B2' : '\u25BC'}</span>
+						</button>
+						{#if encounter.summary}
+							<p class="encounter-summary">{encounter.summary}</p>
+						{/if}
+						{#if expandedEncounters.has(encounter.id)}
+							<div class="actions-list">
+								{#if encounter.actions.length === 0}
+									<p class="muted">No actions recorded.</p>
+								{:else}
+									<table class="actions-table">
+										<thead>
+											<tr>
+												<th>Round</th>
+												<th>Actor</th>
+												<th>Type</th>
+												<th>Target</th>
+												<th>Detail</th>
+												<th>Damage</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each encounter.actions as action (action.id)}
+												<tr>
+													<td class="action-round">{action.round ?? '-'}</td>
+													<td class="action-actor">{action.actor}</td>
+													<td><span class="action-type-badge {actionTypeClass(action.action_type)}">{actionTypeLabel(action.action_type)}</span></td>
+													<td>{action.target || '-'}</td>
+													<td class="action-detail">{action.detail}</td>
+													<td class="action-damage">{action.damage != null ? action.damage : '-'}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/each}
 			</section>
 		{/if}
 
@@ -317,6 +413,135 @@
 		font-size: 0.6rem;
 		top: 0.6rem;
 	}
+
+	/* Combat section styles */
+	.combat-section {
+		margin-bottom: 1.25rem;
+	}
+
+	.encounter-card {
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		margin-bottom: 0.75rem;
+		background: var(--bg-dark);
+		overflow: hidden;
+	}
+	.encounter-card:last-child {
+		margin-bottom: 0;
+	}
+
+	.encounter-header {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		width: 100%;
+		padding: 0.75rem 1rem;
+		background: none;
+		border: none;
+		color: var(--text-primary);
+		cursor: pointer;
+		font-size: 0.9rem;
+		text-align: left;
+	}
+	.encounter-header:hover {
+		background: rgba(255, 255, 255, 0.03);
+	}
+
+	.encounter-indicator {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #ef4444;
+		flex-shrink: 0;
+	}
+
+	.encounter-name {
+		font-weight: 600;
+		color: var(--accent-gold);
+		flex: 1;
+	}
+
+	.encounter-time {
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		font-family: 'Courier New', Courier, monospace;
+	}
+
+	.encounter-toggle {
+		color: var(--text-muted);
+		font-size: 0.7rem;
+	}
+
+	.encounter-summary {
+		padding: 0 1rem 0.75rem;
+		font-size: 0.85rem;
+		color: var(--text-secondary);
+		line-height: 1.5;
+		margin: 0;
+	}
+
+	.actions-list {
+		padding: 0 0.75rem 0.75rem;
+	}
+
+	.actions-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.8rem;
+	}
+	.actions-table th {
+		text-align: left;
+		padding: 0.4rem 0.5rem;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-muted);
+		border-bottom: 1px solid var(--border);
+		font-weight: 600;
+	}
+	.actions-table td {
+		padding: 0.35rem 0.5rem;
+		color: var(--text-primary);
+		border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+	}
+	.actions-table tr:last-child td {
+		border-bottom: none;
+	}
+
+	.action-round {
+		color: var(--text-muted);
+		text-align: center;
+		width: 3rem;
+	}
+	.action-actor {
+		font-weight: 500;
+	}
+	.action-detail {
+		color: var(--text-secondary);
+		max-width: 200px;
+	}
+	.action-damage {
+		text-align: center;
+		font-weight: 600;
+		width: 4rem;
+	}
+
+	.action-type-badge {
+		display: inline-block;
+		padding: 0.1rem 0.4rem;
+		border-radius: 3px;
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	.action-attack { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+	.action-spell { background: rgba(139, 92, 246, 0.2); color: #c4b5fd; }
+	.action-ability { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+	.action-heal { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+	.action-damage { background: rgba(249, 115, 22, 0.2); color: #fdba74; }
+	.action-save { background: rgba(234, 179, 8, 0.2); color: #fde047; }
+	.action-skill { background: rgba(20, 184, 166, 0.2); color: #5eead4; }
 
 	.transcript-scroll {
 		max-height: 500px;

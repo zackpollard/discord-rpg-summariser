@@ -1647,3 +1647,133 @@ func TestMergeEntitiesConflictingRelationships(t *testing.T) {
 		t.Fatalf("expected 1 audit row, got %d", auditCount)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Combat Encounters
+// ---------------------------------------------------------------------------
+
+func TestCombatEncounterCRUD(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sessionID, err := store.CreateSession(ctx, guildID, campID, "chan-combat", "/tmp/audio")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Insert encounter.
+	encID, err := store.InsertCombatEncounter(ctx, CombatEncounter{
+		SessionID:  sessionID,
+		CampaignID: campID,
+		Name:       "Goblin Ambush",
+		StartTime:  120.0,
+		EndTime:    360.0,
+		Summary:    "The party defeated the goblins.",
+	})
+	if err != nil {
+		t.Fatalf("InsertCombatEncounter: %v", err)
+	}
+	if encID == 0 {
+		t.Fatal("expected non-zero encounter id")
+	}
+
+	// Insert actions.
+	dmg := 12
+	round := 1
+	ts := 130.0
+	actions := []CombatAction{
+		{Actor: "Thordak", ActionType: "attack", Target: "Goblin", Detail: "Swings greatsword", Damage: &dmg, Round: &round, Timestamp: &ts},
+		{Actor: "Elara", ActionType: "spell", Target: "Goblin Boss", Detail: "Casts fireball", Damage: nil, Round: &round},
+	}
+	if err := store.InsertCombatActions(ctx, encID, actions); err != nil {
+		t.Fatalf("InsertCombatActions: %v", err)
+	}
+
+	// Retrieve encounters.
+	encounters, err := store.GetCombatEncounters(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCombatEncounters: %v", err)
+	}
+	if len(encounters) != 1 {
+		t.Fatalf("expected 1 encounter, got %d", len(encounters))
+	}
+	if encounters[0].Name != "Goblin Ambush" {
+		t.Fatalf("expected name 'Goblin Ambush', got %q", encounters[0].Name)
+	}
+	if encounters[0].StartTime != 120.0 {
+		t.Fatalf("expected start_time 120.0, got %f", encounters[0].StartTime)
+	}
+
+	// Retrieve actions.
+	got, err := store.GetCombatActions(ctx, encID)
+	if err != nil {
+		t.Fatalf("GetCombatActions: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 actions, got %d", len(got))
+	}
+	if got[0].Actor != "Thordak" {
+		t.Fatalf("expected actor 'Thordak', got %q", got[0].Actor)
+	}
+	if got[0].Damage == nil || *got[0].Damage != 12 {
+		t.Fatal("expected damage 12 for first action")
+	}
+	if got[1].Actor != "Elara" {
+		t.Fatalf("expected actor 'Elara', got %q", got[1].Actor)
+	}
+}
+
+func TestDeleteCombatForSession(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sessionID, err := store.CreateSession(ctx, guildID, campID, "chan-combat-del", "/tmp/audio")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	encID, err := store.InsertCombatEncounter(ctx, CombatEncounter{
+		SessionID:  sessionID,
+		CampaignID: campID,
+		Name:       "Orc Raid",
+		StartTime:  60.0,
+		EndTime:    180.0,
+		Summary:    "The orcs were defeated.",
+	})
+	if err != nil {
+		t.Fatalf("InsertCombatEncounter: %v", err)
+	}
+	dmg := 8
+	if err := store.InsertCombatActions(ctx, encID, []CombatAction{
+		{Actor: "Grimjaw", ActionType: "attack", Target: "Orc", Detail: "Axe swing", Damage: &dmg},
+	}); err != nil {
+		t.Fatalf("InsertCombatActions: %v", err)
+	}
+
+	// Delete all combat for session.
+	if err := store.DeleteCombatForSession(ctx, sessionID); err != nil {
+		t.Fatalf("DeleteCombatForSession: %v", err)
+	}
+
+	// Verify encounters are gone.
+	encounters, err := store.GetCombatEncounters(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetCombatEncounters after delete: %v", err)
+	}
+	if len(encounters) != 0 {
+		t.Fatalf("expected 0 encounters after delete, got %d", len(encounters))
+	}
+
+	// Verify actions are cascade-deleted.
+	actions, err := store.GetCombatActions(ctx, encID)
+	if err != nil {
+		t.Fatalf("GetCombatActions after delete: %v", err)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("expected 0 actions after delete, got %d", len(actions))
+	}
+}

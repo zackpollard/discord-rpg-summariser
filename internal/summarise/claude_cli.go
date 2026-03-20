@@ -127,6 +127,33 @@ func (c *ClaudeCLI) GenerateRecap(ctx context.Context, sessionSummaries []string
 	return &result, nil
 }
 
+// ExtractCombat runs the claude CLI with the combat extraction prompt and
+// parses the JSON response into a CombatExtractionResult.
+func (c *ClaudeCLI) ExtractCombat(ctx context.Context, transcript, summary, dmName string, playerCharacters []string) (*CombatExtractionResult, error) {
+	prompt := BuildCombatExtractionPrompt(transcript, summary, dmName, playerCharacters)
+
+	cmd := exec.CommandContext(ctx, "claude", "--print")
+	cmd.Stdin = strings.NewReader(prompt)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
+	}
+
+	output := stdout.Bytes()
+	output = StripCodeFences(output)
+
+	var result CombatExtractionResult
+	if err := json.Unmarshal(output, &result); err != nil {
+		return nil, fmt.Errorf("parse claude CLI combat extraction JSON: %w\nraw output: %s", err, stdout.String())
+	}
+
+	return &result, nil
+}
+
 // StripCodeFences removes optional ```json ... ``` wrapping from LLM output.
 func StripCodeFences(b []byte) []byte {
 	s := strings.TrimSpace(string(b))

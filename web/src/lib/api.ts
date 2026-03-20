@@ -378,3 +378,31 @@ export async function searchTranscripts(
 		`/api/campaigns/${campaignId}/transcript-search?${params.toString()}`
 	);
 }
+
+// Combat types and functions
+
+export interface CombatAction {
+	id: number;
+	actor: string;
+	action_type: string;
+	target: string;
+	detail: string;
+	damage: number | null;
+	round: number | null;
+	timestamp: number | null;
+}
+
+export interface CombatEncounter {
+	id: number;
+	session_id: number;
+	name: string;
+	start_time: number;
+	end_time: number;
+	summary: string;
+	created_at: string;
+	actions: CombatAction[];
+}
+
+export async function fetchSessionCombat(sessionId: number): Promise<CombatEncounter[]> {
+	return request<CombatEncounter[]>(`/api/sessions/${sessionId}/combat`);
+}

@@ -987,6 +987,9 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 
 	// Extract quests (non-fatal on error).
 	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
+
+	// Extract combat encounters (non-fatal on error).
+	b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
 }
 
 // buildTranscriptWithTelegram persists Telegram messages to the DB, filters
@@ -1406,6 +1409,59 @@ func (b *Bot) extractQuests(ctx context.Context, session *storage.Session, sessi
 	}
 
 	log.Printf("pipeline: extracted %d quests", len(extraction.Quests))
+}
+
+func (b *Bot) extractCombat(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary, dmName string) {
+	extractor, ok := b.summariser.(summarise.CombatExtractor)
+	if !ok {
+		return
+	}
+
+	// Collect player character names.
+	charMappings, _ := b.store.GetCharacterMappings(ctx, session.CampaignID)
+	var playerCharacters []string
+	for _, m := range charMappings {
+		playerCharacters = append(playerCharacters, m.CharacterName)
+	}
+
+	extraction, err := extractor.ExtractCombat(ctx, transcript, summary, dmName, playerCharacters)
+	if err != nil {
+		log.Printf("pipeline: combat extraction: %v", err)
+		return
+	}
+
+	for _, enc := range extraction.Encounters {
+		encID, err := b.store.InsertCombatEncounter(ctx, storage.CombatEncounter{
+			SessionID:  sessionID,
+			CampaignID: session.CampaignID,
+			Name:       enc.Name,
+			StartTime:  enc.StartTime,
+			EndTime:    enc.EndTime,
+			Summary:    enc.Summary,
+		})
+		if err != nil {
+			log.Printf("pipeline: insert combat encounter %q: %v", enc.Name, err)
+			continue
+		}
+
+		var actions []storage.CombatAction
+		for _, a := range enc.Actions {
+			actions = append(actions, storage.CombatAction{
+				Actor:      a.Actor,
+				ActionType: a.ActionType,
+				Target:     a.Target,
+				Detail:     a.Detail,
+				Damage:     a.Damage,
+				Round:      a.Round,
+				Timestamp:  a.Timestamp,
+			})
+		}
+		if err := b.store.InsertCombatActions(ctx, encID, actions); err != nil {
+			log.Printf("pipeline: insert combat actions for %q: %v", enc.Name, err)
+		}
+	}
+
+	log.Printf("pipeline: extracted %d combat encounters", len(extraction.Encounters))
 }
 
 // ---------------------------------------------------------------------------

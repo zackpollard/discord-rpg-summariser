@@ -102,9 +102,15 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 		log.Printf("reprocess: DeleteEntityReferencesForSession: %v", err)
 	}
 
-	// Extract entities and quests (non-fatal).
+	// Clean up old combat encounters before re-extracting.
+	if err := b.store.DeleteCombatForSession(ctx, sessionID); err != nil {
+		log.Printf("reprocess: DeleteCombatForSession: %v", err)
+	}
+
+	// Extract entities, quests, and combat (non-fatal).
 	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
 	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
+	b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
 
 	log.Printf("reprocess: session %d completed successfully", sessionID)
 	return nil
