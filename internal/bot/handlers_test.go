@@ -22,7 +22,7 @@ type stubSummariser struct {
 	called bool
 }
 
-func (s *stubSummariser) Summarise(_ context.Context, _ string, _ string) (*summarise.SummaryResult, error) {
+func (s *stubSummariser) Summarise(_ context.Context, _, _, _ string) (*summarise.SummaryResult, error) {
 	s.called = true
 	return s.result, s.err
 }
@@ -268,7 +268,7 @@ func TestStubSummariser(t *testing.T) {
 		},
 	}
 
-	result, err := s.Summarise(context.Background(), "transcript", "")
+	result, err := s.Summarise(context.Background(), "transcript", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
