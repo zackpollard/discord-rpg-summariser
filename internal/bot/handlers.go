@@ -6,8 +6,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/diarize"
@@ -1219,6 +1221,140 @@ func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, ses
 	}
 
 	log.Printf("pipeline: extracted %d entities, %d relationships", len(extraction.Entities), len(extraction.Relationships))
+
+	// Link entity references to transcript segments.
+	b.linkEntityReferences(ctx, sessionID, entityIDs)
+}
+
+// linkEntityReferences scans transcript segments for mentions of entities and
+// inserts entity_references rows linking them.
+func (b *Bot) linkEntityReferences(ctx context.Context, sessionID int64, entityIDs map[string]int64) {
+	segments, err := b.store.GetTranscript(ctx, sessionID)
+	if err != nil {
+		log.Printf("pipeline: linkEntityReferences: get transcript: %v", err)
+		return
+	}
+	if len(segments) == 0 {
+		return
+	}
+
+	// Build a map of entity name -> entity ID, skipping names shorter than 3 chars.
+	nameToID := make(map[string]int64)
+	for key, id := range entityIDs {
+		parts := strings.SplitN(key, "|", 2)
+		name := parts[0]
+		if len([]rune(name)) < 3 {
+			continue
+		}
+		nameToID[name] = id
+	}
+
+	if len(nameToID) == 0 {
+		return
+	}
+
+	var refs []storage.EntityReference
+	for i := range segments {
+		seg := &segments[i]
+		matches := findEntityMentions(seg.Text, nameToID)
+		for entityName, entityID := range matches {
+			ctx := truncateContext(seg.Text, entityName, 200)
+			segID := seg.ID
+			refs = append(refs, storage.EntityReference{
+				EntityID:  entityID,
+				SessionID: sessionID,
+				SegmentID: &segID,
+				Context:   ctx,
+			})
+		}
+	}
+
+	if len(refs) == 0 {
+		return
+	}
+
+	if err := b.store.InsertEntityReferences(ctx, refs); err != nil {
+		log.Printf("pipeline: linkEntityReferences: insert: %v", err)
+		return
+	}
+
+	log.Printf("pipeline: linked %d entity references for session %d", len(refs), sessionID)
+}
+
+// findEntityMentions performs case-insensitive word-boundary matching of entity
+// names against the given text. Returns a map of matched entity name -> ID.
+func findEntityMentions(text string, nameToID map[string]int64) map[string]int64 {
+	matches := make(map[string]int64)
+	lower := strings.ToLower(text)
+
+	for name, id := range nameToID {
+		pattern := `(?i)\b` + regexp.QuoteMeta(name) + `\b`
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			// If the name has characters that break regex even after quoting,
+			// fall back to simple case-insensitive contains with boundary check.
+			if containsWordBoundary(lower, strings.ToLower(name)) {
+				matches[name] = id
+			}
+			continue
+		}
+		if re.MatchString(text) {
+			matches[name] = id
+		}
+	}
+
+	return matches
+}
+
+// containsWordBoundary checks if text contains substr at a word boundary.
+func containsWordBoundary(text, substr string) bool {
+	idx := strings.Index(text, substr)
+	if idx < 0 {
+		return false
+	}
+	// Check left boundary.
+	if idx > 0 {
+		r := rune(text[idx-1])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	// Check right boundary.
+	end := idx + len(substr)
+	if end < len(text) {
+		r := rune(text[end])
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// truncateContext returns a context snippet from text around the entity name,
+// truncated to maxLen characters.
+func truncateContext(text, entityName string, maxLen int) string {
+	if len(text) <= maxLen {
+		return text
+	}
+	// Try to center around the entity mention.
+	lower := strings.ToLower(text)
+	idx := strings.Index(lower, strings.ToLower(entityName))
+	if idx < 0 {
+		return text[:maxLen]
+	}
+	start := idx - (maxLen-len(entityName))/2
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxLen
+	if end > len(text) {
+		end = len(text)
+		start = end - maxLen
+		if start < 0 {
+			start = 0
+		}
+	}
+	return text[start:end]
 }
 
 func findEntityID(ids map[string]int64, name string) int64 {

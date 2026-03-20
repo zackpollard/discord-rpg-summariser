@@ -185,9 +185,24 @@ export interface Entity {
 	updated_at: string;
 }
 
+export interface EntitySessionAppearance {
+	session_id: number;
+	started_at: string;
+	mention_count: number;
+}
+
+export interface EntityReferenceDisplay {
+	session_id: number;
+	segment_id: number | null;
+	start_time: number;
+	context: string;
+}
+
 export interface EntityDetail extends Entity {
 	notes: EntityNote[];
 	relationships: EntityRelationshipDisplay[];
+	sessions: EntitySessionAppearance[];
+	references: EntityReferenceDisplay[];
 }
 
 export interface EntityNote {

@@ -1083,8 +1083,54 @@ func TestGetLatestCompleteSessions(t *testing.T) {
 	ctx := context.Background()
 	guildID := uniqueGuild(t)
 	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/er")
 
-	// Create 5 sessions: 3 complete with summaries, 1 complete without summary, 1 recording.
+	// Insert transcript segments so we have segment IDs.
+	segments := []TranscriptSegment{
+		{SessionID: sessID, UserID: "u1", StartTime: 0.0, EndTime: 5.0, Text: "We met Strahd"},
+		{SessionID: sessID, UserID: "u2", StartTime: 6.0, EndTime: 10.0, Text: "In Barovia"},
+	}
+	if err := store.InsertSegments(ctx, segments); err != nil {
+		t.Fatalf("InsertSegments: %v", err)
+	}
+	segs, _ := store.GetTranscript(ctx, sessID)
+
+	entID, _ := store.UpsertEntity(ctx, campID, "Strahd", "npc", "Vampire lord")
+
+	seg0ID := segs[0].ID
+	seg1ID := segs[1].ID
+	refs := []EntityReference{
+		{EntityID: entID, SessionID: sessID, SegmentID: &seg0ID, Context: "We met Strahd"},
+		{EntityID: entID, SessionID: sessID, SegmentID: &seg1ID, Context: "In Barovia"},
+	}
+
+	if err := store.InsertEntityReferences(ctx, refs); err != nil {
+		t.Fatalf("InsertEntityReferences: %v", err)
+	}
+
+	// Insert again — should not fail (ON CONFLICT DO NOTHING).
+	if err := store.InsertEntityReferences(ctx, refs); err != nil {
+		t.Fatalf("InsertEntityReferences duplicate: %v", err)
+	}
+
+	// Verify retrieval.
+	got, err := store.GetEntityReferences(ctx, entID, 50, 0)
+	if err != nil {
+		t.Fatalf("GetEntityReferences: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 references, got %d", len(got))
+	}
+	if got[0].Context != "We met Strahd" {
+		t.Fatalf("expected context 'We met Strahd', got %q", got[0].Context)
+	}
+}
+
+func TestGetLatestCompleteSessions(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
 	var completeIDs []int64
 	for i := 0; i < 3; i++ {
 		id, err := store.CreateSession(ctx, guildID, campID, "ch-1", fmt.Sprintf("/tmp/latest-%d", i))
@@ -1149,5 +1195,111 @@ func TestGetLatestCompleteSessions(t *testing.T) {
 	}
 	if len(zero) != 0 {
 		t.Fatalf("expected 0 sessions for n=0, got %d", len(zero))
+	}
+}
+
+func TestGetEntitySessionAppearances(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sess1ID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/esa1")
+	sess2ID, _ := store.CreateSession(ctx, guildID, campID, "ch-2", "/tmp/esa2")
+
+	// Insert segments for both sessions.
+	segs1 := []TranscriptSegment{
+		{SessionID: sess1ID, UserID: "u1", StartTime: 0.0, EndTime: 5.0, Text: "seg1"},
+		{SessionID: sess1ID, UserID: "u1", StartTime: 6.0, EndTime: 10.0, Text: "seg2"},
+	}
+	segs2 := []TranscriptSegment{
+		{SessionID: sess2ID, UserID: "u1", StartTime: 0.0, EndTime: 5.0, Text: "seg3"},
+	}
+	store.InsertSegments(ctx, segs1)
+	store.InsertSegments(ctx, segs2)
+
+	got1, _ := store.GetTranscript(ctx, sess1ID)
+	got2, _ := store.GetTranscript(ctx, sess2ID)
+
+	entID, _ := store.UpsertEntity(ctx, campID, "TestEntity", "npc", "Test")
+
+	seg1aID := got1[0].ID
+	seg1bID := got1[1].ID
+	seg2aID := got2[0].ID
+	refs := []EntityReference{
+		{EntityID: entID, SessionID: sess1ID, SegmentID: &seg1aID, Context: "ref1"},
+		{EntityID: entID, SessionID: sess1ID, SegmentID: &seg1bID, Context: "ref2"},
+		{EntityID: entID, SessionID: sess2ID, SegmentID: &seg2aID, Context: "ref3"},
+	}
+	store.InsertEntityReferences(ctx, refs)
+
+	appearances, err := store.GetEntitySessionAppearances(ctx, entID)
+	if err != nil {
+		t.Fatalf("GetEntitySessionAppearances: %v", err)
+	}
+	if len(appearances) != 2 {
+		t.Fatalf("expected 2 session appearances, got %d", len(appearances))
+	}
+
+	// Sessions should be ordered by started_at. Both were created close together,
+	// so we just check the counts.
+	totalMentions := 0
+	for _, a := range appearances {
+		totalMentions += a.MentionCount
+	}
+	if totalMentions != 3 {
+		t.Fatalf("expected 3 total mentions, got %d", totalMentions)
+	}
+
+	// Find the appearance for sess1 and verify count.
+	for _, a := range appearances {
+		if a.SessionID == sess1ID {
+			if a.MentionCount != 2 {
+				t.Fatalf("expected 2 mentions in session 1, got %d", a.MentionCount)
+			}
+		}
+		if a.SessionID == sess2ID {
+			if a.MentionCount != 1 {
+				t.Fatalf("expected 1 mention in session 2, got %d", a.MentionCount)
+			}
+		}
+	}
+}
+
+func TestDeleteEntityReferencesForSession(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "ch-1", "/tmp/dere")
+
+	segments := []TranscriptSegment{
+		{SessionID: sessID, UserID: "u1", StartTime: 0.0, EndTime: 5.0, Text: "test"},
+	}
+	store.InsertSegments(ctx, segments)
+	segs, _ := store.GetTranscript(ctx, sessID)
+
+	entID, _ := store.UpsertEntity(ctx, campID, "DelTest", "npc", "Test")
+	segID := segs[0].ID
+	refs := []EntityReference{
+		{EntityID: entID, SessionID: sessID, SegmentID: &segID, Context: "test context"},
+	}
+	store.InsertEntityReferences(ctx, refs)
+
+	// Verify it exists.
+	got, _ := store.GetEntityReferences(ctx, entID, 50, 0)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 reference before delete, got %d", len(got))
+	}
+
+	// Delete.
+	if err := store.DeleteEntityReferencesForSession(ctx, sessID); err != nil {
+		t.Fatalf("DeleteEntityReferencesForSession: %v", err)
+	}
+
+	// Verify deleted.
+	got, _ = store.GetEntityReferences(ctx, entID, 50, 0)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 references after delete, got %d", len(got))
 	}
 }

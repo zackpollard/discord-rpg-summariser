@@ -333,3 +333,115 @@ func searchString(s, substr string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// Entity mention matching tests
+// ---------------------------------------------------------------------------
+
+func TestFindEntityMentions(t *testing.T) {
+	nameToID := map[string]int64{
+		"Strahd":     1,
+		"Barovia":    2,
+		"Waterdeep":  3,
+		"Sunblade":   4,
+	}
+
+	tests := []struct {
+		name     string
+		text     string
+		expected map[string]int64
+	}{
+		{
+			name:     "exact match",
+			text:     "We met Strahd in the castle.",
+			expected: map[string]int64{"Strahd": 1},
+		},
+		{
+			name:     "case insensitive",
+			text:     "The land of barovia is dark.",
+			expected: map[string]int64{"Barovia": 2},
+		},
+		{
+			name:     "multiple matches",
+			text:     "Strahd rules Barovia with an iron fist.",
+			expected: map[string]int64{"Strahd": 1, "Barovia": 2},
+		},
+		{
+			name:     "no match",
+			text:     "The party rested at the inn.",
+			expected: map[string]int64{},
+		},
+		{
+			name:     "word boundary - should not match substring",
+			text:     "She wielded a sunbladelike weapon.",
+			expected: map[string]int64{},
+		},
+		{
+			name:     "word boundary - match at start",
+			text:     "Strahd appeared suddenly.",
+			expected: map[string]int64{"Strahd": 1},
+		},
+		{
+			name:     "word boundary - match at end",
+			text:     "They traveled to Waterdeep",
+			expected: map[string]int64{"Waterdeep": 3},
+		},
+		{
+			name:     "match with punctuation boundary",
+			text:     "Is that Strahd? Yes, and Barovia!",
+			expected: map[string]int64{"Strahd": 1, "Barovia": 2},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := findEntityMentions(tc.text, nameToID)
+			if len(result) != len(tc.expected) {
+				t.Fatalf("expected %d matches, got %d: %v", len(tc.expected), len(result), result)
+			}
+			for name, expectedID := range tc.expected {
+				gotID, ok := result[name]
+				if !ok {
+					t.Errorf("expected match for %q, not found", name)
+					continue
+				}
+				if gotID != expectedID {
+					t.Errorf("expected id %d for %q, got %d", expectedID, name, gotID)
+				}
+			}
+		})
+	}
+}
+
+func TestFindEntityMentionsSkipsShortNames(t *testing.T) {
+	// Names shorter than 3 characters should be filtered out before calling
+	// findEntityMentions in the actual pipeline. Verify that even if they're
+	// passed in, they still match (the filtering happens at the caller level).
+	nameToID := map[string]int64{
+		"Bo": 1,
+	}
+	result := findEntityMentions("Bo went to the store.", nameToID)
+	// "Bo" is 2 chars but findEntityMentions doesn't filter — that's the caller's job.
+	// It should still match at a word boundary.
+	if len(result) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(result))
+	}
+}
+
+func TestTruncateContext(t *testing.T) {
+	short := "A short text."
+	if got := truncateContext(short, "short", 200); got != short {
+		t.Errorf("expected full text for short string, got %q", got)
+	}
+
+	long := "The beginning of the text. " +
+		"Here in the middle we find Strahd lurking in the shadows. " +
+		"And then the text continues on and on and on and on and on for quite a while longer."
+	result := truncateContext(long, "Strahd", 80)
+	if len(result) > 80 {
+		t.Errorf("expected max 80 chars, got %d", len(result))
+	}
+	if !contains(result, "Strahd") {
+		t.Errorf("expected context to contain 'Strahd', got %q", result)
+	}
+}

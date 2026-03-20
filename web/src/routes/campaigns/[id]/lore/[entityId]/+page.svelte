@@ -6,6 +6,7 @@
 	let entity = $state<EntityDetail | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let expandedSessions = $state<Set<number>>(new Set());
 
 	function typeBadgeClass(type: string): string {
 		return `type-badge type-${type}`;
@@ -19,8 +20,24 @@
 		});
 	}
 
+	function formatTimestamp(seconds: number): string {
+		const m = Math.floor(seconds / 60);
+		const s = Math.floor(seconds % 60);
+		return `${m}:${s.toString().padStart(2, '0')}`;
+	}
+
 	function relationshipLabel(rel: string): string {
 		return rel.replace(/_/g, ' ');
+	}
+
+	function toggleSession(sessionId: number) {
+		const next = new Set(expandedSessions);
+		if (next.has(sessionId)) {
+			next.delete(sessionId);
+		} else {
+			next.add(sessionId);
+		}
+		expandedSessions = next;
 	}
 
 	onMount(() => {
@@ -101,6 +118,44 @@
 							<span class="rel-type">{relationshipLabel(rel.relationship)}</span>
 							{#if rel.description}
 								<p class="rel-desc">{rel.description}</p>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			</section>
+		{/if}
+
+		{#if entity.sessions && entity.sessions.length > 0}
+			<section class="section-card">
+				<h2>Appearances</h2>
+				<div class="appearances-list">
+					{#each entity.sessions as sess (sess.session_id)}
+						<div class="appearance-item">
+							<button
+								class="appearance-header"
+								onclick={() => toggleSession(sess.session_id)}
+							>
+								<div class="appearance-info">
+									<a href="/sessions/{sess.session_id}" class="appearance-session-link">Session #{sess.session_id}</a>
+									<span class="appearance-date">{formatDate(sess.started_at)}</span>
+								</div>
+								<div class="appearance-meta">
+									<span class="mention-count">{sess.mention_count} mention{sess.mention_count !== 1 ? 's' : ''}</span>
+									<span class="expand-arrow" class:expanded={expandedSessions.has(sess.session_id)}>&#9662;</span>
+								</div>
+							</button>
+							{#if expandedSessions.has(sess.session_id) && entity.references}
+								<div class="reference-list">
+									{#each entity.references.filter(r => r.session_id === sess.session_id) as ref}
+										<div class="reference-item">
+											<a
+												href="/sessions/{ref.session_id}?t={Math.floor(ref.start_time)}"
+												class="ref-timestamp"
+											>{formatTimestamp(ref.start_time)}</a>
+											<p class="ref-context">{ref.context}</p>
+										</div>
+									{/each}
+								</div>
 							{/if}
 						</div>
 					{/each}
@@ -273,6 +328,96 @@
 		background: rgba(239, 68, 68, 0.2);
 		color: #fca5a5;
 		border: 1px solid rgba(239, 68, 68, 0.3);
+	}
+
+	.appearances-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.appearance-item {
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		overflow: hidden;
+	}
+	.appearance-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		width: 100%;
+		padding: 0.65rem 0.75rem;
+		background: none;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		text-align: left;
+		font-size: inherit;
+	}
+	.appearance-header:hover {
+		background: rgba(255, 255, 255, 0.03);
+	}
+	.appearance-info {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+	.appearance-session-link {
+		color: var(--accent-gold);
+		font-weight: 600;
+		font-size: 0.85rem;
+	}
+	.appearance-date {
+		color: var(--text-muted);
+		font-size: 0.8rem;
+	}
+	.appearance-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.mention-count {
+		font-size: 0.75rem;
+		padding: 0.1rem 0.45rem;
+		border-radius: 999px;
+		background: rgba(139, 92, 246, 0.15);
+		color: var(--accent-purple);
+		border: 1px solid rgba(139, 92, 246, 0.25);
+		font-weight: 600;
+	}
+	.expand-arrow {
+		color: var(--text-muted);
+		font-size: 0.75rem;
+		transition: transform 0.15s;
+	}
+	.expand-arrow.expanded {
+		transform: rotate(180deg);
+	}
+	.reference-list {
+		border-top: 1px solid var(--border);
+		padding: 0.5rem 0.75rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+	.reference-item {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.5rem;
+		padding: 0.35rem 0;
+	}
+	.ref-timestamp {
+		color: var(--accent-gold-dim);
+		font-size: 0.75rem;
+		font-family: monospace;
+		white-space: nowrap;
+		min-width: 3.5rem;
+		padding-top: 0.1rem;
+	}
+	.ref-context {
+		color: var(--text-secondary);
+		font-size: 0.8rem;
+		line-height: 1.4;
 	}
 
 	.muted {

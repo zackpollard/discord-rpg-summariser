@@ -97,6 +97,11 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 		return err
 	}
 
+	// Clean up old entity references before re-extracting.
+	if err := b.store.DeleteEntityReferencesForSession(ctx, sessionID); err != nil {
+		log.Printf("reprocess: DeleteEntityReferencesForSession: %v", err)
+	}
+
 	// Extract entities and quests (non-fatal).
 	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
 	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)

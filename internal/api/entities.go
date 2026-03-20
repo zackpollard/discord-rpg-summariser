@@ -22,6 +22,21 @@ type entityDetailResponse struct {
 	entityResponse
 	Notes         []entityNoteResponse         `json:"notes"`
 	Relationships []entityRelationshipResponse `json:"relationships"`
+	Sessions      []entitySessionResponse      `json:"sessions"`
+	References    []entityReferenceResponse    `json:"references"`
+}
+
+type entitySessionResponse struct {
+	SessionID    int64     `json:"session_id"`
+	StartedAt    time.Time `json:"started_at"`
+	MentionCount int       `json:"mention_count"`
+}
+
+type entityReferenceResponse struct {
+	SessionID int64   `json:"session_id"`
+	SegmentID *int64  `json:"segment_id"`
+	StartTime float64 `json:"start_time"`
+	Context   string  `json:"context"`
 }
 
 type entityNoteResponse struct {
@@ -153,6 +168,40 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Fetch session appearances and references.
+	appearances, err := s.store.GetEntitySessionAppearances(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get entity session appearances")
+		return
+	}
+
+	refs, err := s.store.GetEntityReferences(r.Context(), id, 100, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get entity references")
+		return
+	}
+
+	sessResp := make([]entitySessionResponse, len(appearances))
+	for i := range appearances {
+		a := &appearances[i]
+		sessResp[i] = entitySessionResponse{
+			SessionID:    a.SessionID,
+			StartedAt:    a.StartedAt,
+			MentionCount: a.MentionCount,
+		}
+	}
+
+	refResp := make([]entityReferenceResponse, len(refs))
+	for i := range refs {
+		ref := &refs[i]
+		refResp[i] = entityReferenceResponse{
+			SessionID: ref.SessionID,
+			SegmentID: ref.SegmentID,
+			StartTime: ref.StartTime,
+			Context:   ref.Context,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, entityDetailResponse{
 		entityResponse: entityResponse{
 			ID:          entity.ID,
@@ -165,5 +214,7 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
 		},
 		Notes:         noteResp,
 		Relationships: relResp,
+		Sessions:      sessResp,
+		References:    refResp,
 	})
 }
