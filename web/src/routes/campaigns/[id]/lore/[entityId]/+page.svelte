@@ -131,10 +131,24 @@
 		<div class="entity-header">
 			<h1>{entity.name}</h1>
 			<span class={typeBadgeClass(entity.type)}>{entity.type}</span>
+			{#if entity.status === 'dead'}
+				<span class="status-badge status-badge-dead">Dead</span>
+			{:else if entity.status === 'alive'}
+				<span class="status-badge status-badge-alive">Alive</span>
+			{:else}
+				<span class="status-badge status-badge-unknown">Unknown</span>
+			{/if}
 			<button class="merge-btn" onclick={openMergePanel}>Merge with...</button>
 		</div>
 
 		<p class="entity-description">{entity.description}</p>
+
+		{#if entity.status === 'dead' && entity.cause_of_death}
+			<div class="cause-of-death">
+				<span class="cod-label">Cause of Death:</span>
+				<span class="cod-text">{entity.cause_of_death}</span>
+			</div>
+		{/if}
 
 		{#if showMergePanel}
 			<section class="section-card merge-panel">
@@ -279,6 +293,48 @@
 	.entity-header h1 {
 		color: var(--accent-gold);
 		font-size: 1.5rem;
+	}
+
+	.status-badge {
+		font-size: 0.7rem;
+		padding: 0.15rem 0.55rem;
+		border-radius: 999px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.status-badge-dead {
+		background: rgba(239, 68, 68, 0.2);
+		color: #f87171;
+		border: 1px solid rgba(239, 68, 68, 0.3);
+	}
+	.status-badge-alive {
+		background: rgba(34, 197, 94, 0.2);
+		color: #4ade80;
+		border: 1px solid rgba(34, 197, 94, 0.3);
+	}
+	.status-badge-unknown {
+		background: rgba(163, 163, 163, 0.15);
+		color: #a3a3a3;
+		border: 1px solid rgba(163, 163, 163, 0.3);
+	}
+
+	.cause-of-death {
+		background: rgba(239, 68, 68, 0.08);
+		border: 1px solid rgba(239, 68, 68, 0.2);
+		border-radius: var(--radius);
+		padding: 0.75rem 1rem;
+		margin-bottom: 1.5rem;
+	}
+	.cod-label {
+		color: #f87171;
+		font-size: 0.8rem;
+		font-weight: 600;
+		margin-right: 0.4rem;
+	}
+	.cod-text {
+		color: var(--text-secondary);
+		font-size: 0.9rem;
 	}
 
 	.merge-btn {

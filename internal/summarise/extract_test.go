@@ -92,6 +92,29 @@ func TestBuildExtractionPrompt_WithPlayerCharacters(t *testing.T) {
 	}
 }
 
+func TestBuildExtractionPrompt_IncludesStatusInstructions(t *testing.T) {
+	prompt := BuildExtractionPrompt("transcript", "summary", nil, "", nil)
+
+	if !strings.Contains(prompt, "status") {
+		t.Error("prompt should contain status field instructions")
+	}
+	if !strings.Contains(prompt, "'alive'") {
+		t.Error("prompt should mention 'alive' as a valid status")
+	}
+	if !strings.Contains(prompt, "'dead'") {
+		t.Error("prompt should mention 'dead' as a valid status")
+	}
+	if !strings.Contains(prompt, "'unknown'") {
+		t.Error("prompt should mention 'unknown' as a valid status")
+	}
+	if !strings.Contains(prompt, "cause_of_death") {
+		t.Error("prompt should mention cause_of_death in the JSON schema")
+	}
+	if !strings.Contains(prompt, "For each NPC, include their current status") {
+		t.Error("prompt should instruct the LLM to include NPC status")
+	}
+}
+
 func TestBuildExtractionPrompt_NoDMName(t *testing.T) {
 	prompt := BuildExtractionPrompt("transcript", "summary", nil, "", nil)
 

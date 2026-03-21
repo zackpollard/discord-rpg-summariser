@@ -11,6 +11,7 @@
 	let error = $state<string | null>(null);
 
 	let activeType = $state<string>('');
+	let activeStatus = $state<string>('');
 	let searchQuery = $state('');
 	let searchTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -48,6 +49,13 @@
 		{ value: 'event', label: 'Events' }
 	];
 
+	const statusFilters = [
+		{ value: '', label: 'All' },
+		{ value: 'alive', label: 'Alive' },
+		{ value: 'dead', label: 'Dead' },
+		{ value: 'unknown', label: 'Unknown' }
+	];
+
 	function typeBadgeClass(type: string): string {
 		return `type-badge type-${type}`;
 	}
@@ -58,7 +66,8 @@
 		try {
 			entities = await fetchEntities(campaignId, {
 				type: activeType || undefined,
-				search: searchQuery || undefined
+				search: searchQuery || undefined,
+				status: activeStatus || undefined
 			});
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load entities';
@@ -88,6 +97,11 @@
 
 	function selectType(type: string) {
 		activeType = type;
+		loadEntities();
+	}
+
+	function selectStatus(status: string) {
+		activeStatus = status;
 		loadEntities();
 	}
 
@@ -169,6 +183,15 @@
 					>{t.label}</button>
 				{/each}
 			</div>
+			<div class="status-filters">
+				{#each statusFilters as sf (sf.value)}
+					<button
+						class="filter-btn"
+						class:active={activeStatus === sf.value}
+						onclick={() => selectStatus(sf.value)}
+					>{sf.label}</button>
+				{/each}
+			</div>
 			<input
 				type="text"
 				placeholder="Search entities..."
@@ -195,6 +218,11 @@
 					<a href="/campaigns/{campaignId}/lore/{entity.id}" class="entity-card">
 						<div class="card-top">
 							<span class={typeBadgeClass(entity.type)}>{entity.type}</span>
+							{#if entity.status === 'dead'}
+								<span class="status-indicator status-dead" title="Dead">&#9760;</span>
+							{:else if entity.status === 'alive'}
+								<span class="status-indicator status-alive" title="Alive"></span>
+							{/if}
 						</div>
 						<h3>{entity.name}</h3>
 						{#if entity.description}
@@ -343,9 +371,14 @@
 	.entity-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; }
 	.entity-card { display: block; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; transition: border-color 0.15s; }
 	.entity-card:hover { border-color: var(--accent-gold-dim); text-decoration: none; }
-	.card-top { margin-bottom: 0.4rem; }
+	.card-top { margin-bottom: 0.4rem; display: flex; align-items: center; gap: 0.5rem; }
 	.entity-card h3 { font-size: 1rem; color: var(--text-primary); margin-bottom: 0.3rem; }
 	.entity-desc { color: var(--text-secondary); font-size: 0.85rem; line-height: 1.4; }
+
+	.status-filters { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+	.status-indicator { margin-left: auto; }
+	.status-dead { font-size: 0.9rem; color: #f87171; }
+	.status-alive { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4ade80; }
 
 	.type-badge { font-size: 0.65rem; padding: 0.15rem 0.5rem; border-radius: 999px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
 	.type-pc { background: rgba(236, 72, 153, 0.15); color: #f472b6; border: 1px solid rgba(236, 72, 153, 0.3); }

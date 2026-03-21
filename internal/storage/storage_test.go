@@ -1303,6 +1303,7 @@ func TestDeleteEntityReferencesForSession(t *testing.T) {
 		t.Fatalf("expected 0 references after delete, got %d", len(got))
 	}
 }
+
 // ---------------------------------------------------------------------------
 // Transcript Full-Text Search
 // ---------------------------------------------------------------------------
@@ -2111,5 +2112,112 @@ func TestGetSpeakerEnrollments(t *testing.T) {
 	}
 	if len(enrollments2) != 0 {
 		t.Fatalf("expected 0 enrollments for other campaign, got %d", len(enrollments2))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Entity status
+// ---------------------------------------------------------------------------
+
+func TestUpdateEntityStatus(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create an entity — default status should be 'unknown'.
+	id, err := store.UpsertEntity(ctx, campID, "Lord Soth", "npc", "Death knight")
+	if err != nil {
+		t.Fatalf("UpsertEntity: %v", err)
+	}
+
+	e, err := store.GetEntity(ctx, id)
+	if err != nil {
+		t.Fatalf("GetEntity: %v", err)
+	}
+	if e.Status != "unknown" {
+		t.Fatalf("expected default status 'unknown', got %q", e.Status)
+	}
+	if e.CauseOfDeath != "" {
+		t.Fatalf("expected empty cause_of_death, got %q", e.CauseOfDeath)
+	}
+
+	// Update to alive.
+	if err := store.UpdateEntityStatus(ctx, id, "alive", ""); err != nil {
+		t.Fatalf("UpdateEntityStatus alive: %v", err)
+	}
+	e, _ = store.GetEntity(ctx, id)
+	if e.Status != "alive" {
+		t.Fatalf("expected status 'alive', got %q", e.Status)
+	}
+
+	// Update to dead with cause.
+	if err := store.UpdateEntityStatus(ctx, id, "dead", "Slain by the party in combat"); err != nil {
+		t.Fatalf("UpdateEntityStatus dead: %v", err)
+	}
+	e, _ = store.GetEntity(ctx, id)
+	if e.Status != "dead" {
+		t.Fatalf("expected status 'dead', got %q", e.Status)
+	}
+	if e.CauseOfDeath != "Slain by the party in combat" {
+		t.Fatalf("expected cause_of_death 'Slain by the party in combat', got %q", e.CauseOfDeath)
+	}
+
+	// UpsertEntity should NOT reset status back to 'unknown'.
+	store.UpsertEntity(ctx, campID, "Lord Soth", "npc", "Death knight lord")
+	e, _ = store.GetEntity(ctx, id)
+	if e.Status != "dead" {
+		t.Fatalf("expected status preserved after upsert, got %q", e.Status)
+	}
+	if e.CauseOfDeath != "Slain by the party in combat" {
+		t.Fatalf("expected cause_of_death preserved after upsert, got %q", e.CauseOfDeath)
+	}
+}
+
+func TestListEntities_StatusFilter(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	id1, _ := store.UpsertEntity(ctx, campID, "Living Knight", "npc", "A brave knight")
+	store.UpdateEntityStatus(ctx, id1, "alive", "")
+
+	id2, _ := store.UpsertEntity(ctx, campID, "Dead Dragon", "npc", "Ancient dragon")
+	store.UpdateEntityStatus(ctx, id2, "dead", "Killed by adventurers")
+
+	store.UpsertEntity(ctx, campID, "Mysterious Figure", "npc", "Unknown stranger")
+
+	// Filter by alive.
+	alive, err := store.ListEntities(ctx, campID, "", "", 50, 0, "alive")
+	if err != nil {
+		t.Fatalf("ListEntities alive: %v", err)
+	}
+	if len(alive) != 1 {
+		t.Fatalf("expected 1 alive entity, got %d", len(alive))
+	}
+	if alive[0].Name != "Living Knight" {
+		t.Fatalf("expected 'Living Knight', got %q", alive[0].Name)
+	}
+
+	// Filter by dead.
+	dead, err := store.ListEntities(ctx, campID, "", "", 50, 0, "dead")
+	if err != nil {
+		t.Fatalf("ListEntities dead: %v", err)
+	}
+	if len(dead) != 1 {
+		t.Fatalf("expected 1 dead entity, got %d", len(dead))
+	}
+	if dead[0].Name != "Dead Dragon" {
+		t.Fatalf("expected 'Dead Dragon', got %q", dead[0].Name)
+	}
+
+	// No filter returns all.
+	all, err := store.ListEntities(ctx, campID, "", "", 50, 0)
+	if err != nil {
+		t.Fatalf("ListEntities all: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 entities, got %d", len(all))
 	}
 }

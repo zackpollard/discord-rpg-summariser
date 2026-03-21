@@ -383,6 +383,11 @@ func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, ses
 			continue
 		}
 		entityIDs[e.Name+"|"+e.Type] = id
+		if e.Status != "" {
+			if err := b.store.UpdateEntityStatus(ctx, id, e.Status, e.CauseOfDeath); err != nil {
+				log.Printf("pipeline: update entity status %q: %v", e.Name, err)
+			}
+		}
 		if e.Notes != "" {
 			if err := b.store.AddEntityNote(ctx, id, sessionID, e.Notes); err != nil {
 				log.Printf("pipeline: add note for %q: %v", e.Name, err)

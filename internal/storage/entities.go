@@ -9,13 +9,15 @@ import (
 )
 
 type Entity struct {
-	ID          int64
-	CampaignID  int64
-	Name        string
-	Type        string
-	Description string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID           int64
+	CampaignID   int64
+	Name         string
+	Type         string
+	Description  string
+	Status       string
+	CauseOfDeath string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type EntityNote struct {
@@ -54,20 +56,31 @@ func (s *Store) UpsertEntity(ctx context.Context, campaignID int64, name, typ, d
 	return id, nil
 }
 
+func (s *Store) UpdateEntityStatus(ctx context.Context, entityID int64, status, causeOfDeath string) error {
+	_, err := s.Pool.Exec(ctx,
+		`UPDATE entities SET status = $1, cause_of_death = $2, updated_at = NOW() WHERE id = $3`,
+		status, causeOfDeath, entityID,
+	)
+	if err != nil {
+		return fmt.Errorf("update entity status: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) GetEntity(ctx context.Context, id int64) (*Entity, error) {
 	var e Entity
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, campaign_id, name, type, description, created_at, updated_at
+		`SELECT id, campaign_id, name, type, description, status, cause_of_death, created_at, updated_at
 		 FROM entities WHERE id = $1`, id,
-	).Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.CreatedAt, &e.UpdatedAt)
+	).Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.Status, &e.CauseOfDeath, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &e, nil
 }
 
-func (s *Store) ListEntities(ctx context.Context, campaignID int64, typeFilter, search string, limit, offset int) ([]Entity, error) {
-	query := `SELECT id, campaign_id, name, type, description, created_at, updated_at
+func (s *Store) ListEntities(ctx context.Context, campaignID int64, typeFilter, search string, limit, offset int, statusFilter ...string) ([]Entity, error) {
+	query := `SELECT id, campaign_id, name, type, description, status, cause_of_death, created_at, updated_at
 		 FROM entities WHERE campaign_id = $1`
 	args := []any{campaignID}
 	argN := 2
@@ -80,6 +93,11 @@ func (s *Store) ListEntities(ctx context.Context, campaignID int64, typeFilter, 
 	if search != "" {
 		query += fmt.Sprintf(` AND name ILIKE $%d`, argN)
 		args = append(args, "%"+search+"%")
+		argN++
+	}
+	if len(statusFilter) > 0 && statusFilter[0] != "" {
+		query += fmt.Sprintf(` AND status = $%d`, argN)
+		args = append(args, statusFilter[0])
 		argN++
 	}
 
@@ -96,7 +114,7 @@ func (s *Store) ListEntities(ctx context.Context, campaignID int64, typeFilter, 
 	var entities []Entity
 	for rows.Next() {
 		var e Entity
-		if err := rows.Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.Status, &e.CauseOfDeath, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err
 		}
 		entities = append(entities, e)
@@ -184,9 +202,9 @@ func (s *Store) EnsurePCEntities(ctx context.Context, campaignID int64, characte
 func (s *Store) GetEntityByName(ctx context.Context, campaignID int64, name, typ string) (*Entity, error) {
 	var e Entity
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, campaign_id, name, type, description, created_at, updated_at
+		`SELECT id, campaign_id, name, type, description, status, cause_of_death, created_at, updated_at
 		 FROM entities WHERE campaign_id = $1 AND name = $2 AND type = $3`, campaignID, name, typ,
-	).Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.CreatedAt, &e.UpdatedAt)
+	).Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.Status, &e.CauseOfDeath, &e.CreatedAt, &e.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -200,7 +218,7 @@ func (s *Store) GetEntityByName(ctx context.Context, campaignID int64, name, typ
 // suitable for rendering a relationship graph.
 func (s *Store) GetCampaignRelationshipGraph(ctx context.Context, campaignID int64) ([]Entity, []EntityRelationship, error) {
 	rows, err := s.Pool.Query(ctx,
-		`SELECT id, campaign_id, name, type, description, created_at, updated_at
+		`SELECT id, campaign_id, name, type, description, status, cause_of_death, created_at, updated_at
 		 FROM entities WHERE campaign_id = $1 ORDER BY name`, campaignID,
 	)
 	if err != nil {
@@ -211,7 +229,7 @@ func (s *Store) GetCampaignRelationshipGraph(ctx context.Context, campaignID int
 	var entities []Entity
 	for rows.Next() {
 		var e Entity
-		if err := rows.Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.CreatedAt, &e.UpdatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.CampaignID, &e.Name, &e.Type, &e.Description, &e.Status, &e.CauseOfDeath, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, nil, err
 		}
 		entities = append(entities, e)

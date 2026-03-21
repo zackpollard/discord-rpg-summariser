@@ -662,6 +662,84 @@ func TestHandleListEntities_TypeFilter(t *testing.T) {
 	}
 }
 
+func TestHandleListEntities_StatusField(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Status Camp", "")
+	id, _ := store.UpsertEntity(ctx, campID, "Dead Baron", "npc", "A fallen noble")
+	store.UpdateEntityStatus(ctx, id, "dead", "Poisoned at dinner")
+
+	url := fmt.Sprintf("/api/campaigns/%d/entities", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var entities []entityResponse
+	if err := json.NewDecoder(rec.Body).Decode(&entities); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entities) < 1 {
+		t.Fatal("expected at least 1 entity")
+	}
+	found := false
+	for _, e := range entities {
+		if e.Name == "Dead Baron" {
+			found = true
+			if e.Status != "dead" {
+				t.Fatalf("expected status 'dead', got %q", e.Status)
+			}
+			if e.CauseOfDeath != "Poisoned at dinner" {
+				t.Fatalf("expected cause_of_death 'Poisoned at dinner', got %q", e.CauseOfDeath)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected to find 'Dead Baron' in response")
+	}
+}
+
+func TestHandleListEntities_StatusFilter(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Status Filter Camp", "")
+	id1, _ := store.UpsertEntity(ctx, campID, "Alive Hero", "npc", "A living hero")
+	store.UpdateEntityStatus(ctx, id1, "alive", "")
+	id2, _ := store.UpsertEntity(ctx, campID, "Dead Villain", "npc", "A slain villain")
+	store.UpdateEntityStatus(ctx, id2, "dead", "Defeated in battle")
+
+	url := fmt.Sprintf("/api/campaigns/%d/entities?status=dead", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var entities []entityResponse
+	if err := json.NewDecoder(rec.Body).Decode(&entities); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(entities) != 1 {
+		t.Fatalf("expected 1 dead entity, got %d", len(entities))
+	}
+	if entities[0].Name != "Dead Villain" {
+		t.Fatalf("expected 'Dead Villain', got %q", entities[0].Name)
+	}
+}
+
 func TestHandleGetEntity_NotFound(t *testing.T) {
 	store := testStore(t)
 	srv := NewServer(store, ":0", "test-guild", "")

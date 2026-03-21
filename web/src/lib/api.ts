@@ -197,6 +197,8 @@ export interface Entity {
 	name: string;
 	type: string;
 	description: string;
+	status: string;
+	cause_of_death: string;
 	created_at: string;
 	updated_at: string;
 }
@@ -239,10 +241,11 @@ export async function setActiveCampaign(id: number): Promise<void> {
 	await request<void>(`/api/campaigns/${id}/active`, { method: 'PUT' });
 }
 
-export async function fetchEntities(campaignId: number, params?: { type?: string; search?: string }): Promise<Entity[]> {
+export async function fetchEntities(campaignId: number, params?: { type?: string; search?: string; status?: string }): Promise<Entity[]> {
 	const searchParams = new URLSearchParams();
 	if (params?.type) searchParams.set('type', params.type);
 	if (params?.search) searchParams.set('search', params.search);
+	if (params?.status) searchParams.set('status', params.status);
 	const qs = searchParams.toString();
 	return request<Entity[]>(`/api/campaigns/${campaignId}/entities${qs ? '?' + qs : ''}`);
 }

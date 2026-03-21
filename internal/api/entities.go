@@ -9,13 +9,15 @@ import (
 )
 
 type entityResponse struct {
-	ID          int64     `json:"id"`
-	CampaignID  int64     `json:"campaign_id"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           int64     `json:"id"`
+	CampaignID   int64     `json:"campaign_id"`
+	Name         string    `json:"name"`
+	Type         string    `json:"type"`
+	Description  string    `json:"description"`
+	Status       string    `json:"status"`
+	CauseOfDeath string    `json:"cause_of_death"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type entityDetailResponse struct {
@@ -64,9 +66,10 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request) {
 
 	typeFilter := r.URL.Query().Get("type")
 	search := r.URL.Query().Get("search")
+	statusFilter := r.URL.Query().Get("status")
 	limit, offset := parsePagination(r, 50)
 
-	entities, err := s.store.ListEntities(r.Context(), campaignID, typeFilter, search, limit, offset)
+	entities, err := s.store.ListEntities(r.Context(), campaignID, typeFilter, search, limit, offset, statusFilter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list entities")
 		return
@@ -76,13 +79,15 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request) {
 	for i := range entities {
 		e := &entities[i]
 		resp[i] = entityResponse{
-			ID:          e.ID,
-			CampaignID:  e.CampaignID,
-			Name:        e.Name,
-			Type:        e.Type,
-			Description: e.Description,
-			CreatedAt:   e.CreatedAt,
-			UpdatedAt:   e.UpdatedAt,
+			ID:           e.ID,
+			CampaignID:   e.CampaignID,
+			Name:         e.Name,
+			Type:         e.Type,
+			Description:  e.Description,
+			Status:       e.Status,
+			CauseOfDeath: e.CauseOfDeath,
+			CreatedAt:    e.CreatedAt,
+			UpdatedAt:    e.UpdatedAt,
 		}
 	}
 
@@ -190,13 +195,15 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, entityDetailResponse{
 		entityResponse: entityResponse{
-			ID:          entity.ID,
-			CampaignID:  entity.CampaignID,
-			Name:        entity.Name,
-			Type:        entity.Type,
-			Description: entity.Description,
-			CreatedAt:   entity.CreatedAt,
-			UpdatedAt:   entity.UpdatedAt,
+			ID:           entity.ID,
+			CampaignID:   entity.CampaignID,
+			Name:         entity.Name,
+			Type:         entity.Type,
+			Description:  entity.Description,
+			Status:       entity.Status,
+			CauseOfDeath: entity.CauseOfDeath,
+			CreatedAt:    entity.CreatedAt,
+			UpdatedAt:    entity.UpdatedAt,
 		},
 		Notes:         noteResp,
 		Relationships: relResp,

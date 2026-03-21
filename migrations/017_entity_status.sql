@@ -1,0 +1,2 @@
+ALTER TABLE entities ADD COLUMN status TEXT NOT NULL DEFAULT 'unknown';
+ALTER TABLE entities ADD COLUMN cause_of_death TEXT NOT NULL DEFAULT '';
