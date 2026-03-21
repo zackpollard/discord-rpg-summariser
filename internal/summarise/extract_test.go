@@ -115,6 +115,20 @@ func TestBuildExtractionPrompt_IncludesStatusInstructions(t *testing.T) {
 	}
 }
 
+func TestBuildExtractionPrompt_IncludesParentPlaceInstruction(t *testing.T) {
+	prompt := BuildExtractionPrompt("transcript", "summary", nil, "", nil)
+
+	if !strings.Contains(prompt, "parent_place") {
+		t.Error("prompt should contain parent_place in the JSON schema")
+	}
+	if !strings.Contains(prompt, "located within another place") {
+		t.Error("prompt should instruct the LLM to detect location containment")
+	}
+	if !strings.Contains(prompt, "set `parent_place` to the name of the containing place") {
+		t.Error("prompt should instruct to set parent_place field")
+	}
+}
+
 func TestBuildExtractionPrompt_NoDMName(t *testing.T) {
 	prompt := BuildExtractionPrompt("transcript", "summary", nil, "", nil)
 

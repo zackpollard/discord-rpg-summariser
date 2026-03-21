@@ -9,15 +9,26 @@ import (
 )
 
 type entityResponse struct {
-	ID           int64     `json:"id"`
-	CampaignID   int64     `json:"campaign_id"`
-	Name         string    `json:"name"`
-	Type         string    `json:"type"`
-	Description  string    `json:"description"`
-	Status       string    `json:"status"`
-	CauseOfDeath string    `json:"cause_of_death"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID             int64     `json:"id"`
+	CampaignID     int64     `json:"campaign_id"`
+	Name           string    `json:"name"`
+	Type           string    `json:"type"`
+	Description    string    `json:"description"`
+	Status         string    `json:"status"`
+	CauseOfDeath   string    `json:"cause_of_death"`
+	ParentEntityID *int64    `json:"parent_entity_id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type entityParentResponse struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type entityChildResponse struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 type entityDetailResponse struct {
@@ -26,6 +37,8 @@ type entityDetailResponse struct {
 	Relationships []entityRelationshipResponse `json:"relationships"`
 	Sessions      []entitySessionResponse      `json:"sessions"`
 	References    []entityReferenceResponse    `json:"references"`
+	Parent        *entityParentResponse        `json:"parent"`
+	Children      []entityChildResponse        `json:"children"`
 }
 
 type entitySessionResponse struct {
@@ -79,15 +92,16 @@ func (s *Server) handleListEntities(w http.ResponseWriter, r *http.Request) {
 	for i := range entities {
 		e := &entities[i]
 		resp[i] = entityResponse{
-			ID:           e.ID,
-			CampaignID:   e.CampaignID,
-			Name:         e.Name,
-			Type:         e.Type,
-			Description:  e.Description,
-			Status:       e.Status,
-			CauseOfDeath: e.CauseOfDeath,
-			CreatedAt:    e.CreatedAt,
-			UpdatedAt:    e.UpdatedAt,
+			ID:             e.ID,
+			CampaignID:     e.CampaignID,
+			Name:           e.Name,
+			Type:           e.Type,
+			Description:    e.Description,
+			Status:         e.Status,
+			CauseOfDeath:   e.CauseOfDeath,
+			ParentEntityID: e.ParentEntityID,
+			CreatedAt:      e.CreatedAt,
+			UpdatedAt:      e.UpdatedAt,
 		}
 	}
 
@@ -193,22 +207,46 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Resolve parent location.
+	var parentResp *entityParentResponse
+	if entity.ParentEntityID != nil {
+		if parentEntity, err := s.store.GetEntity(r.Context(), *entity.ParentEntityID); err == nil {
+			parentResp = &entityParentResponse{
+				ID:   parentEntity.ID,
+				Name: parentEntity.Name,
+			}
+		}
+	}
+
+	// Resolve child locations.
+	children, _ := s.store.GetChildEntities(r.Context(), id)
+	childResp := make([]entityChildResponse, len(children))
+	for i := range children {
+		childResp[i] = entityChildResponse{
+			ID:   children[i].ID,
+			Name: children[i].Name,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, entityDetailResponse{
 		entityResponse: entityResponse{
-			ID:           entity.ID,
-			CampaignID:   entity.CampaignID,
-			Name:         entity.Name,
-			Type:         entity.Type,
-			Description:  entity.Description,
-			Status:       entity.Status,
-			CauseOfDeath: entity.CauseOfDeath,
-			CreatedAt:    entity.CreatedAt,
-			UpdatedAt:    entity.UpdatedAt,
+			ID:             entity.ID,
+			CampaignID:     entity.CampaignID,
+			Name:           entity.Name,
+			Type:           entity.Type,
+			Description:    entity.Description,
+			Status:         entity.Status,
+			CauseOfDeath:   entity.CauseOfDeath,
+			ParentEntityID: entity.ParentEntityID,
+			CreatedAt:      entity.CreatedAt,
+			UpdatedAt:      entity.UpdatedAt,
 		},
 		Notes:         noteResp,
 		Relationships: relResp,
 		Sessions:      sessResp,
 		References:    refResp,
+		Parent:        parentResp,
+		Children:      childResp,
 	})
 }
 

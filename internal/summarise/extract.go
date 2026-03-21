@@ -14,6 +14,7 @@ type ExtractedEntity struct {
 	Notes        string `json:"notes"`          // what happened THIS session
 	Status       string `json:"status"`         // alive, dead, unknown
 	CauseOfDeath string `json:"cause_of_death"` // if dead, how they died
+	ParentPlace  string `json:"parent_place"`   // for places: the containing place name
 }
 
 // ExtractedRelationship represents a relationship between two extracted entities.
@@ -68,6 +69,7 @@ func BuildExtractionPrompt(transcript, summary string, existingEntities []string
 	b.WriteString("- For each entity, write a concise description (what it IS) and notes (what happened THIS session).\n")
 	b.WriteString("- For each NPC, include their current status: 'alive', 'dead', or 'unknown'. If they died this session or previously, include cause_of_death.\n")
 	b.WriteString("- For non-NPC entities (places, items, etc.), set status to 'unknown' unless destruction/loss is relevant.\n")
+	b.WriteString("- For place entities, if they are located within another place, set `parent_place` to the name of the containing place.\n")
 	b.WriteString("- Identify relationships between entities: allied_with, enemy_of, located_in, member_of, owns, related_to.\n")
 	b.WriteString("- Source and target in relationships must exactly match entity names or player character names.\n")
 
@@ -85,7 +87,7 @@ func BuildExtractionPrompt(transcript, summary string, existingEntities []string
 	b.WriteString("Return ONLY valid JSON with exactly these fields:\n")
 	b.WriteString("{\n")
 	b.WriteString("  \"entities\": [\n")
-	b.WriteString("    {\"name\": \"Entity Name\", \"type\": \"npc\", \"description\": \"What it is.\", \"notes\": \"What happened this session.\", \"status\": \"alive\", \"cause_of_death\": \"\"}\n")
+	b.WriteString("    {\"name\": \"Entity Name\", \"type\": \"npc\", \"description\": \"What it is.\", \"notes\": \"What happened this session.\", \"status\": \"alive\", \"cause_of_death\": \"\", \"parent_place\": \"\"}\n")
 	b.WriteString("  ],\n")
 	b.WriteString("  \"relationships\": [\n")
 	b.WriteString("    {\"source\": \"Entity A\", \"target\": \"Entity B\", \"relationship\": \"allied_with\", \"description\": \"Brief description.\"}\n")

@@ -199,13 +199,36 @@ export interface Entity {
 	description: string;
 	status: string;
 	cause_of_death: string;
+	parent_entity_id: number | null;
 	created_at: string;
 	updated_at: string;
+}
+
+export interface EntityParent {
+	id: number;
+	name: string;
+}
+
+export interface EntityChild {
+	id: number;
+	name: string;
 }
 
 export interface EntityDetail extends Entity {
 	notes: EntityNote[];
 	relationships: EntityRelationshipDisplay[];
+	parent: EntityParent | null;
+	children: EntityChild[];
+}
+
+export interface LocationNode {
+	id: number;
+	name: string;
+	description: string;
+	parent_id: number | null;
+	children: LocationNode[];
+	created_at: string;
+	updated_at: string;
 }
 
 export interface EntityNote {
@@ -260,6 +283,10 @@ export async function mergeEntity(keepId: number, mergeId: number): Promise<void
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ merge_id: mergeId })
 	});
+}
+
+export async function fetchLocationHierarchy(campaignId: number): Promise<LocationNode[]> {
+	return request<LocationNode[]>(`/api/campaigns/${campaignId}/location-hierarchy`);
 }
 
 // Quest types and functions

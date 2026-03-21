@@ -740,6 +740,98 @@ func TestHandleListEntities_StatusFilter(t *testing.T) {
 	}
 }
 
+func TestHandleLocationHierarchy(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Hierarchy Camp", "")
+	regionID, _ := store.UpsertEntity(ctx, campID, "Barovia", "place", "A dark region")
+	villageID, _ := store.UpsertEntity(ctx, campID, "Village of Barovia", "place", "A small village")
+	store.UpsertEntity(ctx, campID, "Blood on the Vine Tavern", "place", "A tavern")
+
+	store.SetEntityParent(ctx, villageID, regionID)
+	tavernEntity, _ := store.GetEntityByName(ctx, campID, "Blood on the Vine Tavern", "place")
+	store.SetEntityParent(ctx, tavernEntity.ID, villageID)
+
+	// Also create an NPC that should NOT appear.
+	store.UpsertEntity(ctx, campID, "Strahd", "npc", "Vampire lord")
+
+	url := fmt.Sprintf("/api/campaigns/%d/location-hierarchy", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var tree []struct {
+		ID       int64  `json:"id"`
+		Name     string `json:"name"`
+		Children []struct {
+			ID       int64  `json:"id"`
+			Name     string `json:"name"`
+			Children []struct {
+				ID   int64  `json:"id"`
+				Name string `json:"name"`
+			} `json:"children"`
+		} `json:"children"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&tree); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Should have exactly one root: Barovia.
+	if len(tree) != 1 {
+		t.Fatalf("expected 1 root location, got %d", len(tree))
+	}
+	if tree[0].Name != "Barovia" {
+		t.Fatalf("expected root 'Barovia', got %q", tree[0].Name)
+	}
+	if len(tree[0].Children) != 1 {
+		t.Fatalf("expected 1 child of Barovia, got %d", len(tree[0].Children))
+	}
+	if tree[0].Children[0].Name != "Village of Barovia" {
+		t.Fatalf("expected child 'Village of Barovia', got %q", tree[0].Children[0].Name)
+	}
+	if len(tree[0].Children[0].Children) != 1 {
+		t.Fatalf("expected 1 child of Village of Barovia, got %d", len(tree[0].Children[0].Children))
+	}
+	if tree[0].Children[0].Children[0].Name != "Blood on the Vine Tavern" {
+		t.Fatalf("expected grandchild 'Blood on the Vine Tavern', got %q", tree[0].Children[0].Children[0].Name)
+	}
+}
+
+func TestHandleLocationHierarchy_Empty(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Empty Hierarchy Camp", "")
+
+	url := fmt.Sprintf("/api/campaigns/%d/location-hierarchy", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var tree []any
+	if err := json.NewDecoder(rec.Body).Decode(&tree); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(tree) != 0 {
+		t.Fatalf("expected empty array, got %d items", len(tree))
+	}
+}
+
 func TestHandleGetEntity_NotFound(t *testing.T) {
 	store := testStore(t)
 	srv := NewServer(store, ":0", "test-guild", "")

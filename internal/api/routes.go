@@ -29,6 +29,7 @@ func (s *Server) setupRoutes() {
 	s.handle("POST /api/campaigns/{id}/recap", s.handleRegenerateRecap)
 	s.handle("GET /api/campaigns/{id}/transcript-search", s.handleTranscriptSearch)
 	s.handle("GET /api/campaigns/{id}/relationship-graph", s.handleRelationshipGraph)
+	s.handle("GET /api/campaigns/{id}/location-hierarchy", s.handleLocationHierarchy)
 
 	s.handle("GET /api/entities/{id}", s.handleGetEntity)
 	s.handle("POST /api/entities/{id}/merge", s.handleMergeEntity)

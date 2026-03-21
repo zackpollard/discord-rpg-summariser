@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchEntities, askLore, fetchRelationshipGraph, type Entity, type LoreAnswer, type RelationshipGraphData } from '$lib/api';
+	import { fetchEntities, askLore, fetchRelationshipGraph, fetchLocationHierarchy, type Entity, type LoreAnswer, type RelationshipGraphData, type LocationNode } from '$lib/api';
 	import RelationshipGraph from '$lib/components/RelationshipGraph.svelte';
 
 	const campaignId = $derived(Number($page.params.id));
@@ -20,10 +20,14 @@
 	let loreLoading = $state(false);
 	let loreError = $state<string | null>(null);
 
-	let viewMode = $state<'grid' | 'graph'>('grid');
+	let viewMode = $state<'grid' | 'graph' | 'locations'>('grid');
 	let graphData = $state<RelationshipGraphData | null>(null);
 	let graphLoading = $state(false);
 	let graphError = $state<string | null>(null);
+
+	let locationTree = $state<LocationNode[]>([]);
+	let locationsLoading = $state(false);
+	let locationsError = $state<string | null>(null);
 
 	async function handleAskLore() {
 		if (!loreQuestion.trim()) return;
@@ -105,10 +109,25 @@
 		loadEntities();
 	}
 
-	function switchView(mode: 'grid' | 'graph') {
+	async function loadLocations() {
+		if (locationTree.length > 0) return; // Already loaded
+		locationsLoading = true;
+		locationsError = null;
+		try {
+			locationTree = await fetchLocationHierarchy(campaignId);
+		} catch (e) {
+			locationsError = e instanceof Error ? e.message : 'Failed to load locations';
+		} finally {
+			locationsLoading = false;
+		}
+	}
+
+	function switchView(mode: 'grid' | 'graph' | 'locations') {
 		viewMode = mode;
 		if (mode === 'graph') {
 			loadGraphData();
+		} else if (mode === 'locations') {
+			loadLocations();
 		}
 	}
 
@@ -172,6 +191,11 @@
 				class:active={viewMode === 'graph'}
 				onclick={() => switchView('graph')}
 			>Graph</button>
+			<button
+				class="toggle-btn"
+				class:active={viewMode === 'locations'}
+				onclick={() => switchView('locations')}
+			>Locations</button>
 		</div>
 		{#if viewMode === 'grid'}
 			<div class="type-filters">
@@ -232,7 +256,7 @@
 				{/each}
 			</div>
 		{/if}
-	{:else}
+	{:else if viewMode === 'graph'}
 		{#if graphLoading}
 			<p class="muted">Loading relationship graph...</p>
 		{:else if graphError}
@@ -244,8 +268,42 @@
 				{campaignId}
 			/>
 		{/if}
+	{:else if viewMode === 'locations'}
+		{#if locationsLoading}
+			<p class="muted">Loading location hierarchy...</p>
+		{:else if locationsError}
+			<div class="error-box">{locationsError}</div>
+		{:else if locationTree.length === 0}
+			<div class="empty-state">
+				<p>No locations found.</p>
+				<p class="muted">Place entities with parent relationships will appear here as a tree.</p>
+			</div>
+		{:else}
+			<div class="location-tree">
+				{#each locationTree as node (node.id)}
+					{@render locationNode(node, 0)}
+				{/each}
+			</div>
+		{/if}
 	{/if}
 </div>
+
+{#snippet locationNode(node: LocationNode, depth: number)}
+	<div class="location-item" style="padding-left: {depth * 1.5}rem">
+		<a href="/campaigns/{campaignId}/lore/{node.id}" class="location-link">
+			<span class="location-icon">{node.children.length > 0 ? '\u25BC' : '\u2022'}</span>
+			<span class="location-name">{node.name}</span>
+		</a>
+		{#if node.description}
+			<p class="location-desc">{node.description.slice(0, 100)}{node.description.length > 100 ? '...' : ''}</p>
+		{/if}
+	</div>
+	{#if node.children.length > 0}
+		{#each node.children as child (child.id)}
+			{@render locationNode(child, depth + 1)}
+		{/each}
+	{/if}
+{/snippet}
 
 <style>
 	.ask-lore-section {
@@ -358,7 +416,8 @@
 		transition: all 0.15s;
 	}
 	.toggle-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
-	.toggle-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; border-left: none; }
+	.toggle-btn:not(:first-child) { border-left: none; }
+	.toggle-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 	.toggle-btn:hover { border-color: var(--accent-gold-dim); color: var(--accent-gold); }
 	.toggle-btn.active { background: var(--accent-gold-dim); color: var(--bg-dark); border-color: var(--accent-gold); font-weight: 600; }
 	.type-filters { display: flex; gap: 0.35rem; flex-wrap: wrap; }
@@ -391,4 +450,42 @@
 	.empty-state { text-align: center; padding: 3rem 1rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); }
 	.muted { color: var(--text-muted); }
 	.error-box { background: rgba(185, 28, 28, 0.15); border: 1px solid #7f1d1d; color: #fca5a5; padding: 0.75rem; border-radius: var(--radius); font-size: 0.9rem; }
+
+	.location-tree {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 1rem;
+	}
+	.location-item {
+		padding: 0.4rem 0;
+	}
+	.location-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		color: var(--text-primary);
+		transition: color 0.15s;
+	}
+	.location-link:hover {
+		color: var(--accent-gold);
+		text-decoration: none;
+	}
+	.location-icon {
+		font-size: 0.65rem;
+		color: var(--text-muted);
+		width: 0.75rem;
+		text-align: center;
+	}
+	.location-name {
+		font-weight: 500;
+		font-size: 0.9rem;
+	}
+	.location-desc {
+		color: var(--text-secondary);
+		font-size: 0.8rem;
+		line-height: 1.4;
+		margin-top: 0.15rem;
+		padding-left: 1.15rem;
+	}
 </style>

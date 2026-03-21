@@ -143,6 +143,24 @@
 
 		<p class="entity-description">{entity.description}</p>
 
+		{#if entity.parent}
+			<div class="location-info">
+				<span class="location-label">Located in:</span>
+				<a href="/campaigns/{$page.params.id}/lore/{entity.parent.id}" class="location-link">{entity.parent.name}</a>
+			</div>
+		{/if}
+
+		{#if entity.children && entity.children.length > 0}
+			<div class="location-info">
+				<span class="location-label">Contains:</span>
+				<span class="location-children">
+					{#each entity.children as child, i (child.id)}
+						<a href="/campaigns/{$page.params.id}/lore/{child.id}" class="location-link">{child.name}</a>{#if i < entity.children.length - 1}, {/if}
+					{/each}
+				</span>
+			</div>
+		{/if}
+
 		{#if entity.status === 'dead' && entity.cause_of_death}
 			<div class="cause-of-death">
 				<span class="cod-label">Cause of Death:</span>
@@ -458,6 +476,38 @@
 	.merge-confirm-no:hover {
 		border-color: var(--accent-gold-dim);
 		color: var(--text-primary);
+	}
+
+	.location-info {
+		display: flex;
+		align-items: baseline;
+		gap: 0.4rem;
+		margin-bottom: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		background: rgba(34, 197, 94, 0.08);
+		border: 1px solid rgba(34, 197, 94, 0.2);
+		border-radius: var(--radius);
+	}
+	.location-info:last-of-type {
+		margin-bottom: 1.5rem;
+	}
+	.location-label {
+		color: #4ade80;
+		font-size: 0.8rem;
+		font-weight: 600;
+		white-space: nowrap;
+	}
+	.location-link {
+		color: var(--accent-gold);
+		font-size: 0.9rem;
+		font-weight: 500;
+	}
+	.location-link:hover {
+		text-decoration: underline;
+	}
+	.location-children {
+		font-size: 0.9rem;
+		color: var(--text-secondary);
 	}
 
 	.entity-description {

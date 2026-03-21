@@ -395,6 +395,30 @@ func (b *Bot) extractEntities(ctx context.Context, session *storage.Session, ses
 		}
 	}
 
+	// Resolve parent_place for place entities and set parent hierarchy.
+	for _, e := range extraction.Entities {
+		if e.Type != "place" || e.ParentPlace == "" {
+			continue
+		}
+		childID := entityIDs[e.Name+"|"+e.Type]
+		if childID == 0 {
+			continue
+		}
+		parentID := findEntityID(entityIDs, e.ParentPlace)
+		if parentID == 0 {
+			// Try to find the parent by name as a place entity in the DB.
+			parentEntity, _ := b.store.GetEntityByName(ctx, session.CampaignID, e.ParentPlace, "place")
+			if parentEntity != nil {
+				parentID = parentEntity.ID
+			}
+		}
+		if parentID != 0 {
+			if err := b.store.SetEntityParent(ctx, childID, parentID); err != nil {
+				log.Printf("pipeline: set parent for %q: %v", e.Name, err)
+			}
+		}
+	}
+
 	// Add PC entity IDs so relationships referencing PCs can be resolved.
 	for name, id := range pcEntityIDs {
 		entityIDs[name+"|pc"] = id

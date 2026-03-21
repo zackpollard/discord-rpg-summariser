@@ -2221,3 +2221,144 @@ func TestListEntities_StatusFilter(t *testing.T) {
 		t.Fatalf("expected 3 entities, got %d", len(all))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Location Hierarchy
+// ---------------------------------------------------------------------------
+
+func TestSetEntityParent(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	parentID, err := store.UpsertEntity(ctx, campID, "Barovia", "place", "A dark land")
+	if err != nil {
+		t.Fatalf("UpsertEntity parent: %v", err)
+	}
+	childID, err := store.UpsertEntity(ctx, campID, "Village of Barovia", "place", "A small village")
+	if err != nil {
+		t.Fatalf("UpsertEntity child: %v", err)
+	}
+
+	// Set parent.
+	if err := store.SetEntityParent(ctx, childID, parentID); err != nil {
+		t.Fatalf("SetEntityParent: %v", err)
+	}
+
+	// Verify.
+	child, err := store.GetEntity(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetEntity: %v", err)
+	}
+	if child.ParentEntityID == nil {
+		t.Fatal("expected non-nil parent_entity_id")
+	}
+	if *child.ParentEntityID != parentID {
+		t.Fatalf("expected parent_entity_id %d, got %d", parentID, *child.ParentEntityID)
+	}
+}
+
+func TestGetLocationHierarchy(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	regionID, _ := store.UpsertEntity(ctx, campID, "Barovia", "place", "A dark land")
+	villageID, _ := store.UpsertEntity(ctx, campID, "Village of Barovia", "place", "A small village")
+	tavernID, _ := store.UpsertEntity(ctx, campID, "Blood on the Vine Tavern", "place", "A tavern")
+
+	// Also create an NPC — should NOT appear in the hierarchy.
+	store.UpsertEntity(ctx, campID, "Strahd", "npc", "Vampire lord")
+
+	store.SetEntityParent(ctx, villageID, regionID)
+	store.SetEntityParent(ctx, tavernID, villageID)
+
+	places, err := store.GetLocationHierarchy(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetLocationHierarchy: %v", err)
+	}
+
+	if len(places) != 3 {
+		t.Fatalf("expected 3 place entities, got %d", len(places))
+	}
+
+	// Verify parent relationships.
+	parentMap := make(map[string]*int64)
+	for _, p := range places {
+		parentMap[p.Name] = p.ParentEntityID
+	}
+
+	if parentMap["Barovia"] != nil {
+		t.Fatal("expected Barovia to have no parent")
+	}
+	if parentMap["Village of Barovia"] == nil || *parentMap["Village of Barovia"] != regionID {
+		t.Fatalf("expected Village of Barovia parent to be %d", regionID)
+	}
+	if parentMap["Blood on the Vine Tavern"] == nil || *parentMap["Blood on the Vine Tavern"] != villageID {
+		t.Fatalf("expected Blood on the Vine Tavern parent to be %d", villageID)
+	}
+}
+
+func TestMergeEntities_ReparentsChildren(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Parent that will be merged away.
+	mergeID, _ := store.UpsertEntity(ctx, campID, "Barovia Region", "place", "The region")
+	// Parent that will be kept.
+	keepID, _ := store.UpsertEntity(ctx, campID, "Barovia", "place", "The dark domain")
+	// Child pointing to the entity that will be merged.
+	childID, _ := store.UpsertEntity(ctx, campID, "Village of Barovia", "place", "Village")
+	store.SetEntityParent(ctx, childID, mergeID)
+
+	// Merge: mergeID into keepID.
+	if err := store.MergeEntities(ctx, campID, keepID, mergeID); err != nil {
+		t.Fatalf("MergeEntities: %v", err)
+	}
+
+	// Verify child is now parented under the kept entity.
+	child, err := store.GetEntity(ctx, childID)
+	if err != nil {
+		t.Fatalf("GetEntity child: %v", err)
+	}
+	if child.ParentEntityID == nil {
+		t.Fatal("expected child to still have a parent after merge")
+	}
+	if *child.ParentEntityID != keepID {
+		t.Fatalf("expected child parent to be %d (kept), got %d", keepID, *child.ParentEntityID)
+	}
+}
+
+func TestGetChildEntities(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	parentID, _ := store.UpsertEntity(ctx, campID, "Barovia", "place", "A dark land")
+	child1ID, _ := store.UpsertEntity(ctx, campID, "Village of Barovia", "place", "A village")
+	child2ID, _ := store.UpsertEntity(ctx, campID, "Castle Ravenloft", "place", "A castle")
+	store.UpsertEntity(ctx, campID, "Unrelated Place", "place", "Somewhere else")
+
+	store.SetEntityParent(ctx, child1ID, parentID)
+	store.SetEntityParent(ctx, child2ID, parentID)
+
+	children, err := store.GetChildEntities(ctx, parentID)
+	if err != nil {
+		t.Fatalf("GetChildEntities: %v", err)
+	}
+	if len(children) != 2 {
+		t.Fatalf("expected 2 children, got %d", len(children))
+	}
+	names := make(map[string]bool)
+	for _, c := range children {
+		names[c.Name] = true
+	}
+	if !names["Village of Barovia"] || !names["Castle Ravenloft"] {
+		t.Fatalf("expected children to be 'Village of Barovia' and 'Castle Ravenloft', got %v", names)
+	}
+}
