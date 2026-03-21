@@ -115,3 +115,48 @@ func (s *Store) DeleteEntityReferencesForSession(ctx context.Context, sessionID 
 	_, err := s.Pool.Exec(ctx, `DELETE FROM entity_references WHERE session_id = $1`, sessionID)
 	return err
 }
+
+// EntityTimelineEntry summarises an entity's activity across sessions for
+// timeline visualization.
+type EntityTimelineEntry struct {
+	EntityID      int64     `json:"entity_id"`
+	EntityName    string    `json:"entity_name"`
+	EntityType    string    `json:"entity_type"`
+	FirstSeen     time.Time `json:"first_seen"`
+	LastSeen      time.Time `json:"last_seen"`
+	SessionCount  int       `json:"session_count"`
+	TotalMentions int       `json:"total_mentions"`
+}
+
+// GetEntityTimeline returns a timeline summary for every entity in a campaign
+// that has at least one entity_reference, ordered by first_seen.
+func (s *Store) GetEntityTimeline(ctx context.Context, campaignID int64) ([]EntityTimelineEntry, error) {
+	rows, err := s.Pool.Query(ctx,
+		`SELECT e.id, e.name, e.type,
+		        MIN(s.started_at) AS first_seen,
+		        MAX(s.started_at) AS last_seen,
+		        COUNT(DISTINCT er.session_id) AS session_count,
+		        COUNT(*) AS total_mentions
+		 FROM entity_references er
+		 JOIN entities e ON e.id = er.entity_id
+		 JOIN sessions s ON s.id = er.session_id
+		 WHERE e.campaign_id = $1
+		 GROUP BY e.id, e.name, e.type
+		 ORDER BY first_seen, e.name`, campaignID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get entity timeline: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []EntityTimelineEntry
+	for rows.Next() {
+		var entry EntityTimelineEntry
+		if err := rows.Scan(&entry.EntityID, &entry.EntityName, &entry.EntityType,
+			&entry.FirstSeen, &entry.LastSeen, &entry.SessionCount, &entry.TotalMentions); err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}

@@ -480,3 +480,19 @@ export interface RelationshipGraphData {
 export async function fetchRelationshipGraph(campaignId: number): Promise<RelationshipGraphData> {
 	return request<RelationshipGraphData>(`/api/campaigns/${campaignId}/relationship-graph`);
 }
+
+// Entity timeline types and functions
+
+export interface EntityTimelineEntry {
+	entity_id: number;
+	entity_name: string;
+	entity_type: string;
+	first_seen: string;
+	last_seen: string;
+	session_count: number;
+	total_mentions: number;
+}
+
+export async function fetchEntityTimeline(campaignId: number): Promise<EntityTimelineEntry[]> {
+	return request<EntityTimelineEntry[]>(`/api/campaigns/${campaignId}/entity-timeline`);
+}

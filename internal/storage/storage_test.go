@@ -2362,3 +2362,131 @@ func TestGetChildEntities(t *testing.T) {
 		t.Fatalf("expected children to be 'Village of Barovia' and 'Castle Ravenloft', got %v", names)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Entity Timeline
+// ---------------------------------------------------------------------------
+
+func TestGetEntityTimeline(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create two entities.
+	npcID, err := store.UpsertEntity(ctx, campID, "Timeline NPC", "npc", "A test NPC")
+	if err != nil {
+		t.Fatalf("upsert entity: %v", err)
+	}
+	placeID, err := store.UpsertEntity(ctx, campID, "Timeline Place", "place", "A test place")
+	if err != nil {
+		t.Fatalf("upsert entity: %v", err)
+	}
+
+	// Create two sessions.
+	sess1, err := store.CreateSession(ctx, guildID, campID, "chan-1", "/tmp/audio1")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	sess2, err := store.CreateSession(ctx, guildID, campID, "chan-1", "/tmp/audio2")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	// Insert transcript segments so we can create entity references with unique
+	// (entity_id, segment_id) pairs.
+	var seg1, seg2, seg3 int64
+	err = store.Pool.QueryRow(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, display_name, start_time, end_time, text)
+		 VALUES ($1, 'u1', 'User1', 0, 10, 'text') RETURNING id`, sess1).Scan(&seg1)
+	if err != nil {
+		t.Fatalf("insert segment: %v", err)
+	}
+	err = store.Pool.QueryRow(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, display_name, start_time, end_time, text)
+		 VALUES ($1, 'u1', 'User1', 10, 20, 'text') RETURNING id`, sess1).Scan(&seg2)
+	if err != nil {
+		t.Fatalf("insert segment: %v", err)
+	}
+	err = store.Pool.QueryRow(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, display_name, start_time, end_time, text)
+		 VALUES ($1, 'u1', 'User1', 0, 10, 'text') RETURNING id`, sess2).Scan(&seg3)
+	if err != nil {
+		t.Fatalf("insert segment: %v", err)
+	}
+
+	// NPC appears in both sessions (2 refs in sess1, 1 in sess2).
+	err = store.InsertEntityReferences(ctx, []EntityReference{
+		{EntityID: npcID, SessionID: sess1, SegmentID: &seg1, Context: "npc ref 1"},
+		{EntityID: npcID, SessionID: sess1, SegmentID: &seg2, Context: "npc ref 2"},
+		{EntityID: npcID, SessionID: sess2, SegmentID: &seg3, Context: "npc ref 3"},
+	})
+	if err != nil {
+		t.Fatalf("insert entity references: %v", err)
+	}
+
+	// Place appears only in session 1 (1 ref).
+	err = store.InsertEntityReferences(ctx, []EntityReference{
+		{EntityID: placeID, SessionID: sess1, SegmentID: &seg1, Context: "place ref 1"},
+	})
+	if err != nil {
+		t.Fatalf("insert entity references: %v", err)
+	}
+
+	// Query the timeline.
+	entries, err := store.GetEntityTimeline(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetEntityTimeline: %v", err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("expected at least 2 timeline entries, got %d", len(entries))
+	}
+
+	// Find the NPC entry.
+	var npcEntry *EntityTimelineEntry
+	var placeEntry *EntityTimelineEntry
+	for i := range entries {
+		if entries[i].EntityID == npcID {
+			npcEntry = &entries[i]
+		}
+		if entries[i].EntityID == placeID {
+			placeEntry = &entries[i]
+		}
+	}
+
+	if npcEntry == nil {
+		t.Fatal("expected to find NPC in timeline entries")
+	}
+	if npcEntry.EntityName != "Timeline NPC" {
+		t.Fatalf("expected entity_name 'Timeline NPC', got %q", npcEntry.EntityName)
+	}
+	if npcEntry.EntityType != "npc" {
+		t.Fatalf("expected entity_type 'npc', got %q", npcEntry.EntityType)
+	}
+	if npcEntry.SessionCount != 2 {
+		t.Fatalf("expected NPC session_count 2, got %d", npcEntry.SessionCount)
+	}
+	if npcEntry.TotalMentions != 3 {
+		t.Fatalf("expected NPC total_mentions 3, got %d", npcEntry.TotalMentions)
+	}
+
+	if placeEntry == nil {
+		t.Fatal("expected to find Place in timeline entries")
+	}
+	if placeEntry.SessionCount != 1 {
+		t.Fatalf("expected Place session_count 1, got %d", placeEntry.SessionCount)
+	}
+	if placeEntry.TotalMentions != 1 {
+		t.Fatalf("expected Place total_mentions 1, got %d", placeEntry.TotalMentions)
+	}
+
+	// Empty campaign should return empty slice.
+	emptyCampID := createTestCampaign(t, store, guildID)
+	emptyEntries, err := store.GetEntityTimeline(ctx, emptyCampID)
+	if err != nil {
+		t.Fatalf("GetEntityTimeline for empty campaign: %v", err)
+	}
+	if emptyEntries != nil {
+		t.Fatalf("expected nil entries for empty campaign, got %d", len(emptyEntries))
+	}
+}

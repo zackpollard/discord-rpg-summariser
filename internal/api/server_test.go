@@ -832,6 +832,99 @@ func TestHandleLocationHierarchy_Empty(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Entity Timeline handler tests
+// ---------------------------------------------------------------------------
+
+func TestHandleGetEntityTimeline(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Entity Timeline Camp", "")
+
+	url := fmt.Sprintf("/api/campaigns/%d/entity-timeline", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var entries []storage.EntityTimelineEntry
+	if err := json.NewDecoder(rec.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Valid JSON array (possibly empty for a new campaign).
+	if entries == nil {
+		t.Fatal("expected non-nil entity timeline array")
+	}
+}
+
+func TestHandleGetEntityTimeline_WithData(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	campID, _ := store.CreateCampaign(ctx, guildID, "Timeline Data Camp", "")
+	entityID, _ := store.UpsertEntity(ctx, campID, "Test Hero", "npc", "A brave hero")
+	sessID, _ := store.CreateSession(ctx, guildID, campID, "chan-1", "/tmp/audio")
+
+	// Insert a segment for the entity reference.
+	var segID int64
+	store.Pool.QueryRow(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, display_name, start_time, end_time, text)
+		 VALUES ($1, 'u1', 'User1', 0, 10, 'text') RETURNING id`, sessID).Scan(&segID)
+
+	store.InsertEntityReferences(ctx, []storage.EntityReference{
+		{EntityID: entityID, SessionID: sessID, SegmentID: &segID, Context: "hero ref"},
+	})
+
+	url := fmt.Sprintf("/api/campaigns/%d/entity-timeline", campID)
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var entries []storage.EntityTimelineEntry
+	if err := json.NewDecoder(rec.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(entries) < 1 {
+		t.Fatal("expected at least 1 entity timeline entry")
+	}
+	if entries[0].EntityName != "Test Hero" {
+		t.Fatalf("expected entity_name 'Test Hero', got %q", entries[0].EntityName)
+	}
+	if entries[0].TotalMentions != 1 {
+		t.Fatalf("expected total_mentions 1, got %d", entries[0].TotalMentions)
+	}
+}
+
+func TestHandleGetEntityTimeline_InvalidID(t *testing.T) {
+	store := testStore(t)
+	srv := NewServer(store, ":0", "test-guild", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/campaigns/abc/entity-timeline", nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandleGetEntity_NotFound(t *testing.T) {
 	store := testStore(t)
 	srv := NewServer(store, ":0", "test-guild", "")
