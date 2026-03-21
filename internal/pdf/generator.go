@@ -4,7 +4,6 @@ package pdf
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,6 +12,49 @@ import (
 
 	"github.com/go-pdf/fpdf"
 )
+
+// sanitizeText replaces common Unicode characters with Latin-1 safe equivalents.
+// The fpdf library defaults to Latin-1 encoding, so characters outside that range
+// will either cause errors or render as garbage.
+func sanitizeText(s string) string {
+	replacer := strings.NewReplacer(
+		// Em-dash and en-dash
+		"\u2014", "--",
+		"\u2013", "-",
+		// Curly/smart quotes
+		"\u201C", "\"",
+		"\u201D", "\"",
+		"\u2018", "'",
+		"\u2019", "'",
+		// Bullet point
+		"\u2022", "*",
+		// Ellipsis
+		"\u2026", "...",
+		// Non-breaking space
+		"\u00A0", " ",
+		// Dagger/double-dagger
+		"\u2020", "+",
+		"\u2021", "++",
+		// Trademark, copyright, registered
+		"\u2122", "(TM)",
+		"\u00A9", "(C)",
+		"\u00AE", "(R)",
+		// Math symbols
+		"\u2264", "<=",
+		"\u2265", ">=",
+		"\u2260", "!=",
+		"\u00D7", "x",
+		"\u00F7", "/",
+		// Arrows
+		"\u2192", "->",
+		"\u2190", "<-",
+		"\u2194", "<->",
+		// Misc
+		"\u2026", "...",
+		"\uFEFF", "", // BOM
+	)
+	return replacer.Replace(s)
+}
 
 // CampaignBook holds all the data needed to generate a campaign PDF.
 type CampaignBook struct {
@@ -137,7 +179,7 @@ func (g *generator) initPDF() {
 		pdf.SetY(-15)
 		pdf.SetFont("Helvetica", "I", 8)
 		pdf.SetTextColor(colMuted[0], colMuted[1], colMuted[2])
-		pdf.CellFormat(contentW/2, 10, g.book.Campaign.Name, "", 0, "L", false, 0, "")
+		pdf.CellFormat(contentW/2, 10, sanitizeText(g.book.Campaign.Name), "", 0, "L", false, 0, "")
 		pdf.CellFormat(contentW/2, 10, fmt.Sprintf("Page %d", pdf.PageNo()), "", 0, "R", false, 0, "")
 	})
 
@@ -153,18 +195,10 @@ func (g *generator) buildBook() {
 	g.drawPageBackground()
 
 	// Build content sections, collecting TOC entries.
-	if g.book.Recap != "" {
-		g.buildRecapSection()
-	}
-	if len(g.book.Sessions) > 0 {
-		g.buildSessionsSection()
-	}
-	if len(g.book.Entities) > 0 {
-		g.buildEntitiesSection()
-	}
-	if len(g.book.Quests) > 0 {
-		g.buildQuestsSection()
-	}
+	g.buildRecapSection()
+	g.buildSessionsSection()
+	g.buildEntitiesSection()
+	g.buildQuestsSection()
 	if g.book.Stats != nil {
 		g.buildStatsSection()
 	}
@@ -189,7 +223,7 @@ func (g *generator) buildTitlePage() {
 	g.pdf.SetY(65)
 	g.pdf.SetFont("Helvetica", "B", 36)
 	g.pdf.SetTextColor(colHeader[0], colHeader[1], colHeader[2])
-	g.pdf.MultiCell(contentW, 14, g.book.Campaign.Name, "", "C", false)
+	g.pdf.MultiCell(contentW, 14, sanitizeText(g.book.Campaign.Name), "", "C", false)
 
 	// Subtitle.
 	g.pdf.Ln(6)
@@ -202,7 +236,7 @@ func (g *generator) buildTitlePage() {
 		g.pdf.Ln(10)
 		g.pdf.SetFont("Helvetica", "", 11)
 		g.pdf.SetTextColor(colText[0], colText[1], colText[2])
-		g.pdf.MultiCell(contentW, 6, g.book.Campaign.Description, "", "C", false)
+		g.pdf.MultiCell(contentW, 6, sanitizeText(g.book.Campaign.Description), "", "C", false)
 	}
 
 	// Decorative diamond.
@@ -233,6 +267,9 @@ func (g *generator) buildTitlePage() {
 // ---- Table of Contents ----
 
 func (g *generator) fillTOC() {
+	// Save the last page so we can restore after writing the TOC.
+	lastPage := g.pdf.PageNo()
+
 	// Go to the TOC page and draw it.
 	g.pdf.SetPage(g.tocPlacePage)
 	g.pdf.SetY(marginT)
@@ -252,7 +289,7 @@ func (g *generator) fillTOC() {
 		if y > pageH-marginB-10 {
 			break // don't overflow the TOC page
 		}
-		title := entry.title
+		title := sanitizeText(entry.title)
 		pageStr := fmt.Sprintf("%d", entry.page)
 
 		// Draw title on left.
@@ -260,6 +297,9 @@ func (g *generator) fillTOC() {
 		// Draw page on right.
 		g.pdf.CellFormat(15, 8, pageStr, "", 1, "R", false, 0, "")
 	}
+
+	// Restore to the last page so pdf.Output writes all pages.
+	g.pdf.SetPage(lastPage)
 }
 
 // ---- Recap Section ----
@@ -272,13 +312,19 @@ func (g *generator) buildRecapSection() {
 	g.drawSectionTitle("The Story So Far")
 	g.pdf.Ln(4)
 
+	if g.book.Recap == "" {
+		g.drawEmptyMessage("No recap available yet.")
+		return
+	}
+
 	// Drop cap for first paragraph.
 	paragraphs := splitParagraphs(g.book.Recap)
 	for i, para := range paragraphs {
+		g.checkPageBreak(15)
 		if i == 0 {
-			g.drawDropCapParagraph(para)
+			g.drawDropCapParagraph(sanitizeText(para))
 		} else {
-			g.drawBodyText(para)
+			g.drawBodyText(sanitizeText(para))
 		}
 		g.pdf.Ln(3)
 	}
@@ -293,6 +339,11 @@ func (g *generator) buildSessionsSection() {
 
 	g.drawSectionTitle("Session Chronicles")
 	g.pdf.Ln(4)
+
+	if len(g.book.Sessions) == 0 {
+		g.drawEmptyMessage("No sessions recorded yet.")
+		return
+	}
 
 	for i, sess := range g.book.Sessions {
 		g.checkPageBreak(40) // ensure enough space for a session header
@@ -314,7 +365,7 @@ func (g *generator) buildSessionsSection() {
 
 		g.pdf.SetFont("Helvetica", "B", 13)
 		g.pdf.SetTextColor(colHeader[0], colHeader[1], colHeader[2])
-		g.pdf.CellFormat(contentW, 8, title, "", 1, "L", false, 0, "")
+		g.pdf.CellFormat(contentW, 8, sanitizeText(title), "", 1, "L", false, 0, "")
 
 		g.pdf.SetFont("Helvetica", "I", 9)
 		g.pdf.SetTextColor(colMuted[0], colMuted[1], colMuted[2])
@@ -322,17 +373,19 @@ func (g *generator) buildSessionsSection() {
 		if duration != "" {
 			meta += "  |  Duration: " + duration
 		}
-		g.pdf.CellFormat(contentW, 5, meta, "", 1, "L", false, 0, "")
+		g.pdf.CellFormat(contentW, 5, sanitizeText(meta), "", 1, "L", false, 0, "")
 		g.pdf.Ln(2)
 
 		// Summary.
 		if sess.Summary != "" {
-			g.drawBodyText(sess.Summary)
+			g.checkPageBreak(15)
+			g.drawBodyText(sanitizeText(sess.Summary))
 			g.pdf.Ln(2)
 		}
 
 		// Key events.
 		if len(sess.KeyEvents) > 0 {
+			g.checkPageBreak(10)
 			g.pdf.SetFont("Helvetica", "BI", 10)
 			g.pdf.SetTextColor(colAccent[0], colAccent[1], colAccent[2])
 			g.pdf.CellFormat(contentW, 6, "Key Events:", "", 1, "L", false, 0, "")
@@ -342,7 +395,7 @@ func (g *generator) buildSessionsSection() {
 			g.pdf.SetTextColor(colText[0], colText[1], colText[2])
 			for _, evt := range sess.KeyEvents {
 				g.checkPageBreak(8)
-				bullet := "  \u2022  " + evt
+				bullet := "  *  " + sanitizeText(evt)
 				g.pdf.MultiCell(contentW-5, 5, bullet, "", "L", false)
 			}
 		}
@@ -362,6 +415,11 @@ func (g *generator) buildEntitiesSection() {
 
 	g.drawSectionTitle("Compendium of Lore")
 	g.pdf.Ln(4)
+
+	if len(g.book.Entities) == 0 {
+		g.drawEmptyMessage("No entities discovered yet.")
+		return
+	}
 
 	// Group entities by type.
 	typeOrder := []string{"pc", "npc", "place", "organisation", "item", "event"}
@@ -404,104 +462,64 @@ func (g *generator) buildEntitiesSection() {
 		}
 		g.pdf.SetFont("Helvetica", "B", 14)
 		g.pdf.SetTextColor(colAccent[0], colAccent[1], colAccent[2])
-		g.pdf.CellFormat(contentW, 9, label, "", 1, "L", false, 0, "")
+		g.pdf.CellFormat(contentW, 9, sanitizeText(label), "", 1, "L", false, 0, "")
 		g.pdf.Ln(2)
 
-		// Render entities in a two-column layout.
-		g.renderEntitiesTwoColumn(entities)
+		// Render entities in a compact single-column layout.
+		g.renderEntitiesList(entities)
 		g.pdf.Ln(6)
 	}
 }
 
-func (g *generator) renderEntitiesTwoColumn(entities []Entity) {
-	colW := (contentW - 6) / 2 // 6mm gap between columns
-	leftX := marginL
-	rightX := marginL + colW + 6
-
-	col := 0 // 0 = left, 1 = right
-	savedY := g.pdf.GetY()
-	maxY := savedY
-
+// renderEntitiesList renders entities in a single-column compact layout.
+// This avoids the fragile Y-position tracking of a two-column approach with fpdf.
+func (g *generator) renderEntitiesList(entities []Entity) {
 	for _, e := range entities {
-		// Estimate height needed.
-		estLines := 2 // name + at least one line
+		// Estimate height: name (5) + possible status (4) + desc lines + padding.
+		estH := 12.0
 		if e.Description != "" {
-			estLines += int(math.Ceil(float64(len(e.Description)) / 60.0))
+			// Use SplitText for accurate line count estimation.
+			g.pdf.SetFont("Helvetica", "", 9)
+			lines := g.pdf.SplitText(sanitizeText(e.Description), contentW-10)
+			estH += float64(len(lines)) * 4.5
 		}
-		estH := float64(estLines)*5 + 8
 
 		g.checkPageBreak(estH)
-		if g.pdf.GetY() < savedY {
-			// Page break happened, reset columns.
-			savedY = g.pdf.GetY()
-			maxY = savedY
-			col = 0
-		}
-
-		var x float64
-		if col == 0 {
-			x = leftX
-			savedY = g.pdf.GetY()
-		} else {
-			x = rightX
-			g.pdf.SetY(savedY)
-		}
 
 		// Entity name.
-		g.pdf.SetX(x)
 		g.pdf.SetFont("Helvetica", "B", 10)
 		g.pdf.SetTextColor(colText[0], colText[1], colText[2])
-		g.pdf.CellFormat(colW, 5, e.Name, "", 1, "L", false, 0, "")
+		g.pdf.CellFormat(contentW, 5, sanitizeText(e.Name), "", 1, "L", false, 0, "")
 
 		// Status badge for NPCs.
 		if e.Type == "npc" && e.Status != "" && e.Status != "unknown" {
-			g.pdf.SetX(x)
 			g.pdf.SetFont("Helvetica", "I", 8)
 			if e.Status == "dead" {
 				g.pdf.SetTextColor(139, 0, 0)
 				statusText := "Dead"
 				if e.CauseOfDeath != "" {
-					statusText += " - " + e.CauseOfDeath
+					statusText += " - " + sanitizeText(e.CauseOfDeath)
 				}
-				g.pdf.CellFormat(colW, 4, statusText, "", 1, "L", false, 0, "")
+				g.pdf.CellFormat(contentW, 4, statusText, "", 1, "L", false, 0, "")
 			} else {
 				g.pdf.SetTextColor(34, 139, 34)
-				g.pdf.CellFormat(colW, 4, strings.Title(e.Status), "", 1, "L", false, 0, "")//nolint:staticcheck
+				g.pdf.CellFormat(contentW, 4, strings.Title(e.Status), "", 1, "L", false, 0, "") //nolint:staticcheck
 			}
 		}
 
 		// Description.
 		if e.Description != "" {
-			g.pdf.SetX(x)
-			g.pdf.SetFont("Helvetica", "", 8)
+			g.pdf.SetFont("Helvetica", "", 9)
 			g.pdf.SetTextColor(colMuted[0], colMuted[1], colMuted[2])
 			// Truncate very long descriptions.
-			desc := e.Description
-			if len(desc) > 200 {
-				desc = desc[:197] + "..."
+			desc := sanitizeText(e.Description)
+			if len(desc) > 300 {
+				desc = desc[:297] + "..."
 			}
-			g.pdf.MultiCell(colW, 4, desc, "", "L", false)
+			g.pdf.MultiCell(contentW-10, 4.5, desc, "", "L", false)
 		}
 
-		endY := g.pdf.GetY()
-		if endY > maxY {
-			maxY = endY
-		}
-
-		// Alternate columns.
-		if col == 0 {
-			col = 1
-		} else {
-			col = 0
-			g.pdf.SetY(maxY + 3)
-			savedY = g.pdf.GetY()
-			maxY = savedY
-		}
-	}
-
-	// If we ended on the left column, move past the right column's extent.
-	if col == 1 {
-		g.pdf.SetY(maxY + 3)
+		g.pdf.Ln(2)
 	}
 }
 
@@ -515,27 +533,47 @@ func (g *generator) buildQuestsSection() {
 	g.drawSectionTitle("Quest Log")
 	g.pdf.Ln(4)
 
+	if len(g.book.Quests) == 0 {
+		g.drawEmptyMessage("No quests recorded yet.")
+		return
+	}
+
 	for _, q := range g.book.Quests {
-		g.checkPageBreak(30)
-		g.drawQuestBox(q)
+		boxH := g.estimateQuestBoxHeight(q)
+		g.checkPageBreak(boxH + 4)
+		g.drawQuestBox(q, boxH)
 		g.pdf.Ln(4)
 	}
 }
 
-func (g *generator) drawQuestBox(q Quest) {
+// estimateQuestBoxHeight calculates the actual height needed for a quest box
+// using fpdf's SplitText for accurate word-wrap measurement.
+func (g *generator) estimateQuestBoxHeight(q Quest) float64 {
+	boxW := contentW
+	boxH := 6.0 + 6.0 // top padding + header line
+
+	if q.Giver != "" {
+		boxH += 5 // giver line
+	}
+
+	if q.Description != "" {
+		desc := sanitizeText(q.Description)
+		if len(desc) > 300 {
+			desc = desc[:297] + "..."
+		}
+		g.pdf.SetFont("Helvetica", "", 9)
+		lines := g.pdf.SplitText(desc, boxW-17)
+		boxH += float64(len(lines)) * 5
+	}
+
+	boxH += 5 // bottom padding
+	return boxH
+}
+
+func (g *generator) drawQuestBox(q Quest, boxH float64) {
 	x := marginL
 	y := g.pdf.GetY()
 	boxW := contentW
-
-	// Estimate height.
-	descLines := 1
-	if q.Description != "" {
-		descLines = int(math.Ceil(float64(len(q.Description)) / 80.0))
-		if descLines < 1 {
-			descLines = 1
-		}
-	}
-	boxH := float64(8+5+descLines*5) + 8 // header + giver + desc + padding
 
 	// Draw box background.
 	g.pdf.SetFillColor(colQuestBox[0], colQuestBox[1], colQuestBox[2])
@@ -554,19 +592,19 @@ func (g *generator) drawQuestBox(q Quest) {
 	// Quest name.
 	g.pdf.SetFont("Helvetica", "B", 11)
 	g.pdf.SetTextColor(colText[0], colText[1], colText[2])
-	g.pdf.CellFormat(boxW-30, 6, q.Name, "", 0, "L", false, 0, "")
+	g.pdf.CellFormat(boxW-30, 6, sanitizeText(q.Name), "", 0, "L", false, 0, "")
 
 	// Status text.
 	g.pdf.SetFont("Helvetica", "I", 9)
 	g.pdf.SetTextColor(colMuted[0], colMuted[1], colMuted[2])
-	g.pdf.CellFormat(18, 6, strings.Title(q.Status), "", 1, "R", false, 0, "")//nolint:staticcheck
+	g.pdf.CellFormat(18, 6, strings.Title(q.Status), "", 1, "R", false, 0, "") //nolint:staticcheck
 
 	// Giver.
 	if q.Giver != "" {
 		g.pdf.SetX(x + 14)
 		g.pdf.SetFont("Helvetica", "I", 8)
 		g.pdf.SetTextColor(colMuted[0], colMuted[1], colMuted[2])
-		g.pdf.CellFormat(boxW-17, 4, "Given by: "+q.Giver, "", 1, "L", false, 0, "")
+		g.pdf.CellFormat(boxW-17, 4, sanitizeText("Given by: "+q.Giver), "", 1, "L", false, 0, "")
 	}
 
 	// Description.
@@ -574,7 +612,7 @@ func (g *generator) drawQuestBox(q Quest) {
 		g.pdf.SetX(x + 14)
 		g.pdf.SetFont("Helvetica", "", 9)
 		g.pdf.SetTextColor(colText[0], colText[1], colText[2])
-		desc := q.Description
+		desc := sanitizeText(q.Description)
 		if len(desc) > 300 {
 			desc = desc[:297] + "..."
 		}
@@ -619,6 +657,7 @@ func (g *generator) buildStatsSection() {
 	g.pdf.Ln(4)
 
 	// Quest stats.
+	g.checkPageBreak(50)
 	g.pdf.SetFont("Helvetica", "B", 12)
 	g.pdf.SetTextColor(colAccent[0], colAccent[1], colAccent[2])
 	g.pdf.CellFormat(contentW, 7, "Quests", "", 1, "L", false, 0, "")
@@ -634,6 +673,7 @@ func (g *generator) buildStatsSection() {
 
 	// Combat stats.
 	if stats.TotalEncounters > 0 {
+		g.checkPageBreak(30)
 		g.pdf.SetFont("Helvetica", "B", 12)
 		g.pdf.SetTextColor(colAccent[0], colAccent[1], colAccent[2])
 		g.pdf.CellFormat(contentW, 7, "Combat", "", 1, "L", false, 0, "")
@@ -648,6 +688,7 @@ func (g *generator) buildStatsSection() {
 
 	// Entity counts.
 	if len(stats.EntityCounts) > 0 {
+		g.checkPageBreak(30)
 		g.pdf.SetFont("Helvetica", "B", 12)
 		g.pdf.SetTextColor(colAccent[0], colAccent[1], colAccent[2])
 		g.pdf.CellFormat(contentW, 7, "World Building", "", 1, "L", false, 0, "")
@@ -660,14 +701,16 @@ func (g *generator) buildStatsSection() {
 		g.drawStatRow("Total Entities", fmt.Sprintf("%d", total))
 
 		for typ, count := range stats.EntityCounts {
+			g.checkPageBreak(10)
 			label := strings.Title(typ + "s") //nolint:staticcheck
-			g.drawStatRow(label, fmt.Sprintf("%d", count))
+			g.drawStatRow(sanitizeText(label), fmt.Sprintf("%d", count))
 		}
 		g.pdf.Ln(4)
 	}
 
 	// NPC status.
 	if len(stats.NPCStatusCounts) > 0 {
+		g.checkPageBreak(30)
 		g.drawThinRule()
 		g.pdf.Ln(4)
 		g.pdf.SetFont("Helvetica", "B", 12)
@@ -676,6 +719,7 @@ func (g *generator) buildStatsSection() {
 		g.pdf.Ln(2)
 
 		for status, count := range stats.NPCStatusCounts {
+			g.checkPageBreak(10)
 			g.drawStatRow(strings.Title(status), fmt.Sprintf("%d", count)) //nolint:staticcheck
 		}
 	}
@@ -684,11 +728,11 @@ func (g *generator) buildStatsSection() {
 func (g *generator) drawStatRow(label, value string) {
 	g.pdf.SetFont("Helvetica", "", 10)
 	g.pdf.SetTextColor(colText[0], colText[1], colText[2])
-	g.pdf.CellFormat(contentW*0.6, 7, label, "", 0, "L", false, 0, "")
+	g.pdf.CellFormat(contentW*0.6, 7, sanitizeText(label), "", 0, "L", false, 0, "")
 
 	g.pdf.SetFont("Helvetica", "B", 10)
 	g.pdf.SetTextColor(colHeader[0], colHeader[1], colHeader[2])
-	g.pdf.CellFormat(contentW*0.4, 7, value, "", 1, "R", false, 0, "")
+	g.pdf.CellFormat(contentW*0.4, 7, sanitizeText(value), "", 1, "R", false, 0, "")
 }
 
 // ---- Drawing helpers ----
@@ -701,7 +745,7 @@ func (g *generator) drawPageBackground() {
 func (g *generator) drawSectionTitle(title string) {
 	g.pdf.SetFont("Helvetica", "B", 22)
 	g.pdf.SetTextColor(colHeader[0], colHeader[1], colHeader[2])
-	g.pdf.CellFormat(contentW, 12, title, "", 1, "C", false, 0, "")
+	g.pdf.CellFormat(contentW, 12, sanitizeText(title), "", 1, "C", false, 0, "")
 	g.pdf.Ln(2)
 	g.drawHorizontalRule()
 }
@@ -725,17 +769,26 @@ func (g *generator) drawThinRule() {
 func (g *generator) drawBodyText(text string) {
 	g.pdf.SetFont("Helvetica", "", 10)
 	g.pdf.SetTextColor(colText[0], colText[1], colText[2])
-	g.pdf.MultiCell(contentW, 5.5, text, "", "L", false)
+	g.pdf.MultiCell(contentW, 5.5, sanitizeText(text), "", "L", false)
+}
+
+// drawEmptyMessage renders a styled placeholder message for empty sections.
+func (g *generator) drawEmptyMessage(msg string) {
+	g.pdf.SetFont("Helvetica", "I", 11)
+	g.pdf.SetTextColor(colMuted[0], colMuted[1], colMuted[2])
+	g.pdf.Ln(8)
+	g.pdf.CellFormat(contentW, 8, msg, "", 1, "C", false, 0, "")
 }
 
 func (g *generator) drawDropCapParagraph(text string) {
-	if len(text) == 0 {
+	safe := sanitizeText(text)
+	if len(safe) == 0 {
 		return
 	}
 
 	// Get the first rune.
-	firstRune, size := utf8.DecodeRuneInString(text)
-	rest := text[size:]
+	firstRune, size := utf8.DecodeRuneInString(safe)
+	rest := safe[size:]
 
 	// Draw large first letter.
 	g.pdf.SetFont("Helvetica", "B", 28)
