@@ -496,3 +496,57 @@ export interface EntityTimelineEntry {
 export async function fetchEntityTimeline(campaignId: number): Promise<EntityTimelineEntry[]> {
 	return request<EntityTimelineEntry[]>(`/api/campaigns/${campaignId}/entity-timeline`);
 }
+
+// Campaign stats types and functions
+
+export interface SpeakerStat {
+	user_id: string;
+	character_name: string;
+	segment_count: number;
+	word_count: number;
+}
+
+export interface TopEntity {
+	name: string;
+	type: string;
+	mentions: number;
+}
+
+export interface CombatActorStat {
+	actor: string;
+	actions: number;
+	total_damage: number;
+}
+
+export interface SessionTimelineStat {
+	session_id: number;
+	started_at: string;
+	duration_min: number;
+	segment_count: number;
+	word_count: number;
+}
+
+export interface CampaignStats {
+	total_sessions: number;
+	total_duration_min: number;
+	avg_duration_min: number;
+	total_segments: number;
+	total_words: number;
+	speaker_stats: SpeakerStat[];
+	entity_counts: Record<string, number>;
+	top_entities: TopEntity[];
+	total_quests: number;
+	active_quests: number;
+	completed_quests: number;
+	failed_quests: number;
+	total_encounters: number;
+	total_actions: number;
+	total_damage: number;
+	combat_actor_stats: CombatActorStat[];
+	session_timeline: SessionTimelineStat[];
+	npc_status_counts: Record<string, number>;
+}
+
+export async function fetchCampaignStats(campaignId: number): Promise<CampaignStats> {
+	return request<CampaignStats>(`/api/campaigns/${campaignId}/stats`);
+}

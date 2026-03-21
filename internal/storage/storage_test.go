@@ -2490,3 +2490,125 @@ func TestGetEntityTimeline(t *testing.T) {
 		t.Fatalf("expected nil entries for empty campaign, got %d", len(emptyEntries))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Campaign Stats
+// ---------------------------------------------------------------------------
+
+func TestGetCampaignStats_Empty(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	stats, err := store.GetCampaignStats(ctx, campID, guildID)
+	if err != nil {
+		t.Fatalf("GetCampaignStats: %v", err)
+	}
+
+	if stats.TotalSessions != 0 {
+		t.Fatalf("expected 0 sessions, got %d", stats.TotalSessions)
+	}
+	if stats.TotalSegments != 0 {
+		t.Fatalf("expected 0 segments, got %d", stats.TotalSegments)
+	}
+	if stats.TotalWords != 0 {
+		t.Fatalf("expected 0 words, got %d", stats.TotalWords)
+	}
+	if stats.TotalQuests != 0 {
+		t.Fatalf("expected 0 quests, got %d", stats.TotalQuests)
+	}
+	if stats.TotalEncounters != 0 {
+		t.Fatalf("expected 0 encounters, got %d", stats.TotalEncounters)
+	}
+	if len(stats.SpeakerStats) != 0 {
+		t.Fatalf("expected empty speaker stats, got %d", len(stats.SpeakerStats))
+	}
+	if len(stats.TopEntities) != 0 {
+		t.Fatalf("expected empty top entities, got %d", len(stats.TopEntities))
+	}
+	if len(stats.CombatActorStats) != 0 {
+		t.Fatalf("expected empty combat actor stats, got %d", len(stats.CombatActorStats))
+	}
+	if len(stats.SessionTimeline) != 0 {
+		t.Fatalf("expected empty session timeline, got %d", len(stats.SessionTimeline))
+	}
+	if stats.EntityCounts == nil {
+		t.Fatal("expected non-nil entity counts map")
+	}
+	if stats.NPCStatusCounts == nil {
+		t.Fatal("expected non-nil npc status counts map")
+	}
+}
+
+func TestGetCampaignStats_WithData(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create a session and end it.
+	sessID, err := store.CreateSession(ctx, guildID, campID, "chan-1", "/tmp/audio")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := store.EndSession(ctx, sessID); err != nil {
+		t.Fatalf("end session: %v", err)
+	}
+	if err := store.UpdateSessionSummary(ctx, sessID, "Test summary", []string{"event1"}); err != nil {
+		t.Fatalf("update session summary: %v", err)
+	}
+
+	// Add transcript segments.
+	segs := []TranscriptSegment{
+		{SessionID: sessID, UserID: "user1", StartTime: 0, EndTime: 5, Text: "Hello world foo bar"},
+		{SessionID: sessID, UserID: "user2", StartTime: 5, EndTime: 10, Text: "Greetings adventurer"},
+	}
+	if err := store.InsertSegments(ctx, segs); err != nil {
+		t.Fatalf("insert segments: %v", err)
+	}
+
+	// Add an entity.
+	entityID, err := store.UpsertEntity(ctx, campID, "Goblin King", "npc", "A fearsome goblin")
+	if err != nil {
+		t.Fatalf("upsert entity: %v", err)
+	}
+	_ = entityID
+
+	// Add a quest.
+	_, err = store.UpsertQuest(ctx, campID, "Slay the Dragon", "Find and slay the dragon", "active", "King")
+	if err != nil {
+		t.Fatalf("upsert quest: %v", err)
+	}
+
+	stats, err := store.GetCampaignStats(ctx, campID, guildID)
+	if err != nil {
+		t.Fatalf("GetCampaignStats: %v", err)
+	}
+
+	if stats.TotalSessions != 1 {
+		t.Fatalf("expected 1 session, got %d", stats.TotalSessions)
+	}
+	if stats.TotalSegments != 2 {
+		t.Fatalf("expected 2 segments, got %d", stats.TotalSegments)
+	}
+	if stats.TotalWords < 6 {
+		t.Fatalf("expected at least 6 words, got %d", stats.TotalWords)
+	}
+	if len(stats.SpeakerStats) < 2 {
+		t.Fatalf("expected at least 2 speaker stats, got %d", len(stats.SpeakerStats))
+	}
+	if stats.TotalQuests != 1 {
+		t.Fatalf("expected 1 quest, got %d", stats.TotalQuests)
+	}
+	if stats.ActiveQuests != 1 {
+		t.Fatalf("expected 1 active quest, got %d", stats.ActiveQuests)
+	}
+	if len(stats.SessionTimeline) != 1 {
+		t.Fatalf("expected 1 session in timeline, got %d", len(stats.SessionTimeline))
+	}
+	// Verify entity counts include our NPC.
+	if npcCount, ok := stats.EntityCounts["npc"]; !ok || npcCount < 1 {
+		t.Fatalf("expected at least 1 npc in entity counts, got %v", stats.EntityCounts)
+	}
+}

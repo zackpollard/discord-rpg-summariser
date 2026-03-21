@@ -25,6 +25,7 @@ import {
 	mergeEntity,
 	fetchRelationshipGraph,
 	reprocessSession,
+	fetchCampaignStats,
 } from './api';
 
 function mockFetch(body: unknown, status = 200, statusText = 'OK') {
@@ -480,5 +481,36 @@ describe('reprocessSession', () => {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ retranscribe: true }),
 		});
+	});
+});
+
+describe('fetchCampaignStats', () => {
+	it('fetches campaign stats by campaign id', async () => {
+		const stats = {
+			total_sessions: 5,
+			total_duration_min: 300,
+			avg_duration_min: 60,
+			total_segments: 100,
+			total_words: 5000,
+			speaker_stats: [],
+			entity_counts: { npc: 3, place: 2 },
+			top_entities: [],
+			total_quests: 2,
+			active_quests: 1,
+			completed_quests: 1,
+			failed_quests: 0,
+			total_encounters: 3,
+			total_actions: 15,
+			total_damage: 120,
+			combat_actor_stats: [],
+			session_timeline: [],
+			npc_status_counts: { alive: 2, dead: 1 },
+		};
+		globalThis.fetch = mockFetch(stats);
+
+		const result = await fetchCampaignStats(7);
+
+		expect(result).toEqual(stats);
+		expect(fetch).toHaveBeenCalledWith('/api/campaigns/7/stats', undefined);
 	});
 });

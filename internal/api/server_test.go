@@ -938,3 +938,65 @@ func TestHandleGetEntity_NotFound(t *testing.T) {
 		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestHandleGetCampaignStats(t *testing.T) {
+	store := testStore(t)
+	guildID := uniqueGuild(t)
+	srv := NewServer(store, ":0", guildID, "")
+
+	ctx := context.Background()
+	campaignID, err := store.CreateCampaign(ctx, guildID, "Stats Test Campaign", "Test")
+	if err != nil {
+		t.Fatalf("create campaign: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/campaigns/%d/stats", campaignID), nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// Verify expected top-level fields exist.
+	expectedFields := []string{
+		"total_sessions", "total_duration_min", "avg_duration_min",
+		"total_segments", "total_words", "speaker_stats",
+		"entity_counts", "top_entities",
+		"total_quests", "active_quests", "completed_quests", "failed_quests",
+		"total_encounters", "total_actions", "total_damage",
+		"combat_actor_stats", "session_timeline", "npc_status_counts",
+	}
+	for _, field := range expectedFields {
+		if _, ok := resp[field]; !ok {
+			t.Errorf("missing field %q in stats response", field)
+		}
+	}
+
+	// Arrays should be non-nil (empty arrays, not null).
+	for _, arrayField := range []string{"speaker_stats", "top_entities", "combat_actor_stats", "session_timeline"} {
+		if resp[arrayField] == nil {
+			t.Errorf("expected %q to be non-nil array", arrayField)
+		}
+	}
+}
+
+func TestHandleGetCampaignStats_InvalidID(t *testing.T) {
+	store := testStore(t)
+	srv := NewServer(store, ":0", "test-guild", "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/campaigns/abc/stats", nil)
+	rec := httptest.NewRecorder()
+
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
