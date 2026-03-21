@@ -550,3 +550,9 @@ export interface CampaignStats {
 export async function fetchCampaignStats(campaignId: number): Promise<CampaignStats> {
 	return request<CampaignStats>(`/api/campaigns/${campaignId}/stats`);
 }
+
+// PDF campaign book
+
+export function campaignPDFURL(campaignId: number): string {
+	return `/api/campaigns/${campaignId}/pdf`;
+}

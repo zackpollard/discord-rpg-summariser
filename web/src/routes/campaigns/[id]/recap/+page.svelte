@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchRecap, regenerateRecap, type CampaignRecap } from '$lib/api';
+	import { fetchRecap, regenerateRecap, campaignPDFURL, type CampaignRecap } from '$lib/api';
 
 	const campaignId = $derived(Number($page.params.id));
 
@@ -90,6 +90,7 @@
 				{/if}
 			</div>
 			<div class="recap-actions">
+				<a href={campaignPDFURL(campaignId)} class="pdf-btn" download>Download PDF</a>
 				<label class="last-n-label">
 					Last N sessions:
 					<input
@@ -168,6 +169,23 @@
 	.last-n-input::placeholder {
 		color: var(--text-muted);
 	}
+
+	.pdf-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		background: var(--accent-gold-dim);
+		color: var(--bg-dark);
+		border: 1px solid var(--accent-gold);
+		padding: 0.4rem 1rem;
+		border-radius: var(--radius);
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.15s;
+		text-decoration: none;
+	}
+	.pdf-btn:hover { background: var(--accent-gold); text-decoration: none; }
 
 	.regenerate-btn {
 		display: inline-flex;

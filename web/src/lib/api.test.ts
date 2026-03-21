@@ -26,6 +26,7 @@ import {
 	fetchRelationshipGraph,
 	reprocessSession,
 	fetchCampaignStats,
+	campaignPDFURL,
 } from './api';
 
 function mockFetch(body: unknown, status = 200, statusText = 'OK') {
@@ -481,6 +482,17 @@ describe('reprocessSession', () => {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ retranscribe: true }),
 		});
+	});
+});
+
+describe('campaignPDFURL', () => {
+	it('returns the correct URL for a campaign', () => {
+		expect(campaignPDFURL(7)).toBe('/api/campaigns/7/pdf');
+	});
+
+	it('handles different campaign IDs', () => {
+		expect(campaignPDFURL(1)).toBe('/api/campaigns/1/pdf');
+		expect(campaignPDFURL(42)).toBe('/api/campaigns/42/pdf');
 	});
 });
 

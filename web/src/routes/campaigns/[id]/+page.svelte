@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchStatus, fetchSessions, subscribeVoiceActivity, subscribeLiveTranscript, type Status, type Session, type VoiceUser, type LiveTranscriptEvent } from '$lib/api';
+	import { fetchStatus, fetchSessions, subscribeVoiceActivity, subscribeLiveTranscript, campaignPDFURL, type Status, type Session, type VoiceUser, type LiveTranscriptEvent } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 
 	const campaignId = $derived(Number($page.params.id));
@@ -136,6 +136,14 @@
 	</section>
 {/if}
 
+<section class="card pdf-section">
+	<div class="section-header">
+		<h2>Campaign Book</h2>
+		<a href={campaignPDFURL(campaignId)} class="pdf-btn" download>Download PDF</a>
+	</div>
+	<p class="muted">Generate a D&D-style PDF campaign book with session recaps, entity compendium, quest log, and stats.</p>
+</section>
+
 <section class="card">
 	<div class="section-header">
 		<h2>Recent Sessions</h2>
@@ -216,6 +224,24 @@
 	.session-info { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.35rem; }
 	.session-date { font-weight: 500; font-size: 0.9rem; }
 	.session-summary { color: var(--text-secondary); font-size: 0.85rem; line-height: 1.4; }
+
+	.pdf-section p { font-size: 0.85rem; line-height: 1.4; }
+	.pdf-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		background: var(--accent-gold-dim);
+		color: var(--bg-dark);
+		border: 1px solid var(--accent-gold);
+		padding: 0.4rem 1rem;
+		border-radius: var(--radius);
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.15s;
+		text-decoration: none;
+	}
+	.pdf-btn:hover { background: var(--accent-gold); text-decoration: none; }
 
 	.muted { color: var(--text-muted); }
 	.error-box { background: rgba(185, 28, 28, 0.15); border: 1px solid #7f1d1d; color: #fca5a5; padding: 0.75rem; border-radius: var(--radius); font-size: 0.9rem; }

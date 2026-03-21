@@ -5,6 +5,7 @@ go 1.23.0
 require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20260318204338-ef3463bb29ef
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/k2-fsa/sherpa-onnx-go v1.12.30
 	github.com/pgvector/pgvector-go v0.3.0

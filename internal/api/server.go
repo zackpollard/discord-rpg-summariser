@@ -184,6 +184,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 			!strings.HasSuffix(r.URL.Path, "/voice-activity") &&
 			!strings.HasSuffix(r.URL.Path, "/live-transcript") &&
 			!strings.HasSuffix(r.URL.Path, "/audio") &&
+			!strings.HasSuffix(r.URL.Path, "/pdf") &&
 			!strings.HasPrefix(r.URL.Path, "/api/auth/login") &&
 			!strings.HasPrefix(r.URL.Path, "/api/auth/callback") {
 			w.Header().Set("Content-Type", "application/json")
