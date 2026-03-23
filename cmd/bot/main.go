@@ -44,26 +44,25 @@ func main() {
 	defer store.Close()
 	log.Println("Database connected and migrated")
 
-	var transcriber transcribe.Transcriber
-	switch cfg.Transcribe.Engine {
-	case "parakeet":
-		transcriber, err = transcribe.NewParakeetTranscriber(
-			cfg.Transcribe.ModelDir,
-			cfg.Transcribe.Threads,
-		)
-	default:
-		transcriber, err = transcribe.NewWhisperTranscriber(
-			cfg.Transcribe.Model,
-			cfg.Transcribe.ModelDir,
-			cfg.Transcribe.Language,
-			cfg.Transcribe.Threads,
-		)
+	// Create a factory that loads the transcription model on demand.
+	// This avoids keeping ~22GB of ONNX Runtime memory allocated while idle.
+	transcriberFactory := func() (transcribe.Transcriber, error) {
+		switch cfg.Transcribe.Engine {
+		case "parakeet":
+			return transcribe.NewParakeetTranscriber(
+				cfg.Transcribe.ModelDir,
+				cfg.Transcribe.Threads,
+			)
+		default:
+			return transcribe.NewWhisperTranscriber(
+				cfg.Transcribe.Model,
+				cfg.Transcribe.ModelDir,
+				cfg.Transcribe.Language,
+				cfg.Transcribe.Threads,
+			)
+		}
 	}
-	if err != nil {
-		log.Fatalf("Failed to initialize transcriber: %v", err)
-	}
-	defer transcriber.Close()
-	log.Printf("Transcription engine loaded: %s", cfg.Transcribe.Engine)
+	log.Printf("Transcription engine configured: %s (lazy-loaded)", cfg.Transcribe.Engine)
 
 	var sum summarise.Summariser
 	switch cfg.LLM.Provider {
@@ -84,7 +83,7 @@ func main() {
 
 	srv := api.NewServer(store, cfg.Web.ListenAddr, cfg.Discord.GuildID, webDir, api.WithAuth(cfg))
 
-	discordBot, err := bot.NewBot(cfg, store, transcriber, sum)
+	discordBot, err := bot.NewBot(cfg, store, transcriberFactory, sum)
 	if err != nil {
 		log.Fatalf("Failed to create bot: %v", err)
 	}

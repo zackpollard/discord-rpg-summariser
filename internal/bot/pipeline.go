@@ -42,6 +42,15 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 		return
 	}
 
+	// Load transcription model for the pipeline (may already be loaded for live).
+	transcriber, err := b.acquireTranscriber()
+	if err != nil {
+		log.Printf("pipeline: failed to load transcriber: %v", err)
+		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
+		return
+	}
+	defer b.releaseTranscriber()
+
 	// Transcribe each user's WAV, with diarization for shared mics.
 	b.store.UpdateSessionStatus(ctx, sessionID, "transcribing")
 
@@ -56,10 +65,10 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	for userID, wavPath := range userFiles {
 		if mic, ok := sharedMicMap[userID]; ok {
 			// Shared mic: diarize then attribute segments.
-			b.transcribeSharedMic(ctx, wavPath, mic, userSegments)
+			b.transcribeSharedMic(ctx, transcriber, wavPath, mic, userSegments)
 		} else {
 			// Normal single-user transcription.
-			segments, err := b.transcriber.TranscribeFile(ctx, wavPath)
+			segments, err := transcriber.TranscribeFile(ctx, wavPath)
 			if err != nil {
 				log.Printf("pipeline: transcribe user %s: %v", userID, err)
 				continue
@@ -277,11 +286,11 @@ func (b *Bot) buildTranscriptWithTelegram(
 
 // transcribeSharedMic diarizes a shared-mic WAV file and attributes each
 // transcription segment to the correct speaker.
-func (b *Bot) transcribeSharedMic(ctx context.Context, wavPath string, mic storage.SharedMic, userSegments map[string][]transcribe.Segment) {
+func (b *Bot) transcribeSharedMic(ctx context.Context, transcriber transcribe.Transcriber, wavPath string, mic storage.SharedMic, userSegments map[string][]transcribe.Segment) {
 	d := b.getDiarizer()
 	if d == nil {
 		log.Printf("pipeline: diarizer not available, treating shared mic user %s as single speaker", mic.DiscordUserID)
-		segments, err := b.transcriber.TranscribeFile(ctx, wavPath)
+		segments, err := transcriber.TranscribeFile(ctx, wavPath)
 		if err != nil {
 			log.Printf("pipeline: transcribe shared mic user %s: %v", mic.DiscordUserID, err)
 			return
@@ -302,7 +311,7 @@ func (b *Bot) transcribeSharedMic(ctx context.Context, wavPath string, mic stora
 	if err != nil {
 		log.Printf("pipeline: diarize %s: %v", mic.DiscordUserID, err)
 		// Fall back to single speaker.
-		segments, _ := b.transcriber.TranscribeFile(ctx, wavPath)
+		segments, _ := transcriber.TranscribeFile(ctx, wavPath)
 		if segments != nil {
 			userSegments[mic.DiscordUserID] = segments
 		}
@@ -348,7 +357,7 @@ func (b *Bot) transcribeSharedMic(ctx context.Context, wavPath string, mic stora
 	log.Printf("pipeline: diarized %s: %d segments, mic owner is speaker %d", mic.DiscordUserID, len(diarSegments), primarySpeaker)
 
 	// Transcribe the full audio.
-	allSegments, err := b.transcriber.TranscribeFile(ctx, wavPath)
+	allSegments, err := transcriber.TranscribeFile(ctx, wavPath)
 	if err != nil {
 		log.Printf("pipeline: transcribe shared mic %s: %v", mic.DiscordUserID, err)
 		return

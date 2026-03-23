@@ -176,9 +176,17 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	}
 	log.Printf("Voice connection established (OpusRecv=%v)", vc.OpusRecv != nil)
 
+	// Load the transcription model for live transcription.
+	transcriber, err := b.acquireTranscriber()
+	if err != nil {
+		respondEphemeral(s, i, "Failed to load transcription model.")
+		log.Printf("acquireTranscriber error: %v", err)
+		return
+	}
+
 	liveCh := make(chan voice.ChunkReady, 16)
 	rec := voice.NewRecorder(audioDir, guildID, liveCh)
-	liveWorker := voice.NewLiveWorker(b.transcriber, liveCh)
+	liveWorker := voice.NewLiveWorker(transcriber, liveCh)
 
 	// Configure shared mic support for live transcription.
 	b.configureLiveSharedMics(ctx, liveWorker, campaign.ID)
@@ -229,6 +237,9 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 
 	// Stop recording and disconnect; get user WAV files and Telegram messages.
 	result := b.stopRecording()
+	// Release the live transcription's reference to the transcriber.
+	// The pipeline will acquire its own reference.
+	b.releaseTranscriber()
 
 	// Mark session as ended in DB.
 	ctx := context.Background()

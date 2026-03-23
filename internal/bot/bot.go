@@ -22,19 +22,24 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
+// TranscriberFactory creates a new Transcriber on demand.
+type TranscriberFactory func() (transcribe.Transcriber, error)
+
 // Bot manages the Discord session and coordinates recording, transcription,
 // and summarisation of RPG sessions.
 type Bot struct {
-	session         *discordgo.Session
-	store           *storage.Store
-	config          *config.Config
-	recorder        *voice.Recorder
-	transcriber     transcribe.Transcriber
-	summariser      summarise.Summariser
-	activeVC        *discordgo.VoiceConnection
-	activeChannelID string // voice channel the bot is currently in
-	mu              sync.Mutex
-	webBaseURL      string
+	session             *discordgo.Session
+	store               *storage.Store
+	config              *config.Config
+	recorder            *voice.Recorder
+	transcriberFactory  TranscriberFactory
+	transcriber         transcribe.Transcriber // lazy-loaded, nil when idle
+	transcriberRefCount int                    // number of active users (live + pipeline)
+	summariser          summarise.Summariser
+	activeVC            *discordgo.VoiceConnection
+	activeChannelID     string // voice channel the bot is currently in
+	mu                  sync.Mutex
+	webBaseURL          string
 
 	// registeredCmds holds the IDs of registered slash commands so they can
 	// be removed on shutdown.
@@ -54,6 +59,42 @@ type Bot struct {
 
 	// Embedding generation for RAG (nil if not configured).
 	embedder embed.Embedder
+}
+
+// acquireTranscriber loads the transcription model if not already loaded and
+// increments the reference count. Callers must call releaseTranscriber when done.
+func (b *Bot) acquireTranscriber() (transcribe.Transcriber, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.transcriber == nil {
+		log.Println("Loading transcription model...")
+		t, err := b.transcriberFactory()
+		if err != nil {
+			return nil, err
+		}
+		b.transcriber = t
+		log.Println("Transcription model loaded")
+	}
+	b.transcriberRefCount++
+	return b.transcriber, nil
+}
+
+// releaseTranscriber decrements the reference count and unloads the model
+// when no one is using it, freeing the ONNX Runtime memory arena.
+func (b *Bot) releaseTranscriber() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.transcriberRefCount--
+	if b.transcriberRefCount <= 0 {
+		b.transcriberRefCount = 0
+		if b.transcriber != nil {
+			log.Println("Unloading transcription model (no active users)")
+			b.transcriber.Close()
+			b.transcriber = nil
+		}
+	}
 }
 
 // LiveTranscriptWorker returns the current live transcription worker, or nil.
@@ -194,7 +235,7 @@ func (b *Bot) VoiceActivity() []voice.UserActivity {
 
 // NewBot creates a new Bot with the given dependencies. The Discord session is
 // created but not yet opened; call Start to connect.
-func NewBot(cfg *config.Config, store *storage.Store, transcriber transcribe.Transcriber, summariser summarise.Summariser) (*Bot, error) {
+func NewBot(cfg *config.Config, store *storage.Store, transcriberFactory TranscriberFactory, summariser summarise.Summariser) (*Bot, error) {
 	dg, err := discordgo.New("Bot " + cfg.Discord.Token)
 	if err != nil {
 		return nil, err
@@ -206,12 +247,12 @@ func NewBot(cfg *config.Config, store *storage.Store, transcriber transcribe.Tra
 		discordgo.IntentsGuildMessages
 
 	b := &Bot{
-		session:     dg,
-		store:       store,
-		config:      cfg,
-		transcriber: transcriber,
-		summariser:  summariser,
-		webBaseURL:  resolveBaseURL(cfg),
+		session:            dg,
+		store:              store,
+		config:             cfg,
+		transcriberFactory: transcriberFactory,
+		summariser:         summariser,
+		webBaseURL:         resolveBaseURL(cfg),
 	}
 
 	return b, nil
@@ -381,6 +422,7 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 	b.mu.Unlock()
 
 	result := b.stopRecording()
+	b.releaseTranscriber() // release live transcription reference
 
 	if sessionID != 0 {
 		ctx := context.Background()

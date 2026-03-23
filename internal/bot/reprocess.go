@@ -211,6 +211,12 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 
 	b.store.UpdateSessionStatus(ctx, session.ID, "transcribing")
 
+	transcriber, err := b.acquireTranscriber()
+	if err != nil {
+		return fmt.Errorf("load transcriber: %w", err)
+	}
+	defer b.releaseTranscriber()
+
 	// Load shared mic config for this campaign.
 	sharedMics, _ := b.store.GetSharedMics(ctx, session.CampaignID)
 	sharedMicMap := make(map[string]storage.SharedMic, len(sharedMics))
@@ -221,9 +227,9 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 	userSegments := make(map[string][]transcribe.Segment, len(userFiles))
 	for userID, wavPath := range userFiles {
 		if mic, ok := sharedMicMap[userID]; ok {
-			b.transcribeSharedMic(ctx, wavPath, mic, userSegments)
+			b.transcribeSharedMic(ctx, transcriber, wavPath, mic, userSegments)
 		} else {
-			segs, err := b.transcriber.TranscribeFile(ctx, wavPath)
+			segs, err := transcriber.TranscribeFile(ctx, wavPath)
 			if err != nil {
 				log.Printf("reprocess: transcribe user %s: %v", userID, err)
 				continue
