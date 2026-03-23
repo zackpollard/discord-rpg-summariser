@@ -29,7 +29,7 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, prompt string, result any) er
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("claude CLI failed: %w: %s", err, stderr.String())
+		return fmt.Errorf("claude CLI failed: %w\nstderr: %s\nstdout: %s", err, stderr.String(), stdout.String())
 	}
 
 	output := StripCodeFences(stdout.Bytes())
