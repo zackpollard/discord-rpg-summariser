@@ -2,8 +2,11 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -114,6 +117,11 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, userJoin
 		joinOffsetSecs[userID] = d.Seconds()
 	}
 
+	// Persist join offsets alongside the audio files for future reprocessing.
+	if session.AudioDir != "" && len(joinOffsetSecs) > 0 {
+		saveJoinOffsets(session.AudioDir, joinOffsetSecs)
+	}
+
 	// Merge voice segments with join offsets so late joiners are correctly placed.
 	merged := transcribe.MergeTranscripts(userSegments, charNames, joinOffsetSecs)
 
@@ -178,6 +186,37 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, userJoin
 
 	// Generate vector embeddings for RAG (non-fatal on error).
 	b.generateEmbeddings(ctx, session, sessionID, merged, result.Summary, dmName)
+}
+
+const offsetsFile = "offsets.json"
+
+// saveJoinOffsets writes per-user join offsets (seconds) to the audio directory.
+func saveJoinOffsets(audioDir string, offsets map[string]float64) {
+	data, err := json.Marshal(offsets)
+	if err != nil {
+		log.Printf("pipeline: marshal join offsets: %v", err)
+		return
+	}
+	path := filepath.Join(audioDir, offsetsFile)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		log.Printf("pipeline: write %s: %v", path, err)
+	}
+}
+
+// loadJoinOffsets reads per-user join offsets from the audio directory.
+// Returns nil if the file doesn't exist (e.g. older sessions).
+func loadJoinOffsets(audioDir string) map[string]float64 {
+	path := filepath.Join(audioDir, offsetsFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var offsets map[string]float64
+	if err := json.Unmarshal(data, &offsets); err != nil {
+		log.Printf("pipeline: parse %s: %v", path, err)
+		return nil
+	}
+	return offsets
 }
 
 // buildTranscriptWithTelegram persists Telegram messages to the DB, filters

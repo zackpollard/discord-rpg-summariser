@@ -245,8 +245,9 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 		}
 	}
 
-	// Reprocessed sessions don't have join offsets — use nil (zero offsets).
-	merged := transcribe.MergeTranscripts(userSegments, charNames, nil)
+	// Load persisted join offsets if available (nil for older sessions).
+	joinOffsets := loadJoinOffsets(session.AudioDir)
+	merged := transcribe.MergeTranscripts(userSegments, charNames, joinOffsets)
 
 	// Replace existing segments.
 	if err := b.store.DeleteTranscriptSegments(ctx, session.ID); err != nil {
