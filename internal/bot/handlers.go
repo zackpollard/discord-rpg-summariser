@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -153,6 +154,11 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 
 	// Create session directory and DB row.
 	audioDir := fmt.Sprintf("%s/%s/%d", b.config.Storage.AudioDir, guildID, time.Now().Unix())
+	if err := os.MkdirAll(audioDir, 0o755); err != nil {
+		respondEphemeral(s, i, "Failed to create audio directory.")
+		log.Printf("MkdirAll %s: %v", audioDir, err)
+		return
+	}
 	sessionID, err := b.store.CreateSession(ctx, guildID, campaign.ID, userVoiceChannelID, audioDir)
 	if err != nil {
 		respondEphemeral(s, i, "Failed to create session in database.")
