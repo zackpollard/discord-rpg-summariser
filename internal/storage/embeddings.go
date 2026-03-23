@@ -12,7 +12,7 @@ type EmbeddingDoc struct {
 	CampaignID int64
 	DocType    string // "summary", "transcript_chunk", "entity", "quest"
 	DocID      int64
-	SessionID  *int64  // nil if not session-scoped
+	SessionID  *int64 // nil if not session-scoped
 	Title      string
 	Content    string
 	Embedding  []float32

@@ -9,9 +9,9 @@ import (
 // CampaignStats holds all aggregate statistics for a campaign dashboard.
 type CampaignStats struct {
 	// Session stats
-	TotalSessions  int     `json:"total_sessions"`
+	TotalSessions    int     `json:"total_sessions"`
 	TotalDurationMin float64 `json:"total_duration_min"`
-	AvgDurationMin float64 `json:"avg_duration_min"`
+	AvgDurationMin   float64 `json:"avg_duration_min"`
 
 	// Transcript stats
 	TotalSegments int `json:"total_segments"`
@@ -31,9 +31,9 @@ type CampaignStats struct {
 	FailedQuests    int `json:"failed_quests"`
 
 	// Combat stats
-	TotalEncounters int               `json:"total_encounters"`
-	TotalActions    int               `json:"total_actions"`
-	TotalDamage     int               `json:"total_damage"`
+	TotalEncounters  int               `json:"total_encounters"`
+	TotalActions     int               `json:"total_actions"`
+	TotalDamage      int               `json:"total_damage"`
 	CombatActorStats []CombatActorStat `json:"combat_actor_stats"` // per-actor damage/action counts
 
 	// Per-session data (for line charts)

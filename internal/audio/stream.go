@@ -136,8 +136,8 @@ func StreamResample(wavPath string, cb ChunkCallback) error {
 
 	// Chunk accumulation state.
 	var chunkBuf []float32
-	var silenceFrameCount int       // consecutive silent frames
-	var totalInputSamples int64     // cumulative input samples read (for offset tracking)
+	var silenceFrameCount int        // consecutive silent frames
+	var totalInputSamples int64      // cumulative input samples read (for offset tracking)
 	var chunkStartInputSamples int64 // input sample index where the current chunk started
 
 	// flush delivers the current chunk and resets accumulation state.

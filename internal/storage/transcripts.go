@@ -8,13 +8,13 @@ import (
 
 // TranscriptSearchResult holds a single full-text search hit across transcript segments.
 type TranscriptSearchResult struct {
-	SegmentID int64   `json:"segment_id"`
-	SessionID int64   `json:"session_id"`
-	UserID    string  `json:"user_id"`
-	StartTime float64 `json:"start_time"`
-	EndTime   float64 `json:"end_time"`
-	Text      string  `json:"text"`
-	Headline  string  `json:"headline"` // ts_headline with <mark> tags
+	SegmentID int64     `json:"segment_id"`
+	SessionID int64     `json:"session_id"`
+	UserID    string    `json:"user_id"`
+	StartTime float64   `json:"start_time"`
+	EndTime   float64   `json:"end_time"`
+	Text      string    `json:"text"`
+	Headline  string    `json:"headline"` // ts_headline with <mark> tags
 	SessionAt time.Time `json:"session_started_at"`
 }
 

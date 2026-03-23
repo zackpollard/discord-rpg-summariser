@@ -214,9 +214,24 @@ export interface EntityChild {
 	name: string;
 }
 
+export interface EntitySessionAppearance {
+	session_id: number;
+	started_at: string;
+	mention_count: number;
+}
+
+export interface EntityReference {
+	session_id: number;
+	segment_id: number | null;
+	start_time: number;
+	context: string;
+}
+
 export interface EntityDetail extends Entity {
 	notes: EntityNote[];
 	relationships: EntityRelationshipDisplay[];
+	sessions: EntitySessionAppearance[];
+	references: EntityReference[];
 	parent: EntityParent | null;
 	children: EntityChild[];
 }
@@ -385,8 +400,11 @@ export async function fetchRecap(campaignId: number): Promise<CampaignRecap> {
 	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`);
 }
 
-export async function regenerateRecap(campaignId: number): Promise<CampaignRecap> {
-	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`, {
+export async function regenerateRecap(campaignId: number, lastN?: number): Promise<CampaignRecap> {
+	const params = new URLSearchParams();
+	if (lastN !== undefined) params.set('last', String(lastN));
+	const qs = params.toString();
+	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap${qs ? '?' + qs : ''}`, {
 		method: 'POST'
 	});
 }

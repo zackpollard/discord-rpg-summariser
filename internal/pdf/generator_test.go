@@ -688,7 +688,7 @@ func TestGeneratePDF_FromSeedData(t *testing.T) {
 
 	book := &CampaignBook{
 		Campaign: Campaign{
-			Name:        "Storm King\u2019s Thunder",
+			Name: "Storm King\u2019s Thunder",
 			Description: "The giants have gone mad. With the Ordning shattered and King Hekaton missing, " +
 				"five heroes must journey across the Sword Coast to uncover a conspiracy, unite unlikely allies, " +
 				"and confront an ancient dragon to restore order to the world.",

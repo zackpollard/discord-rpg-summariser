@@ -101,18 +101,18 @@ type Quest struct {
 
 // CampaignStats is a lightweight copy of stats for PDF generation.
 type CampaignStats struct {
-	TotalSessions   int
+	TotalSessions    int
 	TotalDurationMin float64
-	AvgDurationMin  float64
-	TotalWords      int
-	TotalQuests     int
-	ActiveQuests    int
-	CompletedQuests int
-	FailedQuests    int
-	TotalEncounters int
-	TotalDamage     int
-	EntityCounts    map[string]int
-	NPCStatusCounts map[string]int
+	AvgDurationMin   float64
+	TotalWords       int
+	TotalQuests      int
+	ActiveQuests     int
+	CompletedQuests  int
+	FailedQuests     int
+	TotalEncounters  int
+	TotalDamage      int
+	EntityCounts     map[string]int
+	NPCStatusCounts  map[string]int
 }
 
 // colour constants (RGB) for the D&D-inspired theme.
@@ -127,12 +127,12 @@ var (
 
 // page dimensions (A4 portrait, mm).
 const (
-	pageW  = 210.0
-	pageH  = 297.0
-	marginL = 20.0
-	marginR = 20.0
-	marginT = 25.0
-	marginB = 25.0
+	pageW    = 210.0
+	pageH    = 297.0
+	marginL  = 20.0
+	marginR  = 20.0
+	marginT  = 25.0
+	marginB  = 25.0
 	contentW = pageW - marginL - marginR
 )
 
@@ -908,18 +908,18 @@ func FromStorage(
 
 	if stats != nil {
 		book.Stats = &CampaignStats{
-			TotalSessions:   stats.TotalSessions,
+			TotalSessions:    stats.TotalSessions,
 			TotalDurationMin: stats.TotalDurationMin,
-			AvgDurationMin:  stats.AvgDurationMin,
-			TotalWords:      stats.TotalWords,
-			TotalQuests:     stats.TotalQuests,
-			ActiveQuests:    stats.ActiveQuests,
-			CompletedQuests: stats.CompletedQuests,
-			FailedQuests:    stats.FailedQuests,
-			TotalEncounters: stats.TotalEncounters,
-			TotalDamage:     stats.TotalDamage,
-			EntityCounts:    stats.EntityCounts,
-			NPCStatusCounts: stats.NPCStatusCounts,
+			AvgDurationMin:   stats.AvgDurationMin,
+			TotalWords:       stats.TotalWords,
+			TotalQuests:      stats.TotalQuests,
+			ActiveQuests:     stats.ActiveQuests,
+			CompletedQuests:  stats.CompletedQuests,
+			FailedQuests:     stats.FailedQuests,
+			TotalEncounters:  stats.TotalEncounters,
+			TotalDamage:      stats.TotalDamage,
+			EntityCounts:     stats.EntityCounts,
+			NPCStatusCounts:  stats.NPCStatusCounts,
 		}
 	}
 

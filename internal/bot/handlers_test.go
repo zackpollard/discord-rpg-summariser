@@ -328,10 +328,10 @@ func TestMergeAndFormatIntegration(t *testing.T) {
 
 func TestFindEntityMentions(t *testing.T) {
 	nameToID := map[string]int64{
-		"Strahd":     1,
-		"Barovia":    2,
-		"Waterdeep":  3,
-		"Sunblade":   4,
+		"Strahd":    1,
+		"Barovia":   2,
+		"Waterdeep": 3,
+		"Sunblade":  4,
 	}
 
 	tests := []struct {
