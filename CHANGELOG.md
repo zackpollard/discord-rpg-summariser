@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.3...v0.1.4) (2026-03-23)
+
+
+### Bug Fixes
+
+* add sherpa-onnx libs and claude-cli to Docker image ([8bcc0d3](https://github.com/zackpollard/discord-rpg-summariser/commit/8bcc0d359dc7eccea0f1c315ebd231e6474fdf83))
+* persist claude-cli credentials via /data volume ([78e78ef](https://github.com/zackpollard/discord-rpg-summariser/commit/78e78eff924a5ebb3f9a0484551f23da685f930c))
+
 ## [0.1.3](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.2...v0.1.3) (2026-03-23)
 
 
