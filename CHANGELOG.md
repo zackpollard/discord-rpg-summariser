@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.6](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.5...v0.1.6) (2026-03-23)
+
+
+### Features
+
+* log version on startup ([5a34435](https://github.com/zackpollard/discord-rpg-summariser/commit/5a344355b612f2b27f358dcd4097efae33e725f8))
+
+
+### Bug Fixes
+
+* pin whisper.cpp to v1.8.4 in CI and Makefile ([6d0138a](https://github.com/zackpollard/discord-rpg-summariser/commit/6d0138a79e027cf7ca466b81eb99b6f025af0c52))
+* voice recording, live transcription, and member sync ([23c4749](https://github.com/zackpollard/discord-rpg-summariser/commit/23c47491afeabe5f6e0af2e919f10fe44b10985e))
+
+
+### Miscellaneous
+
+* add debug logging for voice connection and packet reception ([d62e492](https://github.com/zackpollard/discord-rpg-summariser/commit/d62e492d02f0e2b080a3b5354751ace35aebf250))
+
 ## [0.1.5](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.4...v0.1.5) (2026-03-23)
 
 
