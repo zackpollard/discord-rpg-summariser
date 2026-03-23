@@ -1,8 +1,11 @@
 package voice
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -61,12 +64,13 @@ func NewRecorder(outputDir, guildID string, liveCh chan ChunkReady) *Recorder {
 
 // HandleSpeakingUpdate maps an SSRC to a user ID, creates a UserStream if
 // needed, derives the DAVE receiver key, and flushes any buffered packets.
+// If a user reconnects with a new SSRC, the existing stream is reused and
+// remapped so audio continues in the same WAV file.
 func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint32, userID, displayName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.ssrcToUser[ssrc] = userID
-	r.userToSSRC[userID] = ssrc
 
 	if _, ok := r.activity[userID]; !ok {
 		r.activity[userID] = &UserActivity{UserID: userID, DisplayName: displayName}
@@ -74,10 +78,12 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 		r.activity[userID].DisplayName = displayName
 	}
 
+	// Stream already exists for this exact SSRC — nothing to do.
 	if _, ok := r.streams[ssrc]; ok {
 		return
 	}
 
+	// Derive DAVE receiver key for this user.
 	var daveState *discordgo.ReceiverState
 	if dave := vc.DAVESession(); dave != nil {
 		rs, err := dave.DeriveReceiverKey(userID)
@@ -87,6 +93,30 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 			daveState = rs
 		}
 	}
+
+	// Check if this user already has a stream under a previous SSRC (reconnect).
+	if oldSSRC, ok := r.userToSSRC[userID]; ok && oldSSRC != ssrc {
+		if existing, ok := r.streams[oldSSRC]; ok {
+			// Reuse the existing stream under the new SSRC.
+			existing.daveState = daveState
+			existing.daveActive = false // reset so new DAVE handshake can proceed
+			r.streams[ssrc] = existing
+			delete(r.streams, oldSSRC)
+			r.userToSSRC[userID] = ssrc
+			log.Printf("User %s (%s) reconnected with new SSRC %d (was %d)", displayName, userID, ssrc, oldSSRC)
+
+			if pending, ok := r.pendingPackets[ssrc]; ok {
+				for _, pkt := range pending {
+					existing.HandlePacket(pkt)
+				}
+				r.activity[userID].PacketCount += int64(len(pending))
+				delete(r.pendingPackets, ssrc)
+			}
+			return
+		}
+	}
+
+	r.userToSSRC[userID] = ssrc
 
 	us, err := NewUserStream(userID, r.outputDir, daveState)
 	if err != nil {
@@ -101,12 +131,32 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 	r.streams[ssrc] = us
 	log.Printf("Recording user %s (%s) join_offset=%.1fs", displayName, userID, joinOffset.Seconds())
 
+	// Persist offsets to disk immediately so they survive crashes.
+	r.writeOffsetsLocked()
+
 	if pending, ok := r.pendingPackets[ssrc]; ok {
 		for _, pkt := range pending {
 			us.HandlePacket(pkt) // errors expected for pre-DAVE packets
 		}
 		r.activity[userID].PacketCount += int64(len(pending))
 		delete(r.pendingPackets, ssrc)
+	}
+}
+
+// writeOffsetsLocked writes the current join offsets to offsets.json in the
+// output directory. Caller must hold r.mu.
+func (r *Recorder) writeOffsetsLocked() {
+	offsets := make(map[string]float64, len(r.userJoinOffset))
+	for userID, d := range r.userJoinOffset {
+		offsets[userID] = d.Seconds()
+	}
+	data, err := json.Marshal(offsets)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(r.outputDir, "offsets.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		log.Printf("Failed to write %s: %v", path, err)
 	}
 }
 

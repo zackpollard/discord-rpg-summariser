@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 	"unicode"
 
 	"discord-rpg-summariser/internal/audio"
@@ -26,7 +25,7 @@ import (
 // each user's audio, merges segments chronologically (including any Telegram
 // messages), summarises the transcript, persists everything to the database,
 // and posts a notification.
-func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, userJoinOffsets map[string]time.Duration, telegramMsgs []telegram.Message) {
+func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegramMsgs []telegram.Message) {
 	ctx := context.Background()
 
 	session, err := b.store.GetSession(ctx, sessionID)
@@ -111,16 +110,10 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, userJoin
 		}
 	}
 
-	// Convert join offsets to seconds for transcript merging.
-	joinOffsetSecs := make(map[string]float64, len(userJoinOffsets))
-	for userID, d := range userJoinOffsets {
-		joinOffsetSecs[userID] = d.Seconds()
-	}
-
-	// Persist join offsets alongside the audio files for future reprocessing.
-	if session.AudioDir != "" && len(joinOffsetSecs) > 0 {
-		saveJoinOffsets(session.AudioDir, joinOffsetSecs)
-	}
+	// Load join offsets from the audio directory (written by the recorder as
+	// users join). This is more robust than passing them through memory since
+	// it also works if the bot crashed and the pipeline is re-run.
+	joinOffsetSecs := loadJoinOffsets(session.AudioDir)
 
 	// Merge voice segments with join offsets so late joiners are correctly placed.
 	merged := transcribe.MergeTranscripts(userSegments, charNames, joinOffsetSecs)
@@ -189,19 +182,6 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, userJoin
 }
 
 const offsetsFile = "offsets.json"
-
-// saveJoinOffsets writes per-user join offsets (seconds) to the audio directory.
-func saveJoinOffsets(audioDir string, offsets map[string]float64) {
-	data, err := json.Marshal(offsets)
-	if err != nil {
-		log.Printf("pipeline: marshal join offsets: %v", err)
-		return
-	}
-	path := filepath.Join(audioDir, offsetsFile)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		log.Printf("pipeline: write %s: %v", path, err)
-	}
-}
 
 // loadJoinOffsets reads per-user join offsets from the audio directory.
 // Returns nil if the file doesn't exist (e.g. older sessions).

@@ -239,7 +239,7 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 	respond(s, i, fmt.Sprintf("Recording stopped (session #%d). Processing transcript and summary...", sessionID))
 
 	// Kick off async pipeline.
-	go b.runPipeline(sessionID, result.UserFiles, result.UserJoinOffsets, result.TelegramMsgs)
+	go b.runPipeline(sessionID, result.UserFiles, result.TelegramMsgs)
 }
 
 func (b *Bot) handleSessionStatus(s *discordgo.Session, i *discordgo.InteractionCreate) {
