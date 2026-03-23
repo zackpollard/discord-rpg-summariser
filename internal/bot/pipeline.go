@@ -107,9 +107,18 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 		log.Printf("pipeline: auto-enrolled voice embeddings for %d user(s)", len(userFiles)-len(sharedMicMap))
 	}
 
-	// Resolve character names.
+	// Resolve campaign and DM for transcript labelling.
+	campaign, _ := b.store.GetCampaign(ctx, session.CampaignID)
+	var dmUserID string
+	if campaign != nil && campaign.DMUserID != nil {
+		dmUserID = *campaign.DMUserID
+	}
 	charNames := make(map[string]string, len(userSegments))
 	for userID := range userSegments {
+		if userID == dmUserID {
+			charNames[userID] = "DM"
+			continue
+		}
 		name, err := b.store.GetCharacterName(ctx, userID, session.CampaignID)
 		if err != nil {
 			log.Printf("pipeline: GetCharacterName(%s): %v", userID, err)
@@ -143,9 +152,8 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 		log.Printf("pipeline: InsertSegments: %v", err)
 	}
 
-	// Resolve DM name and campaign for Telegram filtering.
+	// Resolve DM display name for Telegram filtering and LLM prompts.
 	dmName := ""
-	campaign, _ := b.store.GetCampaign(ctx, session.CampaignID)
 	if campaign != nil && campaign.DMUserID != nil {
 		if cn, _ := b.store.GetCharacterName(ctx, *campaign.DMUserID, campaign.ID); cn != "" {
 			dmName = cn
