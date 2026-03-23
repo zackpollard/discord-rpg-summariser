@@ -49,7 +49,8 @@ ENV CGO_ENABLED=1
 ENV CGO_LDFLAGS="-L/app/_deps/whisper.cpp/build/src -L/app/_deps/whisper.cpp/build/ggml/src -lwhisper -lggml -lggml-base -lggml-cpu -lm -lstdc++ -fopenmp"
 ENV CGO_CFLAGS="-I/app/_deps/whisper.cpp/include -I/app/_deps/whisper.cpp/ggml/include"
 
-RUN go build -tags nolibopusfile -o /bot ./cmd/bot/
+ARG VERSION=dev
+RUN go build -tags nolibopusfile -ldflags "-X main.version=${VERSION}" -o /bot ./cmd/bot/
 
 # Stage 3: Runtime
 FROM node:22-slim

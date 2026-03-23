@@ -86,8 +86,10 @@ dev: dev-deps whisper web/node_modules ## Start postgres, Go backend, and Svelte
 
 build: whisper web/build $(BINARY) ## Build Go binary and Svelte app
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+
 $(BINARY): whisper $(shell find cmd internal -name '*.go')
-	go build -tags $(BUILD_TAGS) -o $(BINARY) ./cmd/bot/
+	go build -tags $(BUILD_TAGS) -ldflags "-X main.version=$(VERSION)" -o $(BINARY) ./cmd/bot/
 
 web/build: web/node_modules $(shell find web/src -type f)
 	cd web && npm run build

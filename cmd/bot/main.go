@@ -19,9 +19,14 @@ import (
 	"discord-rpg-summariser/internal/transcribe"
 )
 
+// version is set at build time via -ldflags.
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()
+
+	log.Printf("Discord RPG Summariser %s", version)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
