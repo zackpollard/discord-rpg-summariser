@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.2...v0.1.3) (2026-03-23)
+
+
+### Bug Fixes
+
+* chain Docker build into release workflow ([210bd33](https://github.com/zackpollard/discord-rpg-summariser/commit/210bd33c4b1f2d36818dfddb5b170bb6eca1194c))
+
 ## [0.1.2](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.1...v0.1.2) (2026-03-23)
 
 
