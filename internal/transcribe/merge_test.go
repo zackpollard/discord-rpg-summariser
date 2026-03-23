@@ -22,7 +22,7 @@ func TestMergeTranscripts_SortsChronologically(t *testing.T) {
 		"user-b": "DM",
 	}
 
-	merged := MergeTranscripts(userSegments, characterNames)
+	merged := MergeTranscripts(userSegments, characterNames, nil)
 
 	if len(merged) != 4 {
 		t.Fatalf("expected 4 merged segments, got %d", len(merged))
@@ -55,7 +55,7 @@ func TestMergeTranscripts_CharacterNameFallback(t *testing.T) {
 		"known-user": "Gandalf",
 	}
 
-	merged := MergeTranscripts(userSegments, characterNames)
+	merged := MergeTranscripts(userSegments, characterNames, nil)
 
 	if len(merged) != 2 {
 		t.Fatalf("expected 2 segments, got %d", len(merged))
@@ -70,12 +70,12 @@ func TestMergeTranscripts_CharacterNameFallback(t *testing.T) {
 }
 
 func TestMergeTranscripts_EmptyInput(t *testing.T) {
-	merged := MergeTranscripts(nil, nil)
+	merged := MergeTranscripts(nil, nil, nil)
 	if len(merged) != 0 {
 		t.Fatalf("expected 0 segments for nil input, got %d", len(merged))
 	}
 
-	merged = MergeTranscripts(map[string][]Segment{}, map[string]string{})
+	merged = MergeTranscripts(map[string][]Segment{}, map[string]string{}, nil)
 	if len(merged) != 0 {
 		t.Fatalf("expected 0 segments for empty input, got %d", len(merged))
 	}
@@ -117,5 +117,48 @@ func TestFormatTranscript_LargeTimestamp(t *testing.T) {
 
 	if !strings.Contains(output, "[01:02:03]") {
 		t.Errorf("expected timestamp [01:02:03], got %q", output)
+	}
+}
+
+func TestMergeTranscripts_JoinOffsets(t *testing.T) {
+	userSegments := map[string][]Segment{
+		"early": {
+			{StartTime: 0.0, EndTime: 5.0, Text: "I was here from the start."},
+		},
+		"late": {
+			{StartTime: 0.0, EndTime: 3.0, Text: "I joined late."},
+		},
+	}
+
+	characterNames := map[string]string{
+		"early": "Alice",
+		"late":  "Bob",
+	}
+
+	joinOffsets := map[string]float64{
+		"early": 0.0,
+		"late":  30.0, // joined 30 seconds after session start
+	}
+
+	merged := MergeTranscripts(userSegments, characterNames, joinOffsets)
+
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(merged))
+	}
+
+	// Early user's segment should stay at 0s.
+	if merged[0].StartTime != 0.0 {
+		t.Errorf("expected early user at 0.0s, got %.1fs", merged[0].StartTime)
+	}
+	if merged[0].CharacterName != "Alice" {
+		t.Errorf("expected Alice first, got %q", merged[0].CharacterName)
+	}
+
+	// Late user's segment should be shifted to 30s.
+	if merged[1].StartTime != 30.0 {
+		t.Errorf("expected late user at 30.0s, got %.1fs", merged[1].StartTime)
+	}
+	if merged[1].EndTime != 33.0 {
+		t.Errorf("expected late user end at 33.0s, got %.1fs", merged[1].EndTime)
 	}
 }

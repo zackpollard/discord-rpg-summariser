@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"discord-rpg-summariser/internal/config"
 	"discord-rpg-summariser/internal/diarize"
@@ -378,14 +379,15 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 		if err := b.store.EndSession(ctx, sessionID); err != nil {
 			log.Printf("EndSession error (auto-stop): %v", err)
 		}
-		go b.runPipeline(sessionID, result.UserFiles, result.TelegramMsgs)
+		go b.runPipeline(sessionID, result.UserFiles, result.UserJoinOffsets, result.TelegramMsgs)
 	}
 }
 
 // stopResult bundles the results of stopping a recording session.
 type stopResult struct {
-	UserFiles    map[string]string
-	TelegramMsgs []telegram.Message
+	UserFiles       map[string]string
+	UserJoinOffsets map[string]time.Duration
+	TelegramMsgs   []telegram.Message
 }
 
 // stopRecording stops the recorder, Telegram listener, and disconnects from
@@ -402,6 +404,7 @@ func (b *Bot) stopRecording() stopResult {
 			log.Printf("Error stopping recorder: %v", err)
 		}
 		result.UserFiles = b.recorder.UserFiles()
+		result.UserJoinOffsets = b.recorder.UserJoinOffsets()
 		b.recorder = nil
 	}
 	if b.telegramListener != nil {

@@ -6,6 +6,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"discord-rpg-summariser/internal/audio"
@@ -22,7 +23,7 @@ import (
 // each user's audio, merges segments chronologically (including any Telegram
 // messages), summarises the transcript, persists everything to the database,
 // and posts a notification.
-func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegramMsgs []telegram.Message) {
+func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, userJoinOffsets map[string]time.Duration, telegramMsgs []telegram.Message) {
 	ctx := context.Background()
 
 	session, err := b.store.GetSession(ctx, sessionID)
@@ -107,8 +108,14 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 		}
 	}
 
-	// Merge voice segments.
-	merged := transcribe.MergeTranscripts(userSegments, charNames)
+	// Convert join offsets to seconds for transcript merging.
+	joinOffsetSecs := make(map[string]float64, len(userJoinOffsets))
+	for userID, d := range userJoinOffsets {
+		joinOffsetSecs[userID] = d.Seconds()
+	}
+
+	// Merge voice segments with join offsets so late joiners are correctly placed.
+	merged := transcribe.MergeTranscripts(userSegments, charNames, joinOffsetSecs)
 
 	// Persist transcript segments (store only user_id; character names are
 	// resolved from mappings at display time so they stay up to date).

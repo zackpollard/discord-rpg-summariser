@@ -301,7 +301,7 @@ func TestMergeAndFormatIntegration(t *testing.T) {
 		"user2": "Frodo",
 	}
 
-	merged := transcribe.MergeTranscripts(userSegments, charNames)
+	merged := transcribe.MergeTranscripts(userSegments, charNames, nil)
 	if len(merged) != 3 {
 		t.Fatalf("expected 3 merged segments, got %d", len(merged))
 	}

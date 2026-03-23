@@ -36,7 +36,7 @@ func silentPCM(n int) []int16 {
 
 func TestLiveBufferFlushesAtStride(t *testing.T) {
 	ch := make(chan ChunkReady, 16)
-	lb := NewLiveBuffer("user1", "Thordak", time.Now(), ch)
+	lb := NewLiveBuffer("user1", "Thordak", time.Now(), 0, ch)
 
 	// Add exactly strideSamples of loud audio. This should trigger a flush.
 	lb.AddSamples(constantPCM(5000, strideSamples))
@@ -59,7 +59,7 @@ func TestLiveBufferFlushesAtStride(t *testing.T) {
 
 func TestLiveBufferOverlap(t *testing.T) {
 	ch := make(chan ChunkReady, 16)
-	lb := NewLiveBuffer("user1", "Thordak", time.Now(), ch)
+	lb := NewLiveBuffer("user1", "Thordak", time.Now(), 0, ch)
 
 	// First flush: add strideSamples to trigger.
 	lb.AddSamples(constantPCM(5000, strideSamples))
@@ -83,7 +83,7 @@ func TestLiveBufferOverlap(t *testing.T) {
 
 func TestLiveBufferSilenceFlush(t *testing.T) {
 	ch := make(chan ChunkReady, 16)
-	lb := NewLiveBuffer("user1", "Thordak", time.Now(), ch)
+	lb := NewLiveBuffer("user1", "Thordak", time.Now(), 0, ch)
 
 	// Add minFlushSamples of loud audio (not enough for stride).
 	lb.AddSamples(constantPCM(5000, minFlushSamples))
@@ -108,7 +108,7 @@ func TestLiveBufferSilenceFlush(t *testing.T) {
 
 func TestLiveBufferMinFlush(t *testing.T) {
 	ch := make(chan ChunkReady, 16)
-	lb := NewLiveBuffer("user1", "Thordak", time.Now(), ch)
+	lb := NewLiveBuffer("user1", "Thordak", time.Now(), 0, ch)
 
 	// Add less than minFlushSamples of audio, then silence.
 	lb.AddSamples(constantPCM(5000, minFlushSamples-frameSamples))
@@ -129,7 +129,7 @@ func TestLiveBufferMinFlush(t *testing.T) {
 
 	// Reset and test with truly insufficient audio.
 	ch2 := make(chan ChunkReady, 16)
-	lb2 := NewLiveBuffer("user2", "Bard", time.Now(), ch2)
+	lb2 := NewLiveBuffer("user2", "Bard", time.Now(), 0, ch2)
 
 	// Add only a tiny amount of audio, well under minFlushSamples.
 	lb2.AddSamples(constantPCM(5000, frameSamples))
@@ -149,7 +149,7 @@ func TestLiveBufferMinFlush(t *testing.T) {
 
 func TestLiveBufferFlushOnClose(t *testing.T) {
 	ch := make(chan ChunkReady, 16)
-	lb := NewLiveBuffer("user1", "Thordak", time.Now(), ch)
+	lb := NewLiveBuffer("user1", "Thordak", time.Now(), 0, ch)
 
 	// Add enough audio for Flush() to emit (>= minFlushSamples).
 	lb.AddSamples(constantPCM(5000, minFlushSamples))
@@ -196,7 +196,7 @@ func TestIsSilent(t *testing.T) {
 
 func TestLiveBufferChunkSeq(t *testing.T) {
 	ch := make(chan ChunkReady, 16)
-	lb := NewLiveBuffer("user1", "Thordak", time.Now(), ch)
+	lb := NewLiveBuffer("user1", "Thordak", time.Now(), 0, ch)
 
 	// Trigger three flushes.
 	for i := 0; i < 3; i++ {
@@ -218,7 +218,7 @@ func TestLiveBufferChunkSeq(t *testing.T) {
 
 func TestLiveBufferStartOffset(t *testing.T) {
 	ch := make(chan ChunkReady, 16)
-	lb := NewLiveBuffer("user1", "Thordak", time.Now(), ch)
+	lb := NewLiveBuffer("user1", "Thordak", time.Now(), 0, ch)
 
 	// First flush: strideSamples of new audio, no overlap yet.
 	lb.AddSamples(constantPCM(5000, strideSamples))

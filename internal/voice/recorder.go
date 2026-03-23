@@ -35,6 +35,7 @@ type Recorder struct {
 	userToSSRC     map[string]uint32
 	pendingPackets map[uint32][]*discordgo.Packet
 	activity       map[string]*UserActivity
+	userJoinOffset map[string]time.Duration // userID -> offset from session start to first audio
 	outputDir      string
 	guildID        string
 	done           chan struct{}
@@ -49,6 +50,7 @@ func NewRecorder(outputDir, guildID string, liveCh chan ChunkReady) *Recorder {
 		userToSSRC:     make(map[string]uint32),
 		pendingPackets: make(map[uint32][]*discordgo.Packet),
 		activity:       make(map[string]*UserActivity),
+		userJoinOffset: make(map[string]time.Duration),
 		outputDir:      outputDir,
 		guildID:        guildID,
 		done:           make(chan struct{}),
@@ -91,11 +93,13 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 		log.Printf("Failed to create stream for user %s: %v", userID, err)
 		return
 	}
+	joinOffset := time.Since(r.sessionStart)
+	r.userJoinOffset[userID] = joinOffset
 	if r.liveCh != nil {
-		us.liveBuf = NewLiveBuffer(userID, displayName, r.sessionStart, r.liveCh)
+		us.liveBuf = NewLiveBuffer(userID, displayName, r.sessionStart, joinOffset, r.liveCh)
 	}
 	r.streams[ssrc] = us
-	log.Printf("Recording user %s (%s)", displayName, userID)
+	log.Printf("Recording user %s (%s) join_offset=%.1fs", displayName, userID, joinOffset.Seconds())
 
 	if pending, ok := r.pendingPackets[ssrc]; ok {
 		for _, pkt := range pending {
@@ -198,6 +202,19 @@ func (r *Recorder) UserFiles() map[string]string {
 		files[r.ssrcToUser[ssrc]] = us.FilePath()
 	}
 	return files
+}
+
+// UserJoinOffsets returns userID → duration from session start to first audio
+// for each recorded user. Used to adjust transcript timestamps during merge.
+func (r *Recorder) UserJoinOffsets() map[string]time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	offsets := make(map[string]time.Duration, len(r.userJoinOffset))
+	for k, v := range r.userJoinOffset {
+		offsets[k] = v
+	}
+	return offsets
 }
 
 // Activity returns a snapshot of per-user voice activity.

@@ -37,15 +37,17 @@ type LiveBuffer struct {
 	silenceCount int
 	totalNew     int64 // total NEW samples (excluding overlap)
 	sessionStart time.Time
+	joinOffset   time.Duration // offset from session start to this user's first audio
 	chunkSeq     int
 	out          chan<- ChunkReady
 }
 
-func NewLiveBuffer(userID, displayName string, sessionStart time.Time, out chan<- ChunkReady) *LiveBuffer {
+func NewLiveBuffer(userID, displayName string, sessionStart time.Time, joinOffset time.Duration, out chan<- ChunkReady) *LiveBuffer {
 	return &LiveBuffer{
 		userID:       userID,
 		displayName:  displayName,
 		sessionStart: sessionStart,
+		joinOffset:   joinOffset,
 		buf:          make([]int16, 0, windowSamples),
 		out:          out,
 	}
@@ -84,11 +86,11 @@ func (lb *LiveBuffer) flush() {
 	chunk := make([]int16, len(lb.buf))
 	copy(chunk, lb.buf)
 
-	// Offset is based on where this chunk starts in the session
-	// The overlap part started earlier, so subtract overlap duration
+	// Offset is based on where this chunk starts in the session.
+	// Add the user's join offset so timestamps are session-relative.
 	newBeforeThis := lb.totalNew
 	overlapDur := time.Duration(len(lb.overlap)) * time.Second / 48000
-	offset := time.Duration(newBeforeThis)*time.Second/48000 - overlapDur
+	offset := lb.joinOffset + time.Duration(newBeforeThis)*time.Second/48000 - overlapDur
 	if offset < 0 {
 		offset = 0
 	}

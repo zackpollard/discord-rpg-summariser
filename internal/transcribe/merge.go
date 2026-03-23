@@ -13,21 +13,25 @@ type UserSegment struct {
 	Segment
 }
 
-// MergeTranscripts takes per-user segments and character name mappings, merges
-// all segments chronologically (sorted by StartTime), and resolves
-// UserID -> CharacterName using the provided map. If no mapping exists for a
-// user, the character name falls back to "User-{userID}".
-func MergeTranscripts(userSegments map[string][]Segment, characterNames map[string]string) []UserSegment {
+// MergeTranscripts takes per-user segments, character name mappings, and
+// per-user join offsets (seconds from session start to first audio). It adjusts
+// each user's segment timestamps by their join offset, merges all segments
+// chronologically (sorted by StartTime), and resolves UserID -> CharacterName.
+func MergeTranscripts(userSegments map[string][]Segment, characterNames map[string]string, joinOffsets map[string]float64) []UserSegment {
 	var merged []UserSegment
 
 	for userID, segments := range userSegments {
 		name := characterNames[userID] // empty string if no mapping
+		offset := joinOffsets[userID]  // 0 if not present
 
 		for _, seg := range segments {
+			adjusted := seg
+			adjusted.StartTime += offset
+			adjusted.EndTime += offset
 			merged = append(merged, UserSegment{
 				UserID:        userID,
 				CharacterName: name,
-				Segment:       seg,
+				Segment:       adjusted,
 			})
 		}
 	}
