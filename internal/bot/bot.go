@@ -79,7 +79,11 @@ func (b *Bot) SyncGuildMembers() {
 	after := ""
 	for {
 		batch, err := b.session.GuildMembers(guildID, after, 1000)
-		if err != nil || len(batch) == 0 {
+		if err != nil {
+			log.Printf("Failed to fetch guild members (after=%q): %v", after, err)
+			break
+		}
+		if len(batch) == 0 {
 			break
 		}
 		all = append(all, batch...)
@@ -87,6 +91,10 @@ func (b *Bot) SyncGuildMembers() {
 		if len(batch) < 1000 {
 			break
 		}
+	}
+
+	if len(all) == 0 {
+		log.Printf("Warning: fetched 0 guild members — check that Server Members Intent is enabled in the Discord Developer Portal")
 	}
 
 	var users []storage.DiscordUser
@@ -120,6 +128,7 @@ func (b *Bot) SyncGuildMembers() {
 func (b *Bot) GuildMembers() []MemberInfo {
 	users, err := b.store.GetDiscordUsers(context.Background(), b.config.Discord.GuildID)
 	if err != nil {
+		log.Printf("Failed to get guild members from DB: %v", err)
 		return nil
 	}
 	members := make([]MemberInfo, len(users))
@@ -137,6 +146,7 @@ func (b *Bot) GuildMembers() []MemberInfo {
 func (b *Bot) ResolveUsername(userID string) string {
 	u, err := b.store.GetDiscordUser(context.Background(), userID, b.config.Discord.GuildID)
 	if err != nil {
+		log.Printf("Failed to resolve username for %s: %v", userID, err)
 		return userID
 	}
 	return u.DisplayName
