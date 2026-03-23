@@ -15,9 +15,10 @@ discord:
 transcribe:
   engine: "whisper"    # "whisper" or "parakeet" (NVIDIA Parakeet TDT 0.6B v3)
   model: "base"        # whisper model: tiny, base, small, medium, large-v3 (ignored for parakeet)
-  model_dir: "models"  # directory to store downloaded models
+  model_dir: "models"  # directory to store downloaded models (Docker default: /data/models)
   language: "en"        # whisper language (parakeet auto-detects from 25 European languages)
   threads: 4
+  gpu: false           # GPU acceleration (experimental)
 
 # Speaker diarization for shared microphones (auto-downloads models on first use)
 # diarize:
@@ -32,7 +33,7 @@ llm:
 
 storage:
   database_url: "postgres://rpg:rpg@localhost:5432/rpg_summariser?sslmode=disable"
-  audio_dir: "data/audio"
+  audio_dir: "data/audio"  # Docker default: /data/audio
 
 web:
   listen_addr: ":8080"

@@ -57,9 +57,9 @@ COPY --from=frontend /app/web/build web/build
 COPY migrations/ migrations/
 
 # Create directories for data
-RUN mkdir -p data/audio models
+RUN mkdir -p /data/audio /data/models
 
 EXPOSE 8080
 
 ENTRYPOINT ["./bot"]
-CMD ["-config", "/app/config.yaml"]
+CMD ["-config", "/data/config.yaml"]

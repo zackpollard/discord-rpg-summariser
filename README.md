@@ -7,11 +7,19 @@ A Discord bot that records D&D voice sessions, transcribes them with whisper.cpp
 - **Voice Recording** — Records per-user audio from Discord voice channels with DAVE E2EE decryption
 - **Live Transcription** — Sliding-window transcription streamed to the web panel in real time
 - **Session Summaries** — LLM-generated narrative summaries with key events
-- **Knowledge Base** — Automatic extraction of NPCs, places, items, organisations, and events
+- **Knowledge Base** — Automatic extraction of NPCs, places, items, organisations, and events with status tracking (alive/dead) and location hierarchy
 - **Quest Tracker** — Quests are extracted from sessions and tracked across the campaign
+- **Combat Encounters** — Automatic detection and extraction of combat encounters from sessions
 - **Campaign Timeline** — Unified chronological view of sessions, entities, and quest milestones
-- **Lore Q&A** — Ask natural language questions about your campaign and get answers from the knowledge base
+- **Entity Timeline** — Swimlane chart visualising entity involvement across sessions
+- **Campaign Stats** — Dashboard with Chart.js visualisations of session metrics
+- **Relationship Graph** — Interactive D3.js force graph showing entity relationships
+- **PDF Campaign Book** — Export your campaign as a D&D-style PDF book
+- **Lore Q&A** — RAG-powered semantic search using pgvector embeddings
 - **Story Recap** — Generate a narrative recap of your entire campaign
+- **Transcript Search** — Full-text search across all session transcripts
+- **Audio Playback** — Play session recordings with synchronised transcript highlighting
+- **Discord OAuth2** — Optional authentication for the web panel via Discord login
 - **Telegram Integration** — Capture DM text messages from a Telegram group chat during sessions
 - **Web Panel** — Dark-themed D&D UI for browsing all campaign data
 
@@ -48,7 +56,7 @@ A Discord bot that records D&D voice sessions, transcribes them with whisper.cpp
 
 - **Go** backend with CGO bindings to whisper.cpp and opus
 - **SvelteKit** frontend (static adapter, served by the Go server)
-- **PostgreSQL** for storage
+- **PostgreSQL** with pgvector for storage and semantic search
 - **Claude CLI** or **Ollama** for LLM summarisation and extraction
 
 ## Prerequisites
@@ -158,17 +166,21 @@ Two speech-to-text engines are supported:
 cp config.example.yaml config.yaml
 # Edit config.yaml with your settings, then:
 docker compose -f docker-compose.prod.yml up -d
+# Copy your config into the data volume:
+docker compose -f docker-compose.prod.yml cp config.yaml bot:/data/config.yaml
 ```
 
-The web panel will be available at `http://localhost:8080`.
+The bot stores all runtime data (config, audio recordings, models) under `/data` in the container. The production compose file uses a single `botdata` volume for this. The web panel will be available at `http://localhost:8080`.
 
 ### Use the pre-built image
+
+Pre-built images are published to GHCR on every release via [release-please](https://github.com/googleapis/release-please). Images are tagged with the semver version (e.g., `0.2.0`, `0.2`) and `latest`.
 
 ```bash
 docker pull ghcr.io/zackpollard/discord-rpg-summariser:latest
 ```
 
-Or reference it directly in `docker-compose.prod.yml`.
+Or pin to a specific version in `docker-compose.prod.yml`.
 
 ## Configuration
 
@@ -178,7 +190,10 @@ All configuration is in `config.yaml`. Environment variables override config fil
 |---------------------|-------------|-------------|
 | `DISCORD_TOKEN` | `discord.token` | Discord bot token |
 | `DISCORD_GUILD_ID` | `discord.guild_id` | Discord server ID |
+| `DISCORD_CLIENT_ID` | `discord.client_id` | Discord OAuth2 client ID (optional, for web auth) |
+| `DISCORD_CLIENT_SECRET` | `discord.client_secret` | Discord OAuth2 client secret (optional, for web auth) |
 | `DATABASE_URL` | `storage.database_url` | PostgreSQL connection string |
+| `WEB_SESSION_SECRET` | `web.session_secret` | Cookie encryption secret (auto-generated if empty) |
 | `TELEGRAM_BOT_TOKEN` | `telegram.bot_token` | Telegram bot token (optional) |
 
 ### LLM Provider
@@ -264,9 +279,13 @@ make lint           # run Go vet and Svelte check
 cmd/bot/              Go entrypoint
 internal/
   api/                HTTP API handlers
+  auth/               Discord OAuth2 authentication and session management
+  audio/              Audio utilities (mixing, resampling)
   bot/                Discord bot, command handlers, pipeline
   config/             Configuration loading
   diarize/            Speaker diarization (sherpa-onnx)
+  embed/              Vector embeddings (Ollama) for RAG semantic search
+  pdf/                D&D-style PDF campaign book generation
   storage/            PostgreSQL storage layer
   summarise/          LLM prompts and clients (Claude CLI, Ollama)
   telegram/           Telegram Bot API client

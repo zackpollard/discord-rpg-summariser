@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
       POSTGRES_USER: rpg
@@ -23,13 +23,10 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
-      - audio:/app/data/audio
-      - models:/app/models
+      - botdata:/data
     environment:
       DATABASE_URL: postgres://rpg:rpg@postgres:5432/rpg_summariser?sslmode=disable
 
 volumes:
   pgdata:
-  audio:
-  models:
+  botdata:
