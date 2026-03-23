@@ -74,8 +74,9 @@ COPY --from=backend /bot .
 COPY --from=frontend /app/web/build web/build
 COPY migrations/ migrations/
 
-# Create directories for data
-RUN mkdir -p /data/audio /data/models
+# Create directories for data and link claude-cli config to /data for persistence
+RUN mkdir -p /data/audio /data/models /data/claude \
+    && ln -s /data/claude /root/.claude
 
 EXPOSE 8080
 
