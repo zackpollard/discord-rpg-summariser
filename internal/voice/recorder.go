@@ -97,6 +97,12 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 	// Check if this user already has a stream under a previous SSRC (reconnect).
 	if oldSSRC, ok := r.userToSSRC[userID]; ok && oldSSRC != ssrc {
 		if existing, ok := r.streams[oldSSRC]; ok {
+			// Insert silence for the duration the user was disconnected.
+			if a, ok := r.activity[userID]; ok && !a.LastPacketAt.IsZero() {
+				gap := time.Since(a.LastPacketAt)
+				existing.InsertSilenceDuration(gap)
+			}
+
 			// Reuse the existing stream under the new SSRC.
 			existing.daveState = daveState
 			existing.daveActive = false // reset so new DAVE handshake can proceed

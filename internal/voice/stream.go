@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"gopkg.in/hraban/opus.v2"
@@ -168,6 +169,24 @@ func (us *UserStream) insertSilenceGap(timestamp uint32) {
 		gap = maxSilenceGap
 	}
 	us.wav.Write(make([]int16, gap))
+}
+
+// InsertSilenceDuration writes the given duration of silence into the WAV file
+// and live buffer. Used to fill the gap when a user disconnects and reconnects.
+func (us *UserStream) InsertSilenceDuration(d time.Duration) {
+	samples := int(d.Seconds() * sampleRate)
+	if samples <= 0 {
+		return
+	}
+	silence := make([]int16, samples)
+	us.wav.Write(silence)
+	if us.liveBuf != nil {
+		us.liveBuf.AddSamples(silence)
+	}
+	// Reset RTP timestamp tracking so the next packet doesn't trigger
+	// insertSilenceGap with a stale lastTS.
+	us.hasFirstTS = false
+	log.Printf("Inserted %.1fs silence for user %s (reconnect gap)", d.Seconds(), us.userID)
 }
 
 func (us *UserStream) Close() error {
