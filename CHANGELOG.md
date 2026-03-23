@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.7](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.6...v0.1.7) (2026-03-23)
+
+
+### Features
+
+* improve summarization prompt for DM NPC voice attribution ([4a4d41e](https://github.com/zackpollard/discord-rpg-summariser/commit/4a4d41ef7fd81280168d1e660bee8e1b2dfafe21))
+
+
+### Bug Fixes
+
+* adjust transcript timestamps for users who join late ([c803882](https://github.com/zackpollard/discord-rpg-summariser/commit/c8038824576d9c61c6adc097e81521ef6466ca5a))
+* include stdout in claude CLI error messages ([3d56407](https://github.com/zackpollard/discord-rpg-summariser/commit/3d5640727bc80fb03a29eb56cf38865ffbfe603f))
+* insert correct silence gap on user disconnect/reconnect ([674bfad](https://github.com/zackpollard/discord-rpg-summariser/commit/674bfad51f1877388c757407c2e3e6fac9952692))
+* label DM as "DM" in transcript instead of character name ([fe23d7c](https://github.com/zackpollard/discord-rpg-summariser/commit/fe23d7caa9dcce53ee202fbd2984f4031b3ff5a0))
+* make notification link URL configurable ([24ddd07](https://github.com/zackpollard/discord-rpg-summariser/commit/24ddd07112b0e2774a1015578934da44ac227915))
+* persist join offsets to offsets.json for reprocessing ([37c5503](https://github.com/zackpollard/discord-rpg-summariser/commit/37c550334f7ff8e9e47a6aded0226bb1ad8c8689))
+* write offsets.json on user join, handle reconnects ([885133c](https://github.com/zackpollard/discord-rpg-summariser/commit/885133c0b87a24a39248c3bc191303b9e0ab554b))
+
+
+### Performance
+
+* lazy-load transcription model to free ~22GB idle memory ([9c9938b](https://github.com/zackpollard/discord-rpg-summariser/commit/9c9938b7f8e8d24b595ec430daa630becc3f4b57))
+
+
+### Miscellaneous
+
+* add script to generate offsets.json from WAV file timestamps ([e870be9](https://github.com/zackpollard/discord-rpg-summariser/commit/e870be940ab29006ef2e3114bffaea1962802d69))
+
 ## [0.1.6](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.5...v0.1.6) (2026-03-23)
 
 
