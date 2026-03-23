@@ -201,6 +201,7 @@ func NewBot(cfg *config.Config, store *storage.Store, transcriber transcribe.Tra
 	}
 
 	dg.Identify.Intents = discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMembers |
 		discordgo.IntentsGuildVoiceStates |
 		discordgo.IntentsGuildMessages
 

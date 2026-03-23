@@ -50,8 +50,11 @@ func (s *Server) setupRoutes() {
 	s.handle("DELETE /api/characters/{userId}", s.handleDeleteCharacter)
 
 	s.handle("GET /api/members", s.handleListMembers)
-	s.handle("GET /api/voice-activity", s.handleVoiceActivity)
-	s.handle("GET /api/live-transcript", s.handleLiveTranscript)
+
+	// Live data endpoints — not protected by auth since EventSource
+	// doesn't support credentials and these are read-only streams.
+	s.mux.HandleFunc("GET /api/voice-activity", s.handleVoiceActivity)
+	s.mux.HandleFunc("GET /api/live-transcript", s.handleLiveTranscript)
 }
 
 // handle registers a route, wrapping the handler with auth middleware when

@@ -96,6 +96,7 @@ type VoiceConnection struct {
 	pendingReWelcome bool
 
 	voiceSpeakingUpdateHandlers []VoiceSpeakingUpdateHandler
+	bufferedSpeakingUpdates     []*VoiceSpeakingUpdate // buffered until first handler is added
 
 	seqAck int // for heartbeat and resume
 }
@@ -193,12 +194,20 @@ func (v *VoiceConnection) DAVESession() *DAVESession {
 }
 
 // AddHandler adds a Handler for VoiceSpeakingUpdate events.
+// Any speaking updates that arrived before a handler was registered are
+// replayed immediately so that early speakers are not missed.
 func (v *VoiceConnection) AddHandler(h VoiceSpeakingUpdateHandler) {
 	v.Cond.L.Lock()
-	defer v.Cond.L.Unlock()
-
 	v.voiceSpeakingUpdateHandlers = append(v.voiceSpeakingUpdateHandlers, h)
+	buffered := v.bufferedSpeakingUpdates
+	v.bufferedSpeakingUpdates = nil
 	v.Cond.Broadcast()
+	v.Cond.L.Unlock()
+
+	// Replay any speaking updates that arrived before the handler was registered.
+	for _, vs := range buffered {
+		h(v, vs)
+	}
 }
 
 // VoiceSpeakingUpdate is a struct for a VoiceSpeakingUpdate event.
@@ -663,17 +672,24 @@ func (v *VoiceConnection) onEvent(ctx context.Context, binary bool, message []by
 			return
 
 		case 5:
-			if len(v.voiceSpeakingUpdateHandlers) == 0 {
-				return
-			}
-
 			voiceSpeakingUpdate := &VoiceSpeakingUpdate{}
 			if err := json.Unmarshal(e.RawData, voiceSpeakingUpdate); err != nil {
 				v.log(LogError, "OP5 unmarshall error, %s, %s", err, string(e.RawData))
 				return
 			}
 
-			for _, h := range v.voiceSpeakingUpdateHandlers {
+			v.Cond.L.Lock()
+			if len(v.voiceSpeakingUpdateHandlers) == 0 {
+				v.bufferedSpeakingUpdates = append(v.bufferedSpeakingUpdates, voiceSpeakingUpdate)
+				v.Cond.L.Unlock()
+				v.log(LogInformational, "OP5 buffered speaking update for user %s (no handlers yet)", voiceSpeakingUpdate.UserID)
+				return
+			}
+			handlers := make([]VoiceSpeakingUpdateHandler, len(v.voiceSpeakingUpdateHandlers))
+			copy(handlers, v.voiceSpeakingUpdateHandlers)
+			v.Cond.L.Unlock()
+
+			for _, h := range handlers {
 				h(v, voiceSpeakingUpdate)
 			}
 

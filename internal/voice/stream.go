@@ -127,6 +127,8 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	}
 	if us.liveBuf != nil {
 		us.liveBuf.AddSamples(pcm)
+	} else {
+		log.Printf("Warning: no LiveBuffer for user %s, live transcription disabled", us.userID)
 	}
 	return nil
 }
