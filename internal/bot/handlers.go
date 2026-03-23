@@ -167,12 +167,14 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	}
 
 	// Join voice channel.
+	log.Printf("Joining voice channel %s in guild %s", userVoiceChannelID, guildID)
 	vc, err := s.ChannelVoiceJoin(ctx, guildID, userVoiceChannelID, false, false)
 	if err != nil {
 		respondEphemeral(s, i, "Failed to join your voice channel.")
 		log.Printf("VoiceJoin error: %v", err)
 		return
 	}
+	log.Printf("Voice connection established (OpusRecv=%v)", vc.OpusRecv != nil)
 
 	liveCh := make(chan voice.ChunkReady, 16)
 	rec := voice.NewRecorder(audioDir, guildID, liveCh)

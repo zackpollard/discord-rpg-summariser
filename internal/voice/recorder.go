@@ -134,7 +134,10 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 
 // Start registers handlers and begins reading voice packets.
 func (r *Recorder) Start(vc *discordgo.VoiceConnection, nameResolver NameResolver) {
+	log.Printf("Recorder starting (OpusRecv=%v)", vc.OpusRecv != nil)
+
 	vc.AddHandler(func(vc *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
+		log.Printf("Speaking update: user=%s ssrc=%d", vs.UserID, vs.SSRC)
 		name := ""
 		if nameResolver != nil {
 			name = nameResolver(vs.UserID)
@@ -143,15 +146,22 @@ func (r *Recorder) Start(vc *discordgo.VoiceConnection, nameResolver NameResolve
 	})
 
 	go func() {
+		var pktCount int64
 		for {
 			select {
 			case <-r.done:
+				log.Printf("Recorder stopped after %d packets", pktCount)
 				return
 			case pkt, ok := <-vc.OpusRecv:
 				if !ok {
+					log.Printf("OpusRecv channel closed after %d packets", pktCount)
 					return
 				}
 				if pkt != nil {
+					pktCount++
+					if pktCount == 1 {
+						log.Printf("First voice packet received (SSRC=%d)", pkt.SSRC)
+					}
 					r.HandleVoicePacket(pkt)
 				}
 			}
