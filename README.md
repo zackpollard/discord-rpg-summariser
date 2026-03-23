@@ -193,6 +193,7 @@ All configuration is in `config.yaml`. Environment variables override config fil
 | `DISCORD_CLIENT_ID` | `discord.client_id` | Discord OAuth2 client ID (optional, for web auth) |
 | `DISCORD_CLIENT_SECRET` | `discord.client_secret` | Discord OAuth2 client secret (optional, for web auth) |
 | `DATABASE_URL` | `storage.database_url` | PostgreSQL connection string |
+| `WEB_BASE_URL` | `web.base_url` | Public URL for notification links (defaults to localhost) |
 | `WEB_SESSION_SECRET` | `web.session_secret` | Cookie encryption secret (auto-generated if empty) |
 | `TELEGRAM_BOT_TOKEN` | `telegram.bot_token` | Telegram bot token (optional) |
 

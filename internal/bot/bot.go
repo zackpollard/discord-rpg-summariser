@@ -211,10 +211,19 @@ func NewBot(cfg *config.Config, store *storage.Store, transcriber transcribe.Tra
 		config:      cfg,
 		transcriber: transcriber,
 		summariser:  summariser,
-		webBaseURL:  "http://localhost" + cfg.Web.ListenAddr,
+		webBaseURL:  resolveBaseURL(cfg),
 	}
 
 	return b, nil
+}
+
+// resolveBaseURL returns the public web URL for notification links.
+// Uses web.base_url from config if set, otherwise falls back to localhost.
+func resolveBaseURL(cfg *config.Config) string {
+	if cfg.Web.BaseURL != "" {
+		return strings.TrimRight(cfg.Web.BaseURL, "/")
+	}
+	return "http://localhost" + cfg.Web.ListenAddr
 }
 
 // getDiarizer returns the speaker diarizer, initializing it on first use.

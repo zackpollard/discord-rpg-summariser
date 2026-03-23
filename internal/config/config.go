@@ -58,6 +58,7 @@ type TelegramConfig struct {
 
 type WebConfig struct {
 	ListenAddr    string `yaml:"listen_addr"`
+	BaseURL       string `yaml:"base_url"`
 	SessionSecret string `yaml:"session_secret"`
 }
 
@@ -104,6 +105,9 @@ func Load(path string) (*Config, error) {
 	}
 	if clientSecret := os.Getenv("DISCORD_CLIENT_SECRET"); clientSecret != "" {
 		cfg.Discord.ClientSecret = clientSecret
+	}
+	if baseURL := os.Getenv("WEB_BASE_URL"); baseURL != "" {
+		cfg.Web.BaseURL = baseURL
 	}
 	if sessionSecret := os.Getenv("WEB_SESSION_SECRET"); sessionSecret != "" {
 		cfg.Web.SessionSecret = sessionSecret

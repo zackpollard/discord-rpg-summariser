@@ -39,4 +39,5 @@ storage:
 
 web:
   listen_addr: ":8080"
+  # base_url: "https://rpg.example.com"  # public URL for notification links (defaults to http://localhost:<port>)
   # session_secret: "your-random-secret-here"  # for cookie encryption (auto-generated if empty)
