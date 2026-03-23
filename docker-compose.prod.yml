@@ -8,6 +8,7 @@ services:
       POSTGRES_DB: rpg_summariser
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-prod-db.sql:/docker-entrypoint-initdb.d/init-prod-db.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U rpg -d rpg_summariser"]
       interval: 5s
