@@ -49,7 +49,7 @@ whisper: $(WHISPER_LIB)/libwhisper.so ## Build whisper.cpp library
 $(WHISPER_LIB)/libwhisper.so:
 	@if [ ! -d "$(WHISPER_DIR)" ]; then \
 		echo "Cloning whisper.cpp..."; \
-		git clone --depth 1 https://github.com/ggerganov/whisper.cpp "$(WHISPER_DIR)"; \
+		git clone --depth 1 --branch v1.8.4 https://github.com/ggerganov/whisper.cpp "$(WHISPER_DIR)"; \
 	fi
 	cmake -B "$(WHISPER_BUILD)" -S "$(WHISPER_DIR)" \
 		-DCMAKE_BUILD_TYPE=Release \
