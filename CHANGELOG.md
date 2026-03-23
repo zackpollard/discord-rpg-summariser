@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.1...v0.1.2) (2026-03-23)
+
+
+### Bug Fixes
+
+* trigger Docker build on release event instead of tag push ([e7740dc](https://github.com/zackpollard/discord-rpg-summariser/commit/e7740dc6a5f0d3128657760eb7c2bbb98a46b7ad))
+
 ## [0.1.1](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.0...v0.1.1) (2026-03-23)
 
 
