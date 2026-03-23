@@ -4,17 +4,19 @@ import "strings"
 
 // BuildPrompt constructs the full LLM prompt for summarising a D&D session
 // transcript. If previousSummary is non-empty it is included as context.
-// dmName identifies the Dungeon Master in the transcript (may be empty).
+// dmName is unused (kept for API compatibility) — the DM is always labelled
+// "DM" in the transcript.
 func BuildPrompt(transcript string, previousSummary string, dmName string) string {
 	var b strings.Builder
 
 	b.WriteString("You are an expert summariser for tabletop RPG sessions (Dungeons & Dragons 5th Edition).\n\n")
 
-	if dmName != "" {
-		b.WriteString("The Dungeon Master for this session is: " + dmName + "\n")
-		b.WriteString("When " + dmName + " speaks, they are narrating the world, voicing NPCs, and describing events — not acting as a player character.\n")
-		b.WriteString("Attribute NPC dialogue and world descriptions to the NPCs/narrator, not to " + dmName + " personally.\n\n")
-	}
+	b.WriteString("Lines attributed to \"DM\" are the Dungeon Master speaking. The DM performs multiple roles:\n")
+	b.WriteString("- Narrating the world, describing scenes, environments, and events\n")
+	b.WriteString("- Voicing NPCs in character (e.g., when the DM says \"I am Lord Strahd\", attribute this to Strahd, not the DM)\n")
+	b.WriteString("- Adjudicating rules, describing combat outcomes, and asking players for rolls\n")
+	b.WriteString("When summarising, attribute NPC dialogue to the NPC who is speaking, not to \"the DM\".\n")
+	b.WriteString("Use context clues to identify which NPC the DM is voicing (tone shifts, name references, direct speech patterns).\n\n")
 
 	if previousSummary != "" {
 		b.WriteString("Previously:\n")
