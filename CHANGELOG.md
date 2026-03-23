@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.5](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.4...v0.1.5) (2026-03-23)
+
+
+### Bug Fixes
+
+* add logging for silent failures in guild member sync ([a1527f0](https://github.com/zackpollard/discord-rpg-summariser/commit/a1527f070baa5aa970445090d5f8d66f9aa83c1d))
+* create session audio directory before recording ([0a4e582](https://github.com/zackpollard/discord-rpg-summariser/commit/0a4e582162fcee29da5172444012aaf32ac978ba))
+* pre-create pgvector extension via init script ([fa37cdf](https://github.com/zackpollard/discord-rpg-summariser/commit/fa37cdfec6179e19b832b9bfc9d9e306dec2b2b7))
+
 ## [0.1.4](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.3...v0.1.4) (2026-03-23)
 
 
