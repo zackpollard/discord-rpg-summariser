@@ -15,6 +15,12 @@ type Transcriber interface {
 	// prompt provides context from previous chunks for continuity (engine-dependent).
 	TranscribeChunk(ctx context.Context, samples []float32, timeOffset time.Duration, prompt string) ([]Segment, error)
 
+	// SetVocabulary provides campaign-specific words (character names, places,
+	// etc.) to bias the transcription model toward recognising them correctly.
+	// For Whisper this enriches the initial prompt; for Parakeet it configures
+	// hot-word boosting via modified beam search.
+	SetVocabulary(words []string)
+
 	// Close releases engine resources.
 	Close() error
 }

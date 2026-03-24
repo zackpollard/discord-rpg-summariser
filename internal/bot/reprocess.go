@@ -217,6 +217,8 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 	}
 	defer b.releaseTranscriber()
 
+	transcriber.SetVocabulary(b.gatherCampaignVocabulary(ctx, session.CampaignID))
+
 	// Load shared mic config for this campaign.
 	sharedMics, _ := b.store.GetSharedMics(ctx, session.CampaignID)
 	sharedMicMap := make(map[string]storage.SharedMic, len(sharedMics))

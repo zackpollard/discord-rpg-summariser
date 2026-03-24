@@ -28,10 +28,11 @@ type Segment struct {
 
 // WhisperTranscriber performs speech-to-text using whisper.cpp in-process.
 type WhisperTranscriber struct {
-	model    whisper.Model
-	language string
-	threads  int
-	mu       sync.Mutex // whisper is not thread-safe
+	model      whisper.Model
+	language   string
+	threads    int
+	vocabulary []string   // campaign-specific words for prompt biasing
+	mu         sync.Mutex // whisper is not thread-safe
 }
 
 // NewWhisperTranscriber loads the whisper model. If the model file doesn't exist,
@@ -62,6 +63,21 @@ func (t *WhisperTranscriber) Close() error {
 	return t.model.Close()
 }
 
+// SetVocabulary stores campaign-specific words to include in the initial
+// prompt, biasing Whisper toward recognising them correctly.
+func (t *WhisperTranscriber) SetVocabulary(words []string) {
+	t.vocabulary = words
+}
+
+// buildInitialPrompt constructs a Whisper initial prompt that includes
+// campaign-specific vocabulary when available.
+func (t *WhisperTranscriber) buildInitialPrompt() string {
+	if len(t.vocabulary) == 0 {
+		return "Dungeons and Dragons RPG session with fantasy names and places"
+	}
+	return "Dungeons and Dragons RPG session. Names and terms: " + strings.Join(t.vocabulary, ", ") + "."
+}
+
 // TranscribeFile transcribes a 48kHz WAV file and returns timestamped segments.
 // It streams the file in silence-delimited chunks to avoid loading the entire
 // file into memory, and passes the last chunk's text as a prompt for continuity.
@@ -70,7 +86,7 @@ func (t *WhisperTranscriber) TranscribeFile(ctx context.Context, wavPath string)
 	var lastText string
 
 	err := audio.StreamResample(wavPath, func(samples []float32, offsetSeconds float64) error {
-		prompt := "Dungeons and Dragons RPG session with fantasy names and places"
+		prompt := t.buildInitialPrompt()
 		if lastText != "" {
 			prompt = lastText
 		}
@@ -110,7 +126,7 @@ func (t *WhisperTranscriber) TranscribeChunk(ctx context.Context, samples []floa
 	if prompt != "" {
 		wctx.SetInitialPrompt(prompt)
 	} else {
-		wctx.SetInitialPrompt("Dungeons and Dragons RPG session with fantasy names and places")
+		wctx.SetInitialPrompt(t.buildInitialPrompt())
 	}
 
 	if err := wctx.Process(samples, nil, nil, nil); err != nil {

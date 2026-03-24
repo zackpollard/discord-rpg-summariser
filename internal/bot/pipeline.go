@@ -51,6 +51,11 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	}
 	defer b.releaseTranscriber()
 
+	// Bias the transcriber toward campaign-specific vocabulary (character
+	// names, entity names, quest names) so the ASR model is more likely to
+	// recognise them correctly.
+	transcriber.SetVocabulary(b.gatherCampaignVocabulary(ctx, session.CampaignID))
+
 	// Transcribe each user's WAV, with diarization for shared mics.
 	b.store.UpdateSessionStatus(ctx, sessionID, "transcribing")
 
@@ -196,6 +201,40 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 
 	// Generate vector embeddings for RAG (non-fatal on error).
 	b.generateEmbeddings(ctx, session, sessionID, merged, result.Summary, dmName)
+}
+
+// gatherCampaignVocabulary collects campaign-specific proper nouns for
+// transcription biasing: character names, entity names, and quest names.
+func (b *Bot) gatherCampaignVocabulary(ctx context.Context, campaignID int64) []string {
+	seen := make(map[string]struct{})
+	var words []string
+	add := func(name string) {
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		words = append(words, name)
+	}
+
+	charMappings, _ := b.store.GetCharacterMappings(ctx, campaignID)
+	for _, m := range charMappings {
+		add(m.CharacterName)
+	}
+
+	entities, _ := b.store.ListEntities(ctx, campaignID, "", "", 1000, 0)
+	for _, e := range entities {
+		add(e.Name)
+	}
+
+	quests, _ := b.store.ListQuests(ctx, campaignID, "")
+	for _, q := range quests {
+		add(q.Name)
+	}
+
+	return words
 }
 
 const offsetsFile = "offsets.json"

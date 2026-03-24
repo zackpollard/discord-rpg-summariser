@@ -34,6 +34,7 @@ const (
 type ParakeetTranscriber struct {
 	recognizer *sherpa.OfflineRecognizer
 	threads    int
+	modelBase  string // path to extracted model directory
 	mu         sync.Mutex
 }
 
@@ -74,6 +75,7 @@ func NewParakeetTranscriber(modelDir string, threads int) (*ParakeetTranscriber,
 	return &ParakeetTranscriber{
 		recognizer: recognizer,
 		threads:    threads,
+		modelBase:  modelBase,
 	}, nil
 }
 
@@ -84,6 +86,71 @@ func (p *ParakeetTranscriber) Close() error {
 		p.recognizer = nil
 	}
 	return nil
+}
+
+// SetVocabulary configures hot-word boosting for campaign-specific terms.
+// This requires a bpe.vocab file in the model directory (see
+// scripts/generate_bpe_vocab.py). When bpe.vocab is absent, this is a no-op.
+func (p *ParakeetTranscriber) SetVocabulary(words []string) {
+	if len(words) == 0 {
+		return
+	}
+
+	bpeVocabPath := filepath.Join(p.modelBase, "bpe.vocab")
+	if _, err := os.Stat(bpeVocabPath); os.IsNotExist(err) {
+		log.Printf("parakeet: bpe.vocab not found at %s — hot words disabled (run scripts/generate_bpe_vocab.py)", bpeVocabPath)
+		return
+	}
+
+	// Write hotwords file.
+	hotwordsPath := filepath.Join(p.modelBase, "hotwords.txt")
+	var buf strings.Builder
+	for _, w := range words {
+		fmt.Fprintf(&buf, "%s :2.5\n", w)
+	}
+	if err := os.WriteFile(hotwordsPath, []byte(buf.String()), 0o644); err != nil {
+		log.Printf("parakeet: failed to write hotwords file: %v", err)
+		return
+	}
+
+	// Recreate recognizer with modified beam search + hot words.
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.recognizer != nil {
+		sherpa.DeleteOfflineRecognizer(p.recognizer)
+	}
+
+	config := &sherpa.OfflineRecognizerConfig{}
+	config.FeatConfig.SampleRate = 16000
+	config.FeatConfig.FeatureDim = 80
+	config.ModelConfig.Transducer.Encoder = filepath.Join(p.modelBase, parakeetEncoder)
+	config.ModelConfig.Transducer.Decoder = filepath.Join(p.modelBase, parakeetDecoder)
+	config.ModelConfig.Transducer.Joiner = filepath.Join(p.modelBase, parakeetJoiner)
+	config.ModelConfig.Tokens = filepath.Join(p.modelBase, parakeetTokens)
+	config.ModelConfig.NumThreads = p.threads
+	config.ModelConfig.Provider = "cpu"
+	config.ModelConfig.ModelType = parakeetModelType
+	config.ModelConfig.ModelingUnit = "bpe"
+	config.ModelConfig.BpeVocab = bpeVocabPath
+	config.DecodingMethod = "modified_beam_search"
+	config.HotwordsFile = hotwordsPath
+	config.HotwordsScore = 2.0
+
+	recognizer := sherpa.NewOfflineRecognizer(config)
+	if recognizer == nil {
+		log.Printf("parakeet: failed to create recognizer with hot words — falling back to greedy search")
+		// Recreate without hot words.
+		config.DecodingMethod = "greedy_search"
+		config.ModelConfig.ModelingUnit = ""
+		config.ModelConfig.BpeVocab = ""
+		config.HotwordsFile = ""
+		recognizer = sherpa.NewOfflineRecognizer(config)
+	} else {
+		log.Printf("parakeet: hot words enabled with %d terms", len(words))
+	}
+
+	p.recognizer = recognizer
 }
 
 // TranscribeFile transcribes a 48kHz WAV file and returns timestamped segments.
