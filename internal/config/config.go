@@ -40,10 +40,11 @@ type DiarizeConfig struct {
 }
 
 type LLMConfig struct {
-	Provider       string `yaml:"provider"`
-	OllamaURL      string `yaml:"ollama_url"`
-	OllamaModel    string `yaml:"ollama_model"`
-	EmbeddingModel string `yaml:"embedding_model"`
+	Provider          string `yaml:"provider"`
+	OllamaURL         string `yaml:"ollama_url"`
+	OllamaModel       string `yaml:"ollama_model"`
+	EmbeddingModel    string `yaml:"embedding_model"`
+	EmbeddingModelDir string `yaml:"embedding_model_dir"`
 }
 
 type StorageConfig struct {
@@ -77,9 +78,10 @@ func Load(path string) (*Config, error) {
 			Threads:  4,
 		},
 		LLM: LLMConfig{
-			Provider:       "claude-cli",
-			OllamaURL:      "http://localhost:11434",
-			EmbeddingModel: "nomic-embed-text",
+			Provider:          "claude-cli",
+			OllamaURL:         "http://localhost:11434",
+			EmbeddingModel:    "nomic-embed-text",
+			EmbeddingModelDir: "models/embedding",
 		},
 		Storage: StorageConfig{
 			DatabaseURL: "postgres://localhost:5432/rpg_summariser?sslmode=disable",

@@ -9,6 +9,8 @@ require (
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/k2-fsa/sherpa-onnx-go v1.12.30
 	github.com/pgvector/pgvector-go v0.3.0
+	github.com/yalue/onnxruntime_go v1.22.0
+	golang.org/x/text v0.23.0
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -29,5 +31,4 @@ require (
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
 )

@@ -92,12 +92,16 @@ func main() {
 		discordBot.SetTelegramClient(telegram.NewClient(cfg.Telegram.BotToken))
 	}
 
-	// Set up embedder for RAG if Ollama URL and embedding model are configured.
+	// Set up in-process ONNX embedding model.
 	var embedder embed.Embedder
-	if cfg.LLM.OllamaURL != "" && cfg.LLM.EmbeddingModel != "" {
-		embedder = embed.NewOllamaEmbedder(cfg.LLM.OllamaURL, cfg.LLM.EmbeddingModel)
+	onnxEmb, err := embed.NewOnnxEmbedder(cfg.LLM.EmbeddingModelDir, cfg.Transcribe.Threads)
+	if err != nil {
+		log.Printf("Warning: embedding model unavailable: %v", err)
+	} else {
+		embedder = onnxEmb
 		discordBot.SetEmbedder(embedder)
-		log.Printf("Embedding model enabled: %s via %s", cfg.LLM.EmbeddingModel, cfg.LLM.OllamaURL)
+		defer onnxEmb.Close()
+		log.Println("Embedding model enabled: in-process ONNX (nomic-embed-text-v1.5)")
 	}
 
 	srv.SetVoiceActivityProvider(discordBot)
