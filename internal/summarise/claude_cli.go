@@ -21,7 +21,7 @@ func NewClaudeCLI() *ClaudeCLI {
 // JSON response into result. This eliminates duplication across all extraction
 // methods which follow the identical pattern: build prompt, run CLI, parse JSON.
 func (c *ClaudeCLI) runPrompt(ctx context.Context, prompt string, result any) error {
-	cmd := exec.CommandContext(ctx, "claude", "--print")
+	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "opus", "--effort", "high")
 	cmd.Stdin = strings.NewReader(prompt)
 
 	var stdout, stderr bytes.Buffer
