@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.9](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.8...v0.1.9) (2026-03-24)
+
+
+### Features
+
+* add campaign settings page with game system field ([c9b0793](https://github.com/zackpollard/discord-rpg-summariser/commit/c9b07930dc606b11b47c881dce88f9a20ad5b79f))
+* add session deletion and entity renaming ([2ce34cf](https://github.com/zackpollard/discord-rpg-summariser/commit/2ce34cff20cdcb76593438a3848ccae54bd36647))
+* bias transcription toward campaign-specific vocabulary ([5d43208](https://github.com/zackpollard/discord-rpg-summariser/commit/5d4320894ecef4b54061fc2050f1834f9e0355c0))
+* replace Ollama embeddings with in-process ONNX inference ([db5577e](https://github.com/zackpollard/discord-rpg-summariser/commit/db5577e62ab9675b8acdb5457021b21d05f0cc7c))
+* use Claude Opus with high effort for summarisation ([4eff550](https://github.com/zackpollard/discord-rpg-summariser/commit/4eff550b70d8f53f9fca8449946ad7fa07eafa7c))
+
+
+### Bug Fixes
+
+* create /data dirs and claude symlink at runtime, not build time ([1917823](https://github.com/zackpollard/discord-rpg-summariser/commit/19178231e1658ad9fabae8d7996c73acd1cd3919))
+
 ## [0.1.8](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.7...v0.1.8) (2026-03-24)
 
 
