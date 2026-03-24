@@ -188,6 +188,7 @@ export interface Campaign {
 	guild_id: string;
 	name: string;
 	description: string;
+	game_system: string;
 	is_active: boolean;
 	dm_user_id: string | null;
 	created_at: string;
@@ -276,6 +277,19 @@ export async function createCampaign(name: string, description: string): Promise
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ name, description })
+	});
+}
+
+export async function updateCampaign(id: number, data: {
+	name: string;
+	description: string;
+	game_system: string;
+	dm_user_id?: string | null;
+}): Promise<Campaign> {
+	return request<Campaign>(`/api/campaigns/${id}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(data)
 	});
 }
 

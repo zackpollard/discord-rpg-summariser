@@ -54,6 +54,9 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	// Bias the transcriber toward campaign-specific vocabulary (character
 	// names, entity names, quest names) so the ASR model is more likely to
 	// recognise them correctly.
+	if campaign, _ := b.store.GetCampaign(ctx, session.CampaignID); campaign != nil {
+		transcriber.SetGameSystem(campaign.GameSystem)
+	}
 	transcriber.SetVocabulary(b.gatherCampaignVocabulary(ctx, session.CampaignID))
 
 	// Transcribe each user's WAV, with diarization for shared mics.

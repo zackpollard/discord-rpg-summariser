@@ -38,6 +38,7 @@
 		<a href="/campaigns/{campaignId}/recap" class="nav-tab" class:active={$page.url.pathname.includes('/recap')}>Recap</a>
 		<a href="/campaigns/{campaignId}/search" class="nav-tab" class:active={$page.url.pathname.includes('/search')}>Search</a>
 		<a href="/campaigns/{campaignId}/stats" class="nav-tab" class:active={$page.url.pathname.includes('/stats')}>Stats</a>
+		<a href="/campaigns/{campaignId}/settings" class="nav-tab" class:active={$page.url.pathname.includes('/settings')}>Settings</a>
 	</nav>
 
 	{@render children()}

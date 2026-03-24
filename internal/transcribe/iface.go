@@ -21,6 +21,10 @@ type Transcriber interface {
 	// hot-word boosting via modified beam search.
 	SetVocabulary(words []string)
 
+	// SetGameSystem sets the RPG system name (e.g. "Dungeons & Dragons",
+	// "Pathfinder 2e") used in the transcription prompt context.
+	SetGameSystem(system string)
+
 	// Close releases engine resources.
 	Close() error
 }

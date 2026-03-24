@@ -31,8 +31,9 @@ type WhisperTranscriber struct {
 	model      whisper.Model
 	language   string
 	threads    int
-	vocabulary []string   // campaign-specific words for prompt biasing
-	mu         sync.Mutex // whisper is not thread-safe
+	vocabulary []string // campaign-specific words for prompt biasing
+	gameSystem string   // RPG system name for prompt context
+	mu         sync.Mutex
 }
 
 // NewWhisperTranscriber loads the whisper model. If the model file doesn't exist,
@@ -69,13 +70,22 @@ func (t *WhisperTranscriber) SetVocabulary(words []string) {
 	t.vocabulary = words
 }
 
+// SetGameSystem sets the RPG system name for prompt context.
+func (t *WhisperTranscriber) SetGameSystem(system string) {
+	t.gameSystem = system
+}
+
 // buildInitialPrompt constructs a Whisper initial prompt that includes
-// campaign-specific vocabulary when available.
+// the game system and campaign-specific vocabulary when available.
 func (t *WhisperTranscriber) buildInitialPrompt() string {
-	if len(t.vocabulary) == 0 {
-		return "Dungeons and Dragons RPG session with fantasy names and places"
+	system := t.gameSystem
+	if system == "" {
+		system = "Dungeons and Dragons"
 	}
-	return "Dungeons and Dragons RPG session. Names and terms: " + strings.Join(t.vocabulary, ", ") + "."
+	if len(t.vocabulary) == 0 {
+		return system + " RPG session with fantasy names and places"
+	}
+	return system + " RPG session. Names and terms: " + strings.Join(t.vocabulary, ", ") + "."
 }
 
 // TranscribeFile transcribes a 48kHz WAV file and returns timestamped segments.

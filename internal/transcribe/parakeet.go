@@ -88,6 +88,10 @@ func (p *ParakeetTranscriber) Close() error {
 	return nil
 }
 
+// SetGameSystem is a no-op for Parakeet (game system context is not used
+// by the transducer decoder).
+func (p *ParakeetTranscriber) SetGameSystem(system string) {}
+
 // SetVocabulary configures hot-word boosting for campaign-specific terms.
 // This requires a bpe.vocab file in the model directory (see
 // scripts/generate_bpe_vocab.py). When bpe.vocab is absent, this is a no-op.

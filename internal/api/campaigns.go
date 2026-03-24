@@ -16,6 +16,7 @@ type campaignResponse struct {
 	GuildID          string     `json:"guild_id"`
 	Name             string     `json:"name"`
 	Description      string     `json:"description"`
+	GameSystem       string     `json:"game_system"`
 	IsActive         bool       `json:"is_active"`
 	DMUserID         *string    `json:"dm_user_id"`
 	Recap            string     `json:"recap"`
@@ -26,8 +27,8 @@ type campaignResponse struct {
 func toCampaignResponse(c *storage.Campaign) campaignResponse {
 	return campaignResponse{
 		ID: c.ID, GuildID: c.GuildID, Name: c.Name,
-		Description: c.Description, IsActive: c.IsActive,
-		DMUserID: c.DMUserID, Recap: c.Recap,
+		Description: c.Description, GameSystem: c.GameSystem,
+		IsActive: c.IsActive, DMUserID: c.DMUserID, Recap: c.Recap,
 		RecapGeneratedAt: c.RecapGeneratedAt, CreatedAt: c.CreatedAt,
 	}
 }
@@ -92,6 +93,53 @@ func (s *Server) handleGetCampaign(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "campaign not found")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, "failed to get campaign")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toCampaignResponse(campaign))
+}
+
+func (s *Server) handleUpdateCampaign(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Name        string  `json:"name"`
+		Description string  `json:"description"`
+		GameSystem  string  `json:"game_system"`
+		DMUserID    *string `json:"dm_user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	if err := s.store.UpdateCampaign(r.Context(), id, req.Name, req.Description, req.GameSystem); err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "campaign not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update campaign")
+		return
+	}
+
+	// Update DM if provided.
+	if req.DMUserID != nil {
+		if err := s.store.SetCampaignDM(r.Context(), id, *req.DMUserID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update DM")
+			return
+		}
+	}
+
+	campaign, err := s.store.GetCampaign(r.Context(), id)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get campaign")
 		return
 	}

@@ -19,6 +19,7 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/campaigns", s.handleListCampaigns)
 	s.handle("POST /api/campaigns", s.handleCreateCampaign)
 	s.handle("GET /api/campaigns/{id}", s.handleGetCampaign)
+	s.handle("PATCH /api/campaigns/{id}", s.handleUpdateCampaign)
 	s.handle("PUT /api/campaigns/{id}/active", s.handleSetActiveCampaign)
 	s.handle("GET /api/campaigns/{id}/entities", s.handleListEntities)
 	s.handle("GET /api/campaigns/{id}/quests", s.handleListQuests)
