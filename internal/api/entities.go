@@ -250,6 +250,36 @@ func (s *Server) handleGetEntity(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleRenameEntity(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	if err := s.store.RenameEntity(r.Context(), id, body.Name); err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "entity not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to rename entity")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleMergeEntity(w http.ResponseWriter, r *http.Request) {
 	keepID, ok := parsePathID(w, r, "id")
 	if !ok {

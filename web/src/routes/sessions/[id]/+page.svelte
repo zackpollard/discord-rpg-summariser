@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchSession, fetchTranscript, fetchSessionCombat, reprocessSession, sessionAudioURL, type Session, type TranscriptSegment, type CombatEncounter } from '$lib/api';
+	import { goto } from '$app/navigation';
+	import { fetchSession, fetchTranscript, fetchSessionCombat, reprocessSession, deleteSession, sessionAudioURL, type Session, type TranscriptSegment, type CombatEncounter } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
@@ -14,6 +15,8 @@
 	let error = $state<string | null>(null);
 	let reprocessing = $state(false);
 	let reprocessMessage = $state<string | null>(null);
+	let showDeleteConfirm = $state(false);
+	let deleting = $state(false);
 	let audioCurrentTime = $state(0);
 	let audioPlayer = $state<AudioPlayer | null>(null);
 	let transcriptScrollEl = $state<HTMLDivElement | null>(null);
@@ -95,6 +98,19 @@
 			skill: 'action-skill'
 		};
 		return classes[type] || '';
+	}
+
+	async function handleDelete() {
+		if (!session) return;
+		deleting = true;
+		try {
+			await deleteSession(session.id);
+			goto(`/campaigns/${session.campaign_id}/sessions`);
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to delete session';
+			deleting = false;
+			showDeleteConfirm = false;
+		}
 	}
 
 	async function handleReprocess(retranscribe: boolean) {
@@ -228,10 +244,29 @@
 			>
 				{reprocessing ? 'Processing...' : 'Re-run Full Pipeline (incl. Transcription)'}
 			</button>
+			<button
+				class="btn btn-danger"
+				disabled={deleting}
+				onclick={() => showDeleteConfirm = true}
+			>
+				Delete Session
+			</button>
 			{#if reprocessMessage}
 				<span class="reprocess-message">{reprocessMessage}</span>
 			{/if}
 		</div>
+
+		{#if showDeleteConfirm}
+			<div class="delete-confirm-box">
+				<p>Are you sure you want to permanently delete <strong>Session #{session.id}</strong>? This will remove all transcripts, notes, combat data, and embeddings associated with this session. This cannot be undone.</p>
+				<div class="delete-confirm-actions">
+					<button class="btn btn-danger-solid" disabled={deleting} onclick={handleDelete}>
+						{deleting ? 'Deleting...' : 'Yes, delete'}
+					</button>
+					<button class="btn btn-secondary" onclick={() => showDeleteConfirm = false}>Cancel</button>
+				</div>
+			</div>
+		{/if}
 
 		{#if summaryParagraphs.length > 0}
 			<section class="card">
@@ -430,6 +465,40 @@
 	.btn-secondary:hover:not(:disabled) {
 		background: var(--border);
 		border-color: var(--text-muted);
+	}
+	.btn-danger {
+		background: var(--bg-surface);
+		color: #f87171;
+		border-color: rgba(239, 68, 68, 0.3);
+	}
+	.btn-danger:hover:not(:disabled) {
+		background: rgba(185, 28, 28, 0.2);
+		border-color: rgba(239, 68, 68, 0.5);
+	}
+	.btn-danger-solid {
+		background: rgba(185, 28, 28, 0.6);
+		color: #fca5a5;
+		border-color: rgba(185, 28, 28, 0.8);
+	}
+	.btn-danger-solid:hover:not(:disabled) {
+		background: rgba(185, 28, 28, 0.8);
+	}
+	.delete-confirm-box {
+		background: rgba(185, 28, 28, 0.1);
+		border: 1px solid rgba(185, 28, 28, 0.3);
+		border-radius: var(--radius);
+		padding: 0.75rem 1rem;
+		margin-bottom: 1.25rem;
+	}
+	.delete-confirm-box p {
+		color: var(--text-primary);
+		font-size: 0.85rem;
+		margin-bottom: 0.5rem;
+		line-height: 1.5;
+	}
+	.delete-confirm-actions {
+		display: flex;
+		gap: 0.5rem;
 	}
 	.reprocess-message {
 		font-size: 0.85rem;

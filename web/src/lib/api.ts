@@ -96,6 +96,10 @@ export async function fetchTranscript(sessionId: number): Promise<TranscriptSegm
 	return request<TranscriptSegment[]>(`/api/sessions/${sessionId}/transcript`);
 }
 
+export async function deleteSession(sessionId: number): Promise<void> {
+	await request<void>(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+}
+
 export async function reprocessSession(sessionId: number, retranscribe: boolean = false): Promise<void> {
 	await request<void>(`/api/sessions/${sessionId}/reprocess`, {
 		method: 'POST',
@@ -290,6 +294,14 @@ export async function fetchEntities(campaignId: number, params?: { type?: string
 
 export async function fetchEntity(id: number): Promise<EntityDetail> {
 	return request<EntityDetail>(`/api/entities/${id}`);
+}
+
+export async function renameEntity(id: number, name: string): Promise<void> {
+	await request<void>(`/api/entities/${id}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ name })
+	});
 }
 
 export async function mergeEntity(keepId: number, mergeId: number): Promise<void> {

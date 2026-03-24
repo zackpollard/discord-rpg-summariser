@@ -89,3 +89,21 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, toSessionResponse(sess))
 }
+
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	id, ok := parsePathID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	if err := s.store.DeleteSession(r.Context(), id); err != nil {
+		if err == pgx.ErrNoRows {
+			writeError(w, http.StatusNotFound, "session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to delete session")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

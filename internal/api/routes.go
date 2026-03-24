@@ -35,11 +35,13 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/campaigns/{id}/pdf", s.handleGetCampaignPDF)
 
 	s.handle("GET /api/entities/{id}", s.handleGetEntity)
+	s.handle("PATCH /api/entities/{id}", s.handleRenameEntity)
 	s.handle("POST /api/entities/{id}/merge", s.handleMergeEntity)
 	s.handle("GET /api/quests/{id}", s.handleGetQuest)
 
 	s.handle("GET /api/sessions", s.handleListSessions)
 	s.handle("GET /api/sessions/{id}", s.handleGetSession)
+	s.handle("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	s.handle("GET /api/sessions/{id}/transcript", s.handleGetTranscript)
 	s.handle("POST /api/sessions/{id}/reprocess", s.handleReprocessSession)
 	s.handle("GET /api/sessions/{id}/combat", s.handleGetSessionCombat)

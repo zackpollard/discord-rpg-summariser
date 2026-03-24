@@ -199,6 +199,22 @@ func (s *Store) EnsurePCEntities(ctx context.Context, campaignID int64, characte
 	return result, nil
 }
 
+// RenameEntity updates an entity's name. Returns an error if the new name
+// conflicts with an existing entity of the same type in the campaign.
+func (s *Store) RenameEntity(ctx context.Context, id int64, newName string) error {
+	tag, err := s.Pool.Exec(ctx,
+		`UPDATE entities SET name = $1, updated_at = NOW() WHERE id = $2`,
+		newName, id,
+	)
+	if err != nil {
+		return fmt.Errorf("rename entity: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
 // GetEntityByName finds an entity by campaign, name and type.
 func (s *Store) GetEntityByName(ctx context.Context, campaignID int64, name, typ string) (*Entity, error) {
 	var e Entity

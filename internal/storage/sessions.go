@@ -146,6 +146,21 @@ func (s *Store) CleanupStaleSessions(ctx context.Context) (int64, error) {
 	return tag.RowsAffected(), nil
 }
 
+// DeleteSession permanently removes a session and all associated data.
+// Child rows (transcript_segments, telegram_messages, entity_notes,
+// quest_updates, entity_references, combat_encounters, embeddings) are
+// removed via ON DELETE CASCADE. Audio files are NOT removed here.
+func (s *Store) DeleteSession(ctx context.Context, id int64) error {
+	tag, err := s.Pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) GetActiveSession(ctx context.Context, guildID string) (*Session, error) {
 	row := s.Pool.QueryRow(ctx,
 		`SELECT `+sessionColumns+` FROM sessions WHERE guild_id = $1 AND status = 'recording' LIMIT 1`, guildID,

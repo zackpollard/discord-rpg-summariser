@@ -1,12 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchEntity, fetchEntities, mergeEntity, type EntityDetail, type Entity } from '$lib/api';
+	import { fetchEntity, fetchEntities, mergeEntity, renameEntity, type EntityDetail, type Entity } from '$lib/api';
 
 	let entity = $state<EntityDetail | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let expandedSessions = $state<Set<number>>(new Set());
+
+	// Rename state
+	let editingName = $state(false);
+	let editName = $state('');
+	let renameLoading = $state(false);
+	let renameError = $state<string | null>(null);
 
 	// Merge state
 	let showMergePanel = $state(false);
@@ -47,6 +53,36 @@
 			next.add(sessionId);
 		}
 		expandedSessions = next;
+	}
+
+	function startRename() {
+		if (!entity) return;
+		editName = entity.name;
+		editingName = true;
+		renameError = null;
+	}
+
+	async function submitRename() {
+		if (!entity || !editName.trim() || editName.trim() === entity.name) {
+			editingName = false;
+			return;
+		}
+		renameLoading = true;
+		renameError = null;
+		try {
+			await renameEntity(entity.id, editName.trim());
+			entity = await fetchEntity(entity.id);
+			editingName = false;
+		} catch (e) {
+			renameError = e instanceof Error ? e.message : 'Failed to rename entity';
+		} finally {
+			renameLoading = false;
+		}
+	}
+
+	function handleRenameKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') submitRename();
+		if (e.key === 'Escape') editingName = false;
 	}
 
 	async function openMergePanel() {
@@ -129,7 +165,19 @@
 		<div class="error-box">{error}</div>
 	{:else if entity}
 		<div class="entity-header">
-			<h1>{entity.name}</h1>
+			{#if editingName}
+				<input
+					class="rename-input"
+					bind:value={editName}
+					onkeydown={handleRenameKeydown}
+					onblur={submitRename}
+					disabled={renameLoading}
+					autofocus
+				/>
+			{:else}
+				<h1 class="entity-name-editable" ondblclick={startRename} title="Double-click to rename">{entity.name}</h1>
+				<button class="rename-btn" onclick={startRename} title="Rename">&#9998;</button>
+			{/if}
 			<span class={typeBadgeClass(entity.type)}>{entity.type}</span>
 			{#if entity.status === 'dead'}
 				<span class="status-badge status-badge-dead">Dead</span>
@@ -140,6 +188,9 @@
 			{/if}
 			<button class="merge-btn" onclick={openMergePanel}>Merge with...</button>
 		</div>
+		{#if renameError}
+			<div class="error-box rename-error">{renameError}</div>
+		{/if}
 
 		<p class="entity-description">{entity.description}</p>
 
@@ -311,6 +362,40 @@
 	.entity-header h1 {
 		color: var(--accent-gold);
 		font-size: 1.5rem;
+	}
+	.entity-name-editable {
+		cursor: default;
+	}
+	.rename-btn {
+		background: none;
+		border: none;
+		color: var(--text-muted);
+		cursor: pointer;
+		font-size: 1rem;
+		padding: 0.15rem 0.3rem;
+		border-radius: var(--radius);
+		line-height: 1;
+	}
+	.rename-btn:hover {
+		color: var(--accent-gold);
+		background: rgba(255, 255, 255, 0.05);
+	}
+	.rename-input {
+		font-size: 1.5rem;
+		font-weight: bold;
+		color: var(--accent-gold);
+		background: var(--bg-surface-2);
+		border: 1px solid var(--accent-gold-dim);
+		border-radius: var(--radius);
+		padding: 0.15rem 0.5rem;
+		outline: none;
+		min-width: 200px;
+	}
+	.rename-input:focus {
+		border-color: var(--accent-gold);
+	}
+	.rename-error {
+		margin-bottom: 0.75rem;
 	}
 
 	.status-badge {
