@@ -74,6 +74,7 @@ RUN ldconfig
 COPY --from=backend /bot .
 COPY --from=frontend /app/web/build web/build
 COPY migrations/ migrations/
+COPY scripts/ scripts/
 
 # Create directories for data and link claude-cli config to /data for persistence
 RUN mkdir -p /data/audio /data/models /data/claude \
