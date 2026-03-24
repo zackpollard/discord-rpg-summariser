@@ -449,21 +449,27 @@ func (b *Bot) stopRecording() stopResult {
 	var result stopResult
 
 	if b.recorder != nil {
+		log.Println("Stopping recorder...")
 		if err := b.recorder.Stop(); err != nil {
 			log.Printf("Error stopping recorder: %v", err)
 		}
 		result.UserFiles = b.recorder.UserFiles()
 		b.recorder = nil
+		log.Println("Recorder stopped")
 	}
 	if b.telegramListener != nil {
+		log.Println("Stopping Telegram listener...")
 		result.TelegramMsgs = b.telegramListener.Stop()
 		b.telegramListener = nil
+		log.Println("Telegram listener stopped")
 	}
 	if b.activeVC != nil {
+		log.Println("Disconnecting from voice...")
 		if err := b.activeVC.Disconnect(context.Background()); err != nil {
 			log.Printf("Error disconnecting from voice: %v", err)
 		}
 		b.activeVC = nil
+		log.Println("Voice disconnected")
 	}
 	b.activeChannelID = ""
 	b.sessionID = 0

@@ -12,10 +12,9 @@ import (
 
 const (
 	sampleRate      = 48000
-	channels        = 1      // Discord voice sends mono opus
-	frameSamples    = 960    // 20ms at 48kHz
-	maxSilenceGap   = 240000 // 5 seconds at 48kHz
-	maxPCMFrameSize = 5760   // max opus frame at 48kHz (120ms)
+	channels        = 1    // Discord voice sends mono opus
+	frameSamples    = 960  // 20ms at 48kHz
+	maxPCMFrameSize = 5760 // max opus frame at 48kHz (120ms)
 )
 
 // UserStream manages a single user's audio recording: DAVE decryption,
@@ -119,7 +118,7 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	}
 	pcm = pcm[:n]
 
-	us.insertSilenceGap(packet.Timestamp)
+	us.insertSilenceForGap(packet.Timestamp)
 	us.lastTS = packet.Timestamp
 	us.hasFirstTS = true
 
@@ -146,7 +145,7 @@ func (us *UserStream) decodePLC(timestamp uint32) {
 		return
 	}
 
-	us.insertSilenceGap(timestamp)
+	us.insertSilenceForGap(timestamp)
 	us.lastTS = timestamp
 	us.hasFirstTS = true
 
@@ -154,9 +153,11 @@ func (us *UserStream) decodePLC(timestamp uint32) {
 	us.wav.Write(pcm[:n])
 }
 
-// insertSilenceGap writes zero samples into the WAV for any timestamp gap
-// exceeding one frame, capped at maxSilenceGap.
-func (us *UserStream) insertSilenceGap(timestamp uint32) {
+// insertSilenceForGap writes silence into the WAV based on the RTP timestamp
+// gap between the last packet and the current one. Discord's RTP timestamps
+// run at 48kHz and continue incrementing even when no packets are sent, so
+// the gap accurately represents how long the user was silent.
+func (us *UserStream) insertSilenceForGap(timestamp uint32) {
 	if !us.hasFirstTS {
 		return
 	}
@@ -165,10 +166,11 @@ func (us *UserStream) insertSilenceGap(timestamp uint32) {
 		return
 	}
 	gap := int(timestamp - expected)
-	if gap > maxSilenceGap {
-		gap = maxSilenceGap
+	silence := make([]int16, gap)
+	us.wav.Write(silence)
+	if us.liveBuf != nil {
+		us.liveBuf.AddSamples(silence)
 	}
-	us.wav.Write(make([]int16, gap))
 }
 
 // InsertSilenceDuration writes the given duration of silence into the WAV file
