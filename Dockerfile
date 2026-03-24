@@ -76,11 +76,12 @@ COPY --from=frontend /app/web/build web/build
 COPY migrations/ migrations/
 COPY scripts/ scripts/
 
-# Create directories for data and link claude-cli config to /data for persistence
-RUN mkdir -p /data/audio /data/models /data/claude \
-    && ln -s /data/claude /root/.claude
-
 EXPOSE 8080
 
-ENTRYPOINT ["./bot"]
-CMD ["-config", "/data/config.yaml"]
+# Entrypoint script creates /data subdirectories and the claude-cli symlink
+# at runtime (after the volume is mounted), then execs the bot.
+RUN printf '#!/bin/sh\nmkdir -p /data/audio /data/models /data/claude\n[ -e /root/.claude ] || ln -s /data/claude /root/.claude\nexec "$@"\n' > /app/entrypoint.sh \
+    && chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["./bot", "-config", "/data/config.yaml"]
