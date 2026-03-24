@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.8](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.7...v0.1.8) (2026-03-24)
+
+
+### Bug Fixes
+
+* include scripts directory in Docker image ([6f127f8](https://github.com/zackpollard/discord-rpg-summariser/commit/6f127f8b01695843be79100e3311c9bd03de4fad))
+* remove 5-second silence cap to preserve full speech gaps ([239d4a2](https://github.com/zackpollard/discord-rpg-summariser/commit/239d4a2209abd790390cdf6e690b26f0dc3b4ebe))
+
 ## [0.1.7](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.6...v0.1.7) (2026-03-23)
 
 
