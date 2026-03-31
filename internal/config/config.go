@@ -11,9 +11,15 @@ type Config struct {
 	Telegram   TelegramConfig   `yaml:"telegram"`
 	Transcribe TranscribeConfig `yaml:"transcribe"`
 	Diarize    DiarizeConfig    `yaml:"diarize"`
+	TTS        TTSConfig        `yaml:"tts"`
 	LLM        LLMConfig        `yaml:"llm"`
 	Storage    StorageConfig    `yaml:"storage"`
 	Web        WebConfig        `yaml:"web"`
+}
+
+type TTSConfig struct {
+	Engine  string `yaml:"engine"`    // "f5tts" (default) or "zipvoice"
+	Threads int    `yaml:"threads"`   // defaults to transcribe.threads if 0
 }
 
 type DiscordConfig struct {

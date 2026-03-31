@@ -34,6 +34,9 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/campaigns/{id}/entity-timeline", s.handleGetEntityTimeline)
 	s.handle("GET /api/campaigns/{id}/stats", s.handleGetCampaignStats)
 	s.handle("GET /api/campaigns/{id}/pdf", s.handleGetCampaignPDF)
+	s.handle("GET /api/campaigns/{id}/recap/voices", s.handleListRecapVoices)
+	s.handle("GET /api/campaigns/{id}/recap/tts", s.handleGetRecapTTS)
+	s.handle("GET /api/campaigns/{id}/recap/ref", s.handleGetRefAudio)
 
 	s.handle("GET /api/entities/{id}", s.handleGetEntity)
 	s.handle("PATCH /api/entities/{id}", s.handleRenameEntity)
@@ -47,6 +50,7 @@ func (s *Server) setupRoutes() {
 	s.handle("POST /api/sessions/{id}/reprocess", s.handleReprocessSession)
 	s.handle("GET /api/sessions/{id}/combat", s.handleGetSessionCombat)
 	s.handle("GET /api/sessions/{id}/audio", s.handleGetSessionAudio)
+	s.handle("GET /api/sessions/{id}/llm-logs", s.handleGetLLMLogs)
 
 	s.handle("GET /api/characters", s.handleListCharacters)
 	s.handle("PUT /api/characters", s.handleUpsertCharacter)
@@ -58,6 +62,8 @@ func (s *Server) setupRoutes() {
 	// doesn't support credentials and these are read-only streams.
 	s.mux.HandleFunc("GET /api/voice-activity", s.handleVoiceActivity)
 	s.mux.HandleFunc("GET /api/live-transcript", s.handleLiveTranscript)
+	s.mux.HandleFunc("GET /api/sessions/{id}/progress", s.handlePipelineProgress)
+	s.mux.HandleFunc("GET /api/tts/progress", s.handleTTSProgress)
 }
 
 // handle registers a route, wrapping the handler with auth middleware when

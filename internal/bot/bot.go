@@ -59,6 +59,9 @@ type Bot struct {
 
 	// Embedding generation for RAG (nil if not configured).
 	embedder embed.Embedder
+
+	// Pipeline progress tracking (non-nil while a pipeline is running).
+	progress *PipelineProgress
 }
 
 // acquireTranscriber loads the transcription model if not already loaded and
@@ -102,6 +105,17 @@ func (b *Bot) LiveTranscriptWorker() *voice.LiveWorker {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.liveWorker
+}
+
+// PipelineProgressFor returns the progress tracker if one is active for the
+// given session, or nil otherwise.
+func (b *Bot) PipelineProgressFor(sessionID int64) *PipelineProgress {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.progress != nil && b.progress.SessionID() == sessionID {
+		return b.progress
+	}
+	return nil
 }
 
 // MemberInfo represents a Discord guild member.

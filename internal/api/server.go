@@ -26,10 +26,12 @@ type Server struct {
 	guildID       string
 	voiceAP       VoiceActivityProvider
 	liveTP        LiveTranscriptProvider
+	progressP     PipelineProgressProvider
 	memberP       MemberProvider
 	loreQA        LoreQAProvider
 	reprocessor   SessionReprocessor
 	embedder      embed.Embedder
+	ttsSvc        *ttsService
 	mux           *http.ServeMux
 	httpServer    *http.Server
 	sessions      *auth.SessionManager
@@ -106,6 +108,10 @@ func (s *Server) SetLiveTranscriptProvider(ltp LiveTranscriptProvider) {
 	s.liveTP = ltp
 }
 
+func (s *Server) SetPipelineProgressProvider(pp PipelineProgressProvider) {
+	s.progressP = pp
+}
+
 func (s *Server) SetMemberProvider(mp MemberProvider) {
 	s.memberP = mp
 }
@@ -118,6 +124,11 @@ func (s *Server) SetLoreQAProvider(lqp LoreQAProvider) {
 // SetEmbedder sets the embedding generator for RAG-powered features.
 func (s *Server) SetEmbedder(e embed.Embedder) {
 	s.embedder = e
+}
+
+// SetTTSService sets the TTS service for voice-cloned recap audio.
+func (s *Server) SetTTSService(t *ttsService) {
+	s.ttsSvc = t
 }
 
 func (s *Server) Start() error {
@@ -183,7 +194,9 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") &&
 			!strings.HasSuffix(r.URL.Path, "/voice-activity") &&
 			!strings.HasSuffix(r.URL.Path, "/live-transcript") &&
+			!strings.HasSuffix(r.URL.Path, "/progress") &&
 			!strings.HasSuffix(r.URL.Path, "/audio") &&
+			!strings.HasSuffix(r.URL.Path, "/tts") &&
 			!strings.HasSuffix(r.URL.Path, "/pdf") &&
 			!strings.HasPrefix(r.URL.Path, "/api/auth/login") &&
 			!strings.HasPrefix(r.URL.Path, "/api/auth/callback") {

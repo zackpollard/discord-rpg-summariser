@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchRecap, regenerateRecap, campaignPDFURL, type CampaignRecap } from '$lib/api';
+	import { fetchRecap, regenerateRecap, campaignPDFURL, fetchRecapVoices, recapTTSURL, type CampaignRecap, type RecapVoice } from '$lib/api';
+	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 
 	const campaignId = $derived(Number($page.params.id));
 
@@ -10,6 +11,55 @@
 	let generating = $state(false);
 	let error = $state<string | null>(null);
 	let lastN = $state<number | undefined>(undefined);
+
+	// TTS voice picker state.
+	let voices = $state<RecapVoice[]>([]);
+	let selectedVoice = $state<string>('');
+	let ttsAudioSrc = $state<string>('');
+	let ttsGenerating = $state(false);
+	let ttsProgress = $state(0);
+
+	function handleVoiceChange(e: Event) {
+		const uid = (e.target as HTMLSelectElement).value;
+		selectedVoice = uid;
+		ttsAudioSrc = '';
+	}
+
+	async function generateTTS() {
+		if (!selectedVoice) return;
+		ttsGenerating = true;
+		ttsProgress = 0;
+		ttsAudioSrc = '';
+
+		// Subscribe to progress SSE.
+		const progressSource = new EventSource('/api/tts/progress');
+		progressSource.onmessage = (e) => {
+			try {
+				const data = JSON.parse(e.data);
+				if (data.progress >= 0) ttsProgress = data.progress;
+				if (data.progress >= 1 || data.progress < 0) progressSource.close();
+			} catch {}
+		};
+		progressSource.onerror = () => progressSource.close();
+
+		// Fetch the audio (blocks until generation is done).
+		try {
+			const url = recapTTSURL(campaignId, selectedVoice) + `&_t=${Date.now()}`;
+			const res = await fetch(url);
+			if (res.ok) {
+				const blob = await res.blob();
+				ttsAudioSrc = URL.createObjectURL(blob);
+			}
+		} catch {}
+
+		progressSource.close();
+		ttsGenerating = false;
+		ttsProgress = 0;
+	}
+
+	const refAudioSrc = $derived(
+		selectedVoice ? `/api/campaigns/${campaignId}/recap/ref?voice=${encodeURIComponent(selectedVoice)}&_t=${Date.now()}` : ''
+	);
 
 	function formatDate(dateStr: string): string {
 		return new Date(dateStr).toLocaleDateString('en-GB', {
@@ -45,7 +95,10 @@
 		}
 	}
 
-	onMount(() => { loadRecap(); });
+	onMount(() => {
+		loadRecap();
+		fetchRecapVoices(campaignId).then(v => { voices = v; }).catch(() => {});
+	});
 </script>
 
 <svelte:head>
@@ -111,6 +164,51 @@
 				</button>
 			</div>
 		</div>
+
+		{#if voices.length > 0}
+			<div class="tts-section">
+				<div class="tts-controls">
+					<label class="tts-label">
+						Listen with voice:
+						<select class="tts-select" onchange={handleVoiceChange} value={selectedVoice}>
+							<option value="">-- Select a voice --</option>
+							{#each voices as voice}
+								<option value={voice.user_id}>{voice.display_name}</option>
+							{/each}
+						</select>
+					</label>
+					{#if selectedVoice}
+						<button class="regenerate-btn" onclick={generateTTS} disabled={ttsGenerating}>
+							{#if ttsGenerating}
+								<span class="spinner"></span>
+								Generating...
+							{:else}
+								Generate
+							{/if}
+						</button>
+					{/if}
+				</div>
+				{#if ttsGenerating}
+					<div class="tts-progress">
+						<div class="tts-progress-header">
+							<span>Generating audio...</span>
+							<span class="tts-progress-pct">{Math.round(ttsProgress * 100)}%</span>
+						</div>
+						<div class="tts-progress-track">
+							<div class="tts-progress-fill" style="width: {ttsProgress * 100}%"></div>
+						</div>
+					</div>
+				{/if}
+				{#if refAudioSrc}
+					<p class="tts-label" style="margin-top: 0.75rem;">Reference clip:</p>
+					<AudioPlayer src={refAudioSrc} />
+				{/if}
+				{#if ttsAudioSrc}
+					<p class="tts-label" style="margin-top: 0.5rem;">Generated:</p>
+					<AudioPlayer src={ttsAudioSrc} />
+				{/if}
+			</div>
+		{/if}
 
 		<div class="recap-body">
 			{#each recap.recap.split('\n\n') as paragraph}
@@ -207,6 +305,63 @@
 	.regenerate-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.tts-section {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 1rem 1.25rem;
+		margin-bottom: 1.25rem;
+	}
+	.tts-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+	.tts-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		color: var(--text-secondary);
+		font-size: 0.85rem;
+		font-weight: 500;
+	}
+	.tts-select {
+		padding: 0.35rem 0.6rem;
+		background: var(--bg-dark);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		color: var(--text-primary);
+		font-size: 0.85rem;
+	}
+
+	.tts-progress {
+		margin-top: 0.75rem;
+	}
+	.tts-progress-header {
+		display: flex;
+		justify-content: space-between;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		margin-bottom: 0.35rem;
+	}
+	.tts-progress-pct {
+		color: var(--accent-gold);
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+	.tts-progress-track {
+		height: 6px;
+		background: var(--bg-dark);
+		border-radius: 3px;
+		overflow: hidden;
+	}
+	.tts-progress-fill {
+		height: 100%;
+		background: var(--accent-gold);
+		border-radius: 3px;
+		transition: width 0.3s ease;
 	}
 
 	.recap-body {

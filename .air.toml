@@ -1,0 +1,18 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -o ./tmp/bot ./cmd/bot"
+  bin = "./tmp/bot"
+  full_bin = "./tmp/bot"
+  include_ext = ["go"]
+  exclude_dir = ["tmp", "web", "node_modules", "models", "data", "_deps"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 1000 # ms after file change before rebuilding
+  kill_delay = 500 # ms to wait for old process to exit
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

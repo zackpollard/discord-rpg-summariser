@@ -34,39 +34,19 @@ func (s *Server) handleGetSessionAudio(w http.ResponseWriter, r *http.Request) {
 
 	mixedPath := filepath.Join(sess.AudioDir, "mixed.wav")
 
-	// Check if the mixed file already exists (cached).
 	if _, err := os.Stat(mixedPath); os.IsNotExist(err) {
-		// Find per-user WAV files in the audio directory.
-		entries, err := os.ReadDir(sess.AudioDir)
-		if err != nil {
-			log.Printf("read audio dir %s: %v", sess.AudioDir, err)
-			writeError(w, http.StatusInternalServerError, "failed to read audio directory")
+		// Don't generate the mix on-the-fly for in-progress sessions —
+		// the audio files are still being written. The pipeline generates
+		// mixed.wav automatically once recording finishes.
+		switch sess.Status {
+		case "recording", "transcribing", "summarising":
+			writeError(w, http.StatusConflict, "session is still in progress")
 			return
 		}
 
-		userFiles := make(map[string]string)
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-			ext := filepath.Ext(name)
-			if ext != ".wav" {
-				continue
-			}
-			userID := name[:len(name)-len(ext)]
-			if userID == "mixed" {
-				continue
-			}
-			userFiles[userID] = filepath.Join(sess.AudioDir, name)
-		}
-
-		if len(userFiles) == 0 {
-			writeError(w, http.StatusNotFound, "no audio files found")
-			return
-		}
-
-		if err := audio.MixAndNormalize(userFiles, mixedPath); err != nil {
+		// For older sessions that finished before auto-mixing was added,
+		// generate on demand.
+		if err := audio.MixFromDir(sess.AudioDir, mixedPath); err != nil {
 			log.Printf("mix audio for session %d: %v", id, err)
 			writeError(w, http.StatusInternalServerError, "failed to mix audio")
 			return

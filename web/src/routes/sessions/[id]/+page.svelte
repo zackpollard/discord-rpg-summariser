@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { fetchSession, fetchTranscript, fetchSessionCombat, reprocessSession, deleteSession, sessionAudioURL, type Session, type TranscriptSegment, type CombatEncounter } from '$lib/api';
+	import { fetchSession, fetchTranscript, fetchSessionCombat, fetchLLMLogs, reprocessSession, deleteSession, sessionAudioURL, subscribePipelineProgress, type Session, type TranscriptSegment, type CombatEncounter, type PipelineProgressEvent, type LLMLog } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
@@ -22,6 +22,80 @@
 	let transcriptScrollEl = $state<HTMLDivElement | null>(null);
 	let userScrolling = $state(false);
 	let userScrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// LLM debug logs state.
+	let llmLogs = $state<LLMLog[]>([]);
+	let showDebugLogs = $state(false);
+	let expandedLogs = $state<Set<number>>(new Set());
+
+	function toggleLog(id: number) {
+		const next = new Set(expandedLogs);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		expandedLogs = next;
+	}
+
+	async function loadDebugLogs() {
+		if (!session || llmLogs.length > 0) return;
+		try {
+			llmLogs = await fetchLLMLogs(session.id);
+		} catch { }
+	}
+
+	// Pipeline progress state.
+	let progressEvent = $state<PipelineProgressEvent | null>(null);
+	let liveSegments = $state<{ speaker: string; text: string; start_time: number; end_time: number }[]>([]);
+	let unsubProgress: (() => void) | null = null;
+
+	function subscribeToProgress(sessionId: number) {
+		unsubProgress?.();
+		liveSegments = [];
+		progressEvent = null;
+		unsubProgress = subscribePipelineProgress(
+			sessionId,
+			(evt) => {
+				if (evt.type === 'progress') {
+					progressEvent = evt;
+				} else if (evt.type === 'transcript' && evt.speaker && evt.text) {
+					liveSegments = [...liveSegments, {
+						speaker: evt.speaker,
+						text: evt.text,
+						start_time: evt.start_time ?? 0,
+						end_time: evt.end_time ?? 0
+					}];
+				} else if (evt.type === 'complete') {
+					progressEvent = null;
+					// Reload session data now that processing is done.
+					reloadSession(sessionId);
+				}
+			},
+			() => {
+				// idle — no pipeline running
+				progressEvent = null;
+			}
+		);
+	}
+
+	async function reloadSession(sessionId: number) {
+		try {
+			const [sess, trans, combat] = await Promise.all([
+				fetchSession(sessionId),
+				fetchTranscript(sessionId),
+				fetchSessionCombat(sessionId)
+			]);
+			session = sess;
+			transcript = trans;
+			combatEncounters = combat;
+			liveSegments = [];
+			reprocessMessage = null;
+			// Refresh debug logs if the panel is open.
+			if (showDebugLogs) {
+				llmLogs = await fetchLLMLogs(sessionId);
+			} else {
+				llmLogs = []; // force re-fetch on next open
+			}
+		} catch { }
+	}
 
 	// Find the transcript segment that contains the current playback time.
 	const activeSegmentId = $derived.by(() => {
@@ -119,12 +193,10 @@
 		reprocessMessage = null;
 		try {
 			await reprocessSession(session.id, retranscribe);
-			reprocessMessage = retranscribe
-				? 'Re-transcription and processing started. Refresh the page in a few minutes.'
-				: 'Reprocessing started. Refresh the page in a few minutes.';
+			reprocessing = false;
+			subscribeToProgress(session.id);
 		} catch (e) {
 			reprocessMessage = e instanceof Error ? e.message : 'Failed to start reprocessing';
-		} finally {
 			reprocessing = false;
 		}
 	}
@@ -169,6 +241,11 @@
 				combatEncounters = combat;
 				loading = false;
 
+				// Subscribe to progress if session is still being processed.
+				if (sess.status !== 'complete' && sess.status !== 'failed') {
+					subscribeToProgress(sess.id);
+				}
+
 				// After data loads and DOM renders, scroll to the hash fragment
 				// (e.g. #seg-123 from transcript search links).
 				if (window.location.hash) {
@@ -184,6 +261,10 @@
 				error = e instanceof Error ? e.message : 'Failed to load session';
 				loading = false;
 			});
+	});
+
+	onDestroy(() => {
+		unsubProgress?.();
 	});
 </script>
 
@@ -223,7 +304,37 @@
 			</div>
 		</div>
 
-		{#if session.status !== 'complete' && session.status !== 'failed'}
+		{#if progressEvent}
+			<div class="progress-panel">
+				<div class="progress-header">
+					<span class="progress-stage">{progressEvent.detail || progressEvent.stage}</span>
+					<span class="progress-pct">{Math.round(progressEvent.percent)}%</span>
+				</div>
+				<div class="progress-bar-track">
+					<div class="progress-bar-fill" style="width: {progressEvent.percent}%"></div>
+				</div>
+				{#if progressEvent.eta_seconds > 0}
+					<span class="progress-eta">
+						~{progressEvent.eta_seconds < 60
+							? `${Math.round(progressEvent.eta_seconds)}s`
+							: `${Math.round(progressEvent.eta_seconds / 60)}m`} remaining
+					</span>
+				{/if}
+				{#if liveSegments.length > 0}
+					<div class="live-transcript-preview">
+						<h3>Live Transcript</h3>
+						<div class="live-transcript-scroll">
+							{#each liveSegments as seg}
+								<div class="live-seg">
+									<span class="live-seg-speaker">{seg.speaker}</span>
+									<span class="live-seg-text">{seg.text}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{:else if session.status !== 'complete' && session.status !== 'failed'}
 			<div class="processing-notice">
 				This session is still being processed ({session.status}). Content may be incomplete.
 			</div>
@@ -369,6 +480,55 @@
 				</div>
 			{/if}
 		</section>
+
+		<section class="debug-section">
+			<button
+				class="debug-toggle"
+				onclick={() => { showDebugLogs = !showDebugLogs; if (showDebugLogs) loadDebugLogs(); }}
+			>
+				<span class="debug-toggle-icon">{showDebugLogs ? '\u25B2' : '\u25BC'}</span>
+				LLM Debug Logs
+			</button>
+			{#if showDebugLogs}
+				{#if llmLogs.length === 0}
+					<p class="muted" style="padding: 0.5rem 0;">No LLM logs recorded for this session.</p>
+				{:else}
+					<div class="debug-logs">
+						{#each llmLogs as log (log.id)}
+							<div class="debug-log-entry" class:debug-log-error={!!log.error}>
+								<button class="debug-log-header" onclick={() => toggleLog(log.id)}>
+									<span class="debug-log-op">{log.operation}</span>
+									<span class="debug-log-duration">{(log.duration_ms / 1000).toFixed(1)}s</span>
+									{#if log.error}
+										<span class="debug-log-error-badge">error</span>
+									{/if}
+									<span class="debug-log-time">{new Date(log.created_at).toLocaleTimeString()}</span>
+									<span class="encounter-toggle">{expandedLogs.has(log.id) ? '\u25B2' : '\u25BC'}</span>
+								</button>
+								{#if expandedLogs.has(log.id)}
+									<div class="debug-log-body">
+										{#if log.error}
+											<div class="debug-log-block debug-log-block-error">
+												<h4>Error</h4>
+												<pre>{log.error}</pre>
+											</div>
+										{/if}
+										<div class="debug-log-block">
+											<h4>Prompt <span class="debug-log-size">({(log.prompt.length / 1024).toFixed(1)} KB)</span></h4>
+											<pre>{log.prompt}</pre>
+										</div>
+										<div class="debug-log-block">
+											<h4>Response <span class="debug-log-size">({(log.response.length / 1024).toFixed(1)} KB)</span></h4>
+											<pre>{log.response}</pre>
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+		</section>
 	{/if}
 </div>
 
@@ -426,6 +586,85 @@
 	.mono {
 		font-family: 'Courier New', Courier, monospace;
 		font-size: 0.85rem;
+	}
+
+	.progress-panel {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 1rem 1.25rem;
+		margin-bottom: 1.25rem;
+	}
+	.progress-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.5rem;
+	}
+	.progress-stage {
+		font-size: 0.85rem;
+		color: var(--text-primary);
+		font-weight: 500;
+	}
+	.progress-pct {
+		font-size: 0.85rem;
+		color: var(--accent-gold);
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+	.progress-bar-track {
+		height: 6px;
+		background: var(--bg-dark);
+		border-radius: 3px;
+		overflow: hidden;
+		margin-bottom: 0.4rem;
+	}
+	.progress-bar-fill {
+		height: 100%;
+		background: var(--accent-gold);
+		border-radius: 3px;
+		transition: width 0.4s ease;
+	}
+	.progress-eta {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+	}
+	.live-transcript-preview {
+		margin-top: 0.75rem;
+		border-top: 1px solid var(--border);
+		padding-top: 0.75rem;
+	}
+	.live-transcript-preview h3 {
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-muted);
+		font-weight: 600;
+		margin-bottom: 0.5rem;
+	}
+	.live-transcript-scroll {
+		max-height: 200px;
+		overflow-y: auto;
+		padding: 0.4rem;
+		background: var(--bg-dark);
+		border-radius: var(--radius);
+		border: 1px solid var(--border);
+	}
+	.live-seg {
+		padding: 0.2rem 0;
+		font-size: 0.8rem;
+		line-height: 1.4;
+	}
+	.live-seg-speaker {
+		color: var(--accent-gold-dim);
+		font-weight: 600;
+		margin-right: 0.4rem;
+	}
+	.live-seg-speaker::after {
+		content: ':';
+	}
+	.live-seg-text {
+		color: var(--text-primary);
 	}
 
 	.processing-notice {
@@ -708,5 +947,131 @@
 		padding: 0.75rem;
 		border-radius: var(--radius);
 		font-size: 0.9rem;
+	}
+
+	/* Debug logs */
+	.debug-section {
+		margin-bottom: 1.25rem;
+	}
+	.debug-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		background: none;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		color: var(--text-muted);
+		padding: 0.5rem 1rem;
+		font-size: 0.8rem;
+		cursor: pointer;
+		width: 100%;
+		text-align: left;
+	}
+	.debug-toggle:hover {
+		color: var(--text-secondary);
+		border-color: var(--text-muted);
+	}
+	.debug-toggle-icon {
+		font-size: 0.65rem;
+	}
+	.debug-logs {
+		margin-top: 0.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.debug-log-entry {
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--bg-surface);
+		overflow: hidden;
+	}
+	.debug-log-entry.debug-log-error {
+		border-color: rgba(239, 68, 68, 0.3);
+	}
+	.debug-log-header {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		width: 100%;
+		padding: 0.6rem 1rem;
+		background: none;
+		border: none;
+		color: var(--text-primary);
+		cursor: pointer;
+		font-size: 0.8rem;
+		text-align: left;
+	}
+	.debug-log-header:hover {
+		background: rgba(255, 255, 255, 0.03);
+	}
+	.debug-log-op {
+		font-weight: 600;
+		color: var(--text-secondary);
+		min-width: 120px;
+	}
+	.debug-log-duration {
+		color: var(--text-muted);
+		font-family: 'Courier New', Courier, monospace;
+		font-size: 0.75rem;
+	}
+	.debug-log-error-badge {
+		background: rgba(239, 68, 68, 0.2);
+		color: #fca5a5;
+		padding: 0.1rem 0.4rem;
+		border-radius: 3px;
+		font-size: 0.65rem;
+		font-weight: 600;
+		text-transform: uppercase;
+	}
+	.debug-log-time {
+		color: var(--text-muted);
+		font-size: 0.75rem;
+		margin-left: auto;
+	}
+	.debug-log-body {
+		padding: 0 1rem 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+	.debug-log-block {
+		background: var(--bg-dark);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		overflow: hidden;
+	}
+	.debug-log-block-error {
+		border-color: rgba(239, 68, 68, 0.3);
+	}
+	.debug-log-block h4 {
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-muted);
+		font-weight: 600;
+		padding: 0.5rem 0.75rem;
+		margin: 0;
+		border-bottom: 1px solid var(--border);
+		background: rgba(255, 255, 255, 0.02);
+	}
+	.debug-log-block-error h4 {
+		color: #fca5a5;
+	}
+	.debug-log-size {
+		font-weight: 400;
+		text-transform: none;
+		letter-spacing: 0;
+	}
+	.debug-log-block pre {
+		margin: 0;
+		padding: 0.75rem;
+		font-size: 0.75rem;
+		line-height: 1.5;
+		color: var(--text-primary);
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 400px;
+		overflow-y: auto;
 	}
 </style>

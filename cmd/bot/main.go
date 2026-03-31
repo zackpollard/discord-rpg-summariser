@@ -17,6 +17,7 @@ import (
 	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/telegram"
 	"discord-rpg-summariser/internal/transcribe"
+	"discord-rpg-summariser/internal/tts"
 )
 
 // version is set at build time via -ldflags.
@@ -69,7 +70,29 @@ func main() {
 	case "ollama":
 		sum = summarise.NewOllama(cfg.LLM.OllamaURL, cfg.LLM.OllamaModel)
 	default:
-		sum = summarise.NewClaudeCLI()
+		cli := summarise.NewClaudeCLI()
+		cli.OnLog = func(ctx context.Context, entry summarise.LLMLogEntry) {
+			sessionID := summarise.SessionIDFromContext(ctx)
+			var sid *int64
+			if sessionID != 0 {
+				sid = &sessionID
+			}
+			var errStr *string
+			if entry.Error != "" {
+				errStr = &entry.Error
+			}
+			if _, err := store.InsertLLMLog(ctx, storage.LLMLog{
+				SessionID:  sid,
+				Operation:  entry.Operation,
+				Prompt:     entry.Prompt,
+				Response:   entry.Response,
+				Error:      errStr,
+				DurationMS: entry.DurationMS,
+			}); err != nil {
+				log.Printf("Failed to save LLM log: %v", err)
+			}
+		}
+		sum = cli
 	}
 
 	webDir := "web/build"
@@ -104,8 +127,24 @@ func main() {
 		log.Println("Embedding model enabled: in-process ONNX (nomic-embed-text-v1.5)")
 	}
 
+	// Set up TTS service (Python subprocess).
+	ttsThreads := cfg.TTS.Threads
+	if ttsThreads == 0 {
+		ttsThreads = cfg.Transcribe.Threads
+	}
+	projectDir, _ := os.Getwd()
+	ttsSynth, err := tts.NewSynthesizer(projectDir, ttsThreads, cfg.TTS.Engine)
+	if err != nil {
+		log.Printf("Warning: TTS unavailable: %v", err)
+	} else {
+		srv.SetTTSService(api.NewTTSService(ttsSynth, store))
+		defer ttsSynth.Close()
+		log.Println("TTS enabled: ZipVoice (voice-cloned recap)")
+	}
+
 	srv.SetVoiceActivityProvider(discordBot)
 	srv.SetLiveTranscriptProvider(discordBot)
+	srv.SetPipelineProgressProvider(discordBot)
 	srv.SetMemberProvider(discordBot)
 	srv.SetLoreQAProvider(discordBot)
 	srv.SetSessionReprocessor(discordBot)

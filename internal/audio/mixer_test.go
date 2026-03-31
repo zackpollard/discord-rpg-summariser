@@ -65,7 +65,7 @@ func TestMixAndNormalize(t *testing.T) {
 	err := MixAndNormalize(map[string]string{
 		"a": pathA,
 		"b": pathB,
-	}, outputPath)
+	}, outputPath, nil)
 	if err != nil {
 		t.Fatalf("MixAndNormalize: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestMixAndNormalize_DifferentLengths(t *testing.T) {
 	err := MixAndNormalize(map[string]string{
 		"a": pathA,
 		"b": pathB,
-	}, outputPath)
+	}, outputPath, nil)
 	if err != nil {
 		t.Fatalf("MixAndNormalize: %v", err)
 	}
@@ -168,9 +168,71 @@ func TestMixAndNormalize_DifferentLengths(t *testing.T) {
 	}
 }
 
+func TestMixAndNormalize_WithOffsets(t *testing.T) {
+	dir := t.TempDir()
+
+	// User A: starts at 0s, 1 second of audio.
+	// User B: starts at 0.5s offset, 1 second of audio.
+	pathA := filepath.Join(dir, "user_a.wav")
+	pathB := filepath.Join(dir, "user_b.wav")
+	createTestWAV(t, pathA, 0.5, 1.0)
+	createTestWAV(t, pathB, 0.5, 1.0)
+
+	outputPath := filepath.Join(dir, "mixed.wav")
+	err := MixAndNormalize(map[string]string{
+		"a": pathA,
+		"b": pathB,
+	}, outputPath, map[string]float64{
+		"b": 0.5, // B joins 0.5s late
+	})
+	if err != nil {
+		t.Fatalf("MixAndNormalize: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+
+	// Output should be 1.5 seconds (A's 1s + B's 0.5s offset + 1s = 1.5s total).
+	dataChunkSize := binary.LittleEndian.Uint32(data[40:44])
+	expectedDataSize := uint32(1.5 * 48000 * 2)
+	if dataChunkSize != expectedDataSize {
+		t.Errorf("data size = %d, want %d", dataChunkSize, expectedDataSize)
+	}
+
+	// First 0.5s should only contain A's audio (no B contribution).
+	// After 0.5s, both tracks overlap.
+	pcm := data[44:]
+	halfSecSamples := 24000 // 0.5s at 48kHz
+
+	// Check that the first half-second has lower peak than the overlap region,
+	// since only one track is playing.
+	var peakFirst, peakOverlap float64
+	for i := 0; i < halfSecSamples; i++ {
+		s := int16(binary.LittleEndian.Uint16(pcm[i*2 : i*2+2]))
+		amp := math.Abs(float64(s) / 32768.0)
+		if amp > peakFirst {
+			peakFirst = amp
+		}
+	}
+	for i := halfSecSamples; i < halfSecSamples*2; i++ {
+		s := int16(binary.LittleEndian.Uint16(pcm[i*2 : i*2+2]))
+		amp := math.Abs(float64(s) / 32768.0)
+		if amp > peakOverlap {
+			peakOverlap = amp
+		}
+	}
+
+	t.Logf("peak first 0.5s (A only): %.3f, peak overlap 0.5s: %.3f", peakFirst, peakOverlap)
+	if peakOverlap <= peakFirst {
+		t.Errorf("overlap region should be louder than single-track region")
+	}
+}
+
 func TestMixAndNormalize_NoFiles(t *testing.T) {
 	dir := t.TempDir()
-	err := MixAndNormalize(map[string]string{}, filepath.Join(dir, "out.wav"))
+	err := MixAndNormalize(map[string]string{}, filepath.Join(dir, "out.wav"), nil)
 	if err == nil {
 		t.Error("expected error for empty input, got nil")
 	}

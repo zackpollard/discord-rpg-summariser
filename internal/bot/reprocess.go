@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/storage"
+	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/telegram"
 	"discord-rpg-summariser/internal/transcribe"
 )
@@ -17,6 +19,18 @@ import (
 // existing session. If retranscribe is true, it also re-transcribes from the
 // original WAV files (replacing existing transcript segments).
 func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscribe bool) error {
+	ctx = summarise.WithSessionID(ctx, sessionID)
+
+	// Set up progress tracking.
+	b.mu.Lock()
+	b.progress = NewPipelineProgress(sessionID)
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.progress = nil
+		b.mu.Unlock()
+	}()
+
 	session, err := b.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)
@@ -25,6 +39,7 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
 
 	if retranscribe {
+		b.progress.SetStage("transcribing", "Re-transcribing audio")
 		if err := b.retranscribeSession(ctx, session); err != nil {
 			log.Printf("reprocess: retranscription failed for session %d: %v", sessionID, err)
 			b.store.UpdateSessionStatus(ctx, sessionID, "failed")
@@ -84,6 +99,7 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	transcript := b.buildTranscriptFromDB(ctx, session, campaign, merged, dmName)
 
 	// Summarise.
+	b.progress.SetStage("summarising", "Generating summary")
 	result, err := b.summariser.Summarise(ctx, transcript, "", dmName)
 	if err != nil {
 		log.Printf("reprocess: summarise failed for session %d: %v", sessionID, err)
@@ -108,16 +124,23 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	}
 
 	// Extract entities, quests, and combat (non-fatal).
+	b.progress.SetStage("extracting entities", "Extracting entities")
 	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
+
+	b.progress.SetStage("extracting quests", "Extracting quests")
 	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
+
+	b.progress.SetStage("extracting combat", "Extracting combat encounters")
 	b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
 
 	// Regenerate embeddings: delete old ones first, then generate fresh.
+	b.progress.SetStage("generating embeddings", "Generating embeddings")
 	if err := b.store.DeleteEmbeddingsForSession(ctx, sessionID); err != nil {
 		log.Printf("reprocess: DeleteEmbeddingsForSession: %v", err)
 	}
 	b.generateEmbeddings(ctx, session, sessionID, merged, result.Summary, dmName)
 
+	b.progress.Complete()
 	log.Printf("reprocess: session %d completed successfully", sessionID)
 	return nil
 }
@@ -202,6 +225,9 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 			continue
 		}
 		userID := strings.TrimSuffix(entry.Name(), ".wav")
+		if userID == "mixed" {
+			continue // skip the cached mixed-down file
+		}
 		userFiles[userID] = filepath.Join(session.AudioDir, entry.Name())
 	}
 
@@ -257,7 +283,7 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 	}
 
 	// Load persisted join offsets if available (nil for older sessions).
-	joinOffsets := loadJoinOffsets(session.AudioDir)
+	joinOffsets := audio.LoadJoinOffsets(session.AudioDir)
 	merged := transcribe.MergeTranscripts(userSegments, charNames, joinOffsets)
 
 	// Replace existing segments.

@@ -108,3 +108,48 @@ func decimate(samples []float32, factor int) []float32 {
 	}
 	return out
 }
+
+// LoadRaw48k reads a 48kHz 16-bit mono WAV file into float32 samples
+// without resampling. Useful when you need the original sample rate preserved.
+func LoadRaw48k(wavPath string) ([]float32, error) {
+	data, err := os.ReadFile(wavPath)
+	if err != nil {
+		return nil, fmt.Errorf("read wav file: %w", err)
+	}
+	if len(data) < wavHeaderSkip {
+		return nil, fmt.Errorf("wav file too short: %d bytes", len(data))
+	}
+
+	pcmData := data[wavHeaderSkip:]
+	numSamples := len(pcmData) / 2
+	if numSamples == 0 {
+		return nil, nil
+	}
+
+	samples := make([]float32, numSamples)
+	for i := 0; i < numSamples; i++ {
+		s := int16(binary.LittleEndian.Uint16(pcmData[i*2 : i*2+2]))
+		samples[i] = float32(s) / 32768.0
+	}
+
+	return samples, nil
+}
+
+// ExtractTimeRange returns the slice of samples between startSec and endSec
+// at the given sample rate. Out-of-bounds indices are clamped.
+func ExtractTimeRange(samples []float32, sampleRate int, startSec, endSec float64) []float32 {
+	startIdx := int(startSec * float64(sampleRate))
+	endIdx := int(endSec * float64(sampleRate))
+
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if endIdx > len(samples) {
+		endIdx = len(samples)
+	}
+	if startIdx >= endIdx {
+		return nil
+	}
+
+	return samples[startIdx:endIdx]
+}

@@ -181,6 +181,63 @@ export function subscribeLiveTranscript(
 	return () => source.close();
 }
 
+// Pipeline progress types and functions
+
+export interface PipelineProgressEvent {
+	type: 'progress' | 'transcript' | 'complete' | 'idle';
+	stage: string;
+	detail: string;
+	percent: number;
+	eta_seconds: number;
+	speaker?: string;
+	text?: string;
+	start_time?: number;
+	end_time?: number;
+}
+
+export function subscribePipelineProgress(
+	sessionId: number,
+	onEvent: (event: PipelineProgressEvent) => void,
+	onIdle?: () => void
+): () => void {
+	const source = new EventSource(`/api/sessions/${sessionId}/progress`);
+	source.addEventListener('progress', (e) => {
+		try { onEvent(JSON.parse((e as MessageEvent).data)); } catch { }
+	});
+	source.addEventListener('transcript', (e) => {
+		try { onEvent(JSON.parse((e as MessageEvent).data)); } catch { }
+	});
+	source.addEventListener('complete', (e) => {
+		try { onEvent(JSON.parse((e as MessageEvent).data)); } catch { }
+		source.close();
+	});
+	source.addEventListener('idle', () => {
+		if (onIdle) onIdle();
+		source.close();
+	});
+	source.onerror = () => {
+		source.close();
+	};
+	return () => source.close();
+}
+
+// LLM log types and functions
+
+export interface LLMLog {
+	id: number;
+	session_id: number | null;
+	operation: string;
+	prompt: string;
+	response: string;
+	error: string | null;
+	duration_ms: number;
+	created_at: string;
+}
+
+export async function fetchLLMLogs(sessionId: number): Promise<LLMLog[]> {
+	return request<LLMLog[]>(`/api/sessions/${sessionId}/llm-logs`);
+}
+
 // Campaign types and functions
 
 export interface Campaign {
@@ -589,6 +646,21 @@ export interface CampaignStats {
 	combat_actor_stats: CombatActorStat[];
 	session_timeline: SessionTimelineStat[];
 	npc_status_counts: Record<string, number>;
+}
+
+// Recap TTS types and functions
+
+export interface RecapVoice {
+	user_id: string;
+	display_name: string;
+}
+
+export async function fetchRecapVoices(campaignId: number): Promise<RecapVoice[]> {
+	return request<RecapVoice[]>(`/api/campaigns/${campaignId}/recap/voices`);
+}
+
+export function recapTTSURL(campaignId: number, voiceUserId: string): string {
+	return `/api/campaigns/${campaignId}/recap/tts?voice=${encodeURIComponent(voiceUserId)}`;
 }
 
 export async function fetchCampaignStats(campaignId: number): Promise<CampaignStats> {

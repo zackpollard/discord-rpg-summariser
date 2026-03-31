@@ -2,10 +2,13 @@ package audio
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
+	"path/filepath"
 )
 
 const (
@@ -25,7 +28,9 @@ const (
 // MixAndNormalize takes per-user WAV file paths, mixes them into a single
 // normalized WAV file at the given output path. Uses peak normalization
 // per track so all speakers are at the same perceived volume.
-func MixAndNormalize(userFiles map[string]string, outputPath string) error {
+// joinOffsets maps userID to the number of seconds of silence to prepend
+// (i.e. how long after recording started the user joined). May be nil.
+func MixAndNormalize(userFiles map[string]string, outputPath string, joinOffsets map[string]float64) error {
 	if len(userFiles) == 0 {
 		return fmt.Errorf("no input files")
 	}
@@ -112,6 +117,18 @@ func MixAndNormalize(userFiles map[string]string, outputPath string) error {
 		return fmt.Errorf("no valid input files")
 	}
 
+	// Compute per-track offset in samples from join offsets.
+	offsetSamps := make(map[string]int64, len(files))
+	for userID, fi := range files {
+		if secs, ok := joinOffsets[userID]; ok && secs > 0 {
+			off := int64(secs * float64(mixSampleRate))
+			offsetSamps[userID] = off
+			if fi.numSamps+off > maxSamples {
+				maxSamples = fi.numSamps + off
+			}
+		}
+	}
+
 	// Compute gain factors: normalise each track's peak to peakTarget.
 	gains := make(map[string]float64, len(files))
 	for userID, fi := range files {
@@ -170,16 +187,34 @@ func MixAndNormalize(userFiles map[string]string, outputPath string) error {
 		mixBuf := make([]float64, thisBatch)
 
 		for userID, r := range readers {
-			toRead := int(thisBatch) * 2
+			off := offsetSamps[userID]
+			gain := gains[userID]
+
+			// Determine how many samples of this chunk overlap with the
+			// track's actual audio (accounting for the leading silence).
+			chunkStart := totalWritten
+			chunkEnd := totalWritten + thisBatch
+			if chunkEnd <= off {
+				// Entire chunk is before this track starts — silence.
+				continue
+			}
+
+			// Index within mixBuf where this track's audio begins.
+			mixStart := int64(0)
+			if chunkStart < off {
+				mixStart = off - chunkStart
+			}
+			samplesToRead := thisBatch - mixStart
+
+			toRead := int(samplesToRead) * 2
 			n, err := io.ReadFull(r, readBufs[userID][:toRead])
 			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 				return fmt.Errorf("read chunk: %w", err)
 			}
 			samples := n / 2
-			gain := gains[userID]
 			for i := 0; i < samples; i++ {
 				s := int16(binary.LittleEndian.Uint16(readBufs[userID][i*2 : i*2+2]))
-				mixBuf[i] += float64(s) / 32768.0 * gain
+				mixBuf[mixStart+int64(i)] += float64(s) / 32768.0 * gain
 			}
 		}
 
@@ -240,4 +275,51 @@ func closeReaders(readers map[string]*os.File) {
 	for _, f := range readers {
 		f.Close()
 	}
+}
+
+// MixFromDir scans audioDir for per-user WAV files, loads join offsets, and
+// writes a mixed-down WAV to outputPath.
+func MixFromDir(audioDir, outputPath string) error {
+	entries, err := os.ReadDir(audioDir)
+	if err != nil {
+		return fmt.Errorf("read audio dir: %w", err)
+	}
+
+	userFiles := make(map[string]string)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		ext := filepath.Ext(name)
+		if ext != ".wav" {
+			continue
+		}
+		userID := name[:len(name)-len(ext)]
+		if userID == "mixed" {
+			continue
+		}
+		userFiles[userID] = filepath.Join(audioDir, name)
+	}
+
+	if len(userFiles) == 0 {
+		return fmt.Errorf("no WAV files found in %s", audioDir)
+	}
+
+	return MixAndNormalize(userFiles, outputPath, LoadJoinOffsets(audioDir))
+}
+
+// LoadJoinOffsets reads per-user join offsets (in seconds) from the audio
+// directory's offsets.json file. Returns nil if the file doesn't exist.
+func LoadJoinOffsets(audioDir string) map[string]float64 {
+	data, err := os.ReadFile(filepath.Join(audioDir, "offsets.json"))
+	if err != nil {
+		return nil
+	}
+	var offsets map[string]float64
+	if err := json.Unmarshal(data, &offsets); err != nil {
+		log.Printf("audio: parse offsets.json: %v", err)
+		return nil
+	}
+	return offsets
 }

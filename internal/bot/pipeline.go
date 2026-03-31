@@ -2,10 +2,8 @@ package bot
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -26,7 +24,17 @@ import (
 // messages), summarises the transcript, persists everything to the database,
 // and posts a notification.
 func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegramMsgs []telegram.Message) {
-	ctx := context.Background()
+	ctx := summarise.WithSessionID(context.Background(), sessionID)
+
+	// Set up progress tracking.
+	b.mu.Lock()
+	b.progress = NewPipelineProgress(sessionID)
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.progress = nil
+		b.mu.Unlock()
+	}()
 
 	session, err := b.store.GetSession(ctx, sessionID)
 	if err != nil {
@@ -61,6 +69,8 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 
 	// Transcribe each user's WAV, with diarization for shared mics.
 	b.store.UpdateSessionStatus(ctx, sessionID, "transcribing")
+	totalUsers := len(userFiles)
+	b.progress.SetStage("transcribing", fmt.Sprintf("Transcribing audio (0 of %d users)", totalUsers))
 
 	// Load shared mic config for this campaign.
 	sharedMics, _ := b.store.GetSharedMics(ctx, session.CampaignID)
@@ -70,6 +80,7 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	}
 
 	userSegments := make(map[string][]transcribe.Segment, len(userFiles))
+	doneUsers := 0
 	for userID, wavPath := range userFiles {
 		if mic, ok := sharedMicMap[userID]; ok {
 			// Shared mic: diarize then attribute segments.
@@ -79,9 +90,20 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 			segments, err := transcriber.TranscribeFile(ctx, wavPath)
 			if err != nil {
 				log.Printf("pipeline: transcribe user %s: %v", userID, err)
+				doneUsers++
+				b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 				continue
 			}
 			userSegments[userID] = segments
+		}
+		doneUsers++
+		b.progress.SetDetail(fmt.Sprintf("Transcribing audio (%d of %d users)", doneUsers, totalUsers))
+		b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
+
+		// Stream completed segments to subscribers.
+		for _, seg := range userSegments[userID] {
+			name := b.ResolveUsername(userID)
+			b.progress.BroadcastTranscript(name, seg.Text, seg.StartTime, seg.EndTime)
 		}
 	}
 
@@ -139,7 +161,14 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	// Load join offsets from the audio directory (written by the recorder as
 	// users join). This is more robust than passing them through memory since
 	// it also works if the bot crashed and the pipeline is re-run.
-	joinOffsetSecs := loadJoinOffsets(session.AudioDir)
+	joinOffsetSecs := audio.LoadJoinOffsets(session.AudioDir)
+
+	// Generate the mixed-down audio file now that recording is finished.
+	b.progress.SetStage("mixing", "Mixing audio tracks")
+	mixedPath := filepath.Join(session.AudioDir, "mixed.wav")
+	if err := audio.MixAndNormalize(userFiles, mixedPath, joinOffsetSecs); err != nil {
+		log.Printf("pipeline: mix audio: %v", err)
+	}
 
 	// Merge voice segments with join offsets so late joiners are correctly placed.
 	merged := transcribe.MergeTranscripts(userSegments, charNames, joinOffsetSecs)
@@ -175,6 +204,7 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 
 	// Summarise.
 	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
+	b.progress.SetStage("summarising", "Generating summary")
 
 	result, err := b.summariser.Summarise(ctx, transcript, "", dmName)
 	if err != nil {
@@ -194,16 +224,22 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	b.sendNotification(sessionID, result.Summary)
 
 	// Extract entities for the knowledge base (non-fatal on error).
+	b.progress.SetStage("extracting entities", "Extracting entities")
 	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
 
 	// Extract quests (non-fatal on error).
+	b.progress.SetStage("extracting quests", "Extracting quests")
 	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
 
 	// Extract combat encounters (non-fatal on error).
+	b.progress.SetStage("extracting combat", "Extracting combat encounters")
 	b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
 
 	// Generate vector embeddings for RAG (non-fatal on error).
+	b.progress.SetStage("generating embeddings", "Generating embeddings")
 	b.generateEmbeddings(ctx, session, sessionID, merged, result.Summary, dmName)
+
+	b.progress.Complete()
 }
 
 // gatherCampaignVocabulary collects campaign-specific proper nouns for
@@ -240,23 +276,6 @@ func (b *Bot) gatherCampaignVocabulary(ctx context.Context, campaignID int64) []
 	return words
 }
 
-const offsetsFile = "offsets.json"
-
-// loadJoinOffsets reads per-user join offsets from the audio directory.
-// Returns nil if the file doesn't exist (e.g. older sessions).
-func loadJoinOffsets(audioDir string) map[string]float64 {
-	path := filepath.Join(audioDir, offsetsFile)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var offsets map[string]float64
-	if err := json.Unmarshal(data, &offsets); err != nil {
-		log.Printf("pipeline: parse %s: %v", path, err)
-		return nil
-	}
-	return offsets
-}
 
 // buildTranscriptWithTelegram persists Telegram messages to the DB, filters
 // them, and returns a formatted transcript with voice segments and Telegram
