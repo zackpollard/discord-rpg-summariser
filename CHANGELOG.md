@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.9...v0.1.10) (2026-03-31)
+
+
+### Features
+
+* add pipeline progress, LLM debug logs, audio fixes, and TTS recap ([b38d818](https://github.com/zackpollard/discord-rpg-summariser/commit/b38d818d3cc5794f3a83f5cba49bca5dd1234c7e))
+
 ## [0.1.9](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.8...v0.1.9) (2026-03-24)
 
 
