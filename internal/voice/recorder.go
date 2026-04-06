@@ -105,6 +105,7 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 
 			// Reuse the existing stream under the new SSRC.
 			existing.daveState = daveState
+			existing.daveVC = vc
 			existing.daveActive = false // reset so new DAVE handshake can proceed
 			r.streams[ssrc] = existing
 			delete(r.streams, oldSSRC)
@@ -124,7 +125,7 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 
 	r.userToSSRC[userID] = ssrc
 
-	us, err := NewUserStream(userID, r.outputDir, daveState)
+	us, err := NewUserStream(userID, r.outputDir, daveState, vc)
 	if err != nil {
 		log.Printf("Failed to create stream for user %s: %v", userID, err)
 		return

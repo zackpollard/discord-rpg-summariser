@@ -20,18 +20,21 @@ const (
 // UserStream manages a single user's audio recording: DAVE decryption,
 // opus decoding, and WAV writing.
 type UserStream struct {
-	userID     string
-	wav        *WAVWriter
-	decoder    *opus.Decoder
-	lastTS     uint32
-	hasFirstTS bool
-	daveState  *discordgo.ReceiverState
-	daveActive bool // true after the first successful DAVE decrypt
-	liveBuf    *LiveBuffer
+	userID        string
+	wav           *WAVWriter
+	decoder       *opus.Decoder
+	lastTS        uint32
+	hasFirstTS    bool
+	daveState     *discordgo.ReceiverState
+	daveActive    bool // true after the first successful DAVE decrypt
+	daveFailCount int  // consecutive decryption failures
+	daveVC        *discordgo.VoiceConnection // for re-deriving keys
+	liveBuf       *LiveBuffer
 }
 
 // NewUserStream creates a WAV writer and opus decoder for the given user.
-func NewUserStream(userID, outputDir string, daveState *discordgo.ReceiverState) (*UserStream, error) {
+// vc is stored for DAVE key re-derivation after epoch transitions.
+func NewUserStream(userID, outputDir string, daveState *discordgo.ReceiverState, vc *discordgo.VoiceConnection) (*UserStream, error) {
 	path := filepath.Join(outputDir, userID+".wav")
 
 	w, err := NewWAVWriter(path)
@@ -50,6 +53,7 @@ func NewUserStream(userID, outputDir string, daveState *discordgo.ReceiverState)
 		wav:       w,
 		decoder:   dec,
 		daveState: daveState,
+		daveVC:    vc,
 	}, nil
 }
 
@@ -81,6 +85,7 @@ func isOpusSilence(data []byte) bool {
 }
 
 // HandlePacket decrypts, decodes, and writes a single voice packet to the WAV file.
+// vc is passed to allow re-deriving DAVE keys after epoch transitions.
 func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	opusData := packet.Opus
 
@@ -91,19 +96,28 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 		}
 		decrypted, err := discordgo.DecryptFrame(us.daveState, daveFrame)
 		if err != nil {
-			log.Printf("DAVE decrypt failed for %s (seq=%d, %d bytes): %v",
-				us.userID, packet.Sequence, len(daveFrame), err)
-			us.decodePLC(packet.Timestamp)
-			return nil
+			// Decryption failed — the DAVE epoch may have changed (new user
+			// joined). Try re-deriving the receiver key from the current session.
+			if us.rederiveDAVE() {
+				decrypted, err = discordgo.DecryptFrame(us.daveState, daveFrame)
+			}
+			if err != nil {
+				us.daveFailCount++
+				if us.daveFailCount <= 3 || us.daveFailCount%100 == 0 {
+					log.Printf("DAVE decrypt failed for %s (seq=%d, %d bytes, failures=%d): %v",
+						us.userID, packet.Sequence, len(daveFrame), us.daveFailCount, err)
+				}
+				us.decodePLC(packet.Timestamp)
+				return nil
+			}
 		}
+		us.daveFailCount = 0
 		opusData = decrypted
 		us.daveActive = true
 	} else if us.daveActive {
 		if isOpusSilence(opusData) {
 			// Falls through to normal opus decode below.
 		} else {
-			log.Printf("Lost packet for %s (seq=%d, %d bytes, last4=%x)",
-				us.userID, packet.Sequence, len(opusData), opusData[max(0, len(opusData)-4):])
 			us.decodePLC(packet.Timestamp)
 			return nil
 		}
@@ -131,6 +145,26 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 		log.Printf("Warning: no LiveBuffer for user %s, live transcription disabled", us.userID)
 	}
 	return nil
+}
+
+// rederiveDAVE attempts to re-derive the DAVE receiver key from the current
+// voice connection's DAVE session. This is needed after epoch transitions
+// (e.g. when a new user joins the call). Returns true if successful.
+func (us *UserStream) rederiveDAVE() bool {
+	if us.daveVC == nil {
+		return false
+	}
+	dave := us.daveVC.DAVESession()
+	if dave == nil {
+		return false
+	}
+	rs, err := dave.DeriveReceiverKey(us.userID)
+	if err != nil {
+		return false
+	}
+	us.daveState = rs
+	log.Printf("Re-derived DAVE receiver key for %s after epoch transition", us.userID)
+	return true
 }
 
 // decodePLC runs opus Packet Loss Concealment for a missing frame.
