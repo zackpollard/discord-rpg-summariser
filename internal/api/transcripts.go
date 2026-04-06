@@ -35,11 +35,19 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve character names from current mappings using session's campaign
+	// Resolve character names from current mappings using session's campaign.
 	charMappings, _ := s.store.GetCharacterMappings(r.Context(), session.CampaignID)
 	charMap := make(map[string]string, len(charMappings))
 	for _, m := range charMappings {
 		charMap[m.UserID] = m.CharacterName
+	}
+
+	// Label the DM if they don't have a character mapping.
+	campaign, _ := s.store.GetCampaign(r.Context(), session.CampaignID)
+	if campaign != nil && campaign.DMUserID != nil {
+		if _, hasMapped := charMap[*campaign.DMUserID]; !hasMapped {
+			charMap[*campaign.DMUserID] = "DM"
+		}
 	}
 
 	resolveDisplay := s.displayNameResolver()

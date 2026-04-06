@@ -11,7 +11,6 @@ import (
 
 	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/storage"
-	"discord-rpg-summariser/internal/voice"
 
 	"github.com/jackc/pgx/v5"
 )

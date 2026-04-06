@@ -222,7 +222,7 @@ func (b *Bot) AskLore(ctx context.Context, campaignID int64, question, loreConte
 	}
 
 	// Shell out to claude CLI directly (same pattern as summariser)
-	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "opus", "--effort", "high")
+	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "claude-opus-4-6", "--effort", "max")
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

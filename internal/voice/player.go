@@ -45,7 +45,7 @@ func PlayWAV(vc *discordgo.VoiceConnection, wavPath string) error {
 	}
 
 	// Create Opus encoder.
-	encoder, err := opus.NewEncoder(discordSampleRate, discordChannels, opus.AppVoip)
+	encoder, err := opus.NewEncoder(discordSampleRate, discordChannels, opus.AppVoIP)
 	if err != nil {
 		return fmt.Errorf("create opus encoder: %w", err)
 	}

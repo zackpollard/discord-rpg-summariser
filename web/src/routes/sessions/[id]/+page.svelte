@@ -39,9 +39,14 @@
 		return Array.from(seen.entries()).map(([user_id, display_name]) => ({ user_id, display_name }));
 	});
 
+	const sessionDuration = $derived.by(() => {
+		if (transcript.length === 0) return 0;
+		return Math.max(...transcript.map(s => s.end_time));
+	});
+
 	function openClipEditor(seg: TranscriptSegment) {
-		clipStartTime = seg.start_time;
-		clipEndTime = seg.end_time;
+		clipStartTime = Math.round(seg.start_time * 100) / 100;
+		clipEndTime = Math.round(seg.end_time * 100) / 100;
 		showClipEditor = true;
 	}
 
@@ -562,6 +567,7 @@
 		bind:startTime={clipStartTime}
 		bind:endTime={clipEndTime}
 		users={transcriptUsers}
+		sessionDuration={sessionDuration}
 		onclose={() => showClipEditor = false}
 	/>
 {/if}

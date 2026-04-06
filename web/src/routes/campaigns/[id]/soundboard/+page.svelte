@@ -105,8 +105,8 @@
 	}
 
 	.clips-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+		display: flex;
+		flex-direction: column;
 		gap: 1rem;
 	}
 
@@ -118,6 +118,10 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
+		overflow: hidden;
+	}
+	.clip-card :global(.audio-player) {
+		margin-bottom: 0;
 	}
 
 	.clip-header {

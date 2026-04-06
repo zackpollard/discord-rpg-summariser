@@ -66,8 +66,14 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 
 	// Resolve character names for formatting.
 	charNames := make(map[string]string)
+	campaign, _ := b.store.GetCampaign(ctx, session.CampaignID)
 	for _, seg := range segments {
 		if _, ok := charNames[seg.UserID]; ok {
+			continue
+		}
+		// Label the DM.
+		if campaign != nil && campaign.DMUserID != nil && seg.UserID == *campaign.DMUserID {
+			charNames[seg.UserID] = "DM"
 			continue
 		}
 		name, _ := b.store.GetCharacterName(ctx, seg.UserID, session.CampaignID)
@@ -92,7 +98,6 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 
 	// Resolve DM name.
 	dmName := ""
-	campaign, _ := b.store.GetCampaign(ctx, session.CampaignID)
 	if campaign != nil && campaign.DMUserID != nil {
 		if cn, _ := b.store.GetCharacterName(ctx, *campaign.DMUserID, campaign.ID); cn != "" {
 			dmName = cn

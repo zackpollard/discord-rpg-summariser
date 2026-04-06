@@ -39,7 +39,7 @@ func NewClaudeCLI() *ClaudeCLI {
 func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, result any) error {
 	start := time.Now()
 
-	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "opus", "--effort", "high")
+	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "claude-opus-4-6", "--effort", "max")
 	cmd.Stdin = strings.NewReader(prompt)
 
 	var stdout, stderr bytes.Buffer
@@ -147,18 +147,37 @@ func (c *ClaudeCLI) ExtractCombat(ctx context.Context, transcript, summary, dmNa
 	return &result, nil
 }
 
-// StripCodeFences removes optional ```json ... ``` wrapping from LLM output.
+// StripCodeFences extracts JSON from LLM output that may contain free text,
+// code fences, or both. It handles:
+//   - Pure JSON: {"key": "value"}
+//   - Code fences: ```json\n{...}\n```
+//   - Text before code fences: "Here is the result:\n```json\n{...}\n```"
+//   - Text before raw JSON: "Looking at...\n\n{"key": "value"}"
 func StripCodeFences(b []byte) []byte {
 	s := strings.TrimSpace(string(b))
-	if strings.HasPrefix(s, "```") {
-		// Remove opening fence (possibly ```json).
-		if idx := strings.Index(s, "\n"); idx != -1 {
-			s = s[idx+1:]
+
+	// If there's a code fence anywhere, extract its content.
+	if fenceStart := strings.Index(s, "```"); fenceStart >= 0 {
+		inner := s[fenceStart+3:]
+		// Skip the language tag line (e.g. "json\n").
+		if nl := strings.Index(inner, "\n"); nl >= 0 {
+			inner = inner[nl+1:]
 		}
-		// Remove closing fence.
-		if idx := strings.LastIndex(s, "```"); idx != -1 {
-			s = s[:idx]
+		// Find closing fence.
+		if fenceEnd := strings.LastIndex(inner, "```"); fenceEnd >= 0 {
+			inner = inner[:fenceEnd]
+		}
+		return []byte(strings.TrimSpace(inner))
+	}
+
+	// No code fence — try to find raw JSON by locating the first { or [.
+	for i, c := range s {
+		if c == '{' || c == '[' {
+			// Find the matching closing bracket.
+			candidate := s[i:]
+			return []byte(strings.TrimSpace(candidate))
 		}
 	}
-	return []byte(strings.TrimSpace(s))
+
+	return []byte(s)
 }

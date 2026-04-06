@@ -36,7 +36,7 @@ func (b *Bot) handleCampaignGenerateRecapAudio(s *discordgo.Session, i *discordg
 	opts := subcommandOptions(i)
 	voiceUserID := interactionUserID(i)
 	if opt, ok := opts["voice"]; ok {
-		voiceUserID = opt.UserValue().ID
+		voiceUserID = opt.UserValue(nil).ID
 	}
 
 	// Acknowledge — generation takes a while.
@@ -93,7 +93,7 @@ func (b *Bot) handleCampaignPlayRecap(s *discordgo.Session, i *discordgo.Interac
 	opts := subcommandOptions(i)
 	voiceUserID := interactionUserID(i)
 	if opt, ok := opts["voice"]; ok {
-		voiceUserID = opt.UserValue().ID
+		voiceUserID = opt.UserValue(nil).ID
 	}
 
 	// Check for cached audio.

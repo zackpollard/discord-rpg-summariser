@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createClip } from '$lib/api';
+	import WaveformTimeline from './WaveformTimeline.svelte';
 
 	let {
 		sessionId,
@@ -7,6 +8,7 @@
 		startTime = $bindable(0),
 		endTime = $bindable(0),
 		users,
+		sessionDuration = 0,
 		onclose,
 		oncreated
 	}: {
@@ -15,6 +17,7 @@
 		startTime: number;
 		endTime: number;
 		users: { user_id: string; display_name: string }[];
+		sessionDuration?: number;
 		onclose: () => void;
 		oncreated?: () => void;
 	} = $props();
@@ -66,6 +69,13 @@
 	<div class="clip-modal" onclick={(e) => e.stopPropagation()}>
 		<h3>Create Clip</h3>
 
+		<WaveformTimeline
+			peaksUrl={`/api/sessions/${sessionId}/waveform`}
+			bind:startTime={startTime}
+			bind:endTime={endTime}
+			duration={sessionDuration}
+		/>
+
 		<div class="clip-field">
 			<label>Name</label>
 			<input type="text" bind:value={name} placeholder="e.g. Dragon roar, Epic moment" />
@@ -74,11 +84,11 @@
 		<div class="clip-row">
 			<div class="clip-field">
 				<label>Start ({formatTime(startTime)})</label>
-				<input type="number" bind:value={startTime} step="0.1" min="0" />
+				<input type="number" bind:value={startTime} step="0.01" min="0" />
 			</div>
 			<div class="clip-field">
 				<label>End ({formatTime(endTime)})</label>
-				<input type="number" bind:value={endTime} step="0.1" min={startTime} />
+				<input type="number" bind:value={endTime} step="0.01" min={startTime} />
 			</div>
 			<div class="clip-field">
 				<label>Duration</label>

@@ -45,7 +45,7 @@ func (s *Server) handleUploadVoiceProfile(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	filename := fmt.Sprintf("%d-%s%s", time.Now().Unix(), sanitizeFilename(name), filepath.Ext(header.Filename))
+	filename := fmt.Sprintf("%d-%s%s", time.Now().Unix(), sanitizeProfileFilename(name), filepath.Ext(header.Filename))
 	audioPath := filepath.Join(audioDir, filename)
 
 	dst, err := os.Create(audioPath)
@@ -147,7 +147,7 @@ func (s *Server) handleGetVoiceProfileAudio(w http.ResponseWriter, r *http.Reque
 	http.ServeFile(w, r, profile.AudioPath)
 }
 
-func sanitizeFilename(name string) string {
+func sanitizeProfileFilename(name string) string {
 	var clean []byte
 	for _, c := range []byte(name) {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
