@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createClip } from '$lib/api';
+	import { createClip, suggestClipNames } from '$lib/api';
 	import WaveformTimeline from './WaveformTimeline.svelte';
 
 	let {
@@ -9,6 +9,7 @@
 		endTime = $bindable(0),
 		users,
 		sessionDuration = 0,
+		transcriptExcerpt = '',
 		onclose,
 		oncreated
 	}: {
@@ -18,6 +19,7 @@
 		endTime: number;
 		users: { user_id: string; display_name: string }[];
 		sessionDuration?: number;
+		transcriptExcerpt?: string;
 		onclose: () => void;
 		oncreated?: () => void;
 	} = $props();
@@ -26,6 +28,20 @@
 	let selectedUsers = $state<Set<string>>(new Set(users.map(u => u.user_id)));
 	let creating = $state(false);
 	let error = $state<string | null>(null);
+
+	// Name suggestion state.
+	let suggestions = $state<string[]>([]);
+	let suggesting = $state(false);
+
+	async function handleSuggestNames() {
+		if (!transcriptExcerpt) return;
+		suggesting = true;
+		try {
+			const result = await suggestClipNames(transcriptExcerpt);
+			suggestions = result.suggestions;
+		} catch { }
+		suggesting = false;
+	}
 
 	function toggleUser(uid: string) {
 		const next = new Set(selectedUsers);
@@ -78,7 +94,21 @@
 
 		<div class="clip-field">
 			<label>Name</label>
-			<input type="text" bind:value={name} placeholder="e.g. Dragon roar, Epic moment" />
+			<div class="clip-name-row">
+				<input type="text" bind:value={name} placeholder="e.g. Dragon roar, Epic moment" />
+				{#if transcriptExcerpt}
+					<button class="clip-btn clip-btn-suggest" onclick={handleSuggestNames} disabled={suggesting}>
+						{suggesting ? '...' : 'Suggest'}
+					</button>
+				{/if}
+			</div>
+			{#if suggestions.length > 0}
+				<div class="clip-suggestions">
+					{#each suggestions as suggestion}
+						<button class="clip-chip" onclick={() => { name = suggestion; }}>{suggestion}</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 		<div class="clip-row">
@@ -221,6 +251,39 @@
 	}
 	.clip-btn:hover { border-color: var(--text-muted); }
 	.clip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.clip-name-row {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+	}
+	.clip-name-row input {
+		flex: 1;
+	}
+	.clip-btn-suggest {
+		white-space: nowrap;
+		padding: 0.4rem 0.75rem;
+		font-size: 0.8rem;
+	}
+	.clip-suggestions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin-top: 0.4rem;
+	}
+	.clip-chip {
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		border-radius: 1rem;
+		color: var(--text-secondary);
+		padding: 0.2rem 0.6rem;
+		font-size: 0.75rem;
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.clip-chip:hover {
+		border-color: var(--accent-gold-dim);
+		color: var(--accent-gold);
+	}
 	.clip-btn-primary {
 		background: var(--accent-gold-dim);
 		color: var(--bg-dark);

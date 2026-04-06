@@ -2,7 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { fetchSession, fetchTranscript, fetchSessionCombat, fetchQuotes, fetchLLMLogs, reprocessSession, deleteSession, sessionAudioURL, subscribePipelineProgress, type Session, type TranscriptSegment, type CombatEncounter, type SessionQuote, type PipelineProgressEvent, type LLMLog } from '$lib/api';
+	import { fetchSession, fetchTranscript, fetchSessionCombat, fetchQuotes, fetchLLMLogs, reprocessSession, deleteSession, sessionAudioURL, subscribePipelineProgress, fetchCombatAnalysis, type Session, type TranscriptSegment, type CombatEncounter, type SessionQuote, type PipelineProgressEvent, type LLMLog, type CombatAnalysisResult } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
@@ -43,6 +43,13 @@
 	const sessionDuration = $derived.by(() => {
 		if (transcript.length === 0) return 0;
 		return Math.max(...transcript.map(s => s.end_time));
+	});
+
+	const clipTranscriptExcerpt = $derived.by(() => {
+		return transcript
+			.filter(s => s.start_time >= clipStartTime && s.end_time <= clipEndTime + 1)
+			.map(s => `${s.character_name ?? s.display_name}: ${s.text}`)
+			.join('\n');
 	});
 
 	function openClipEditor(seg: TranscriptSegment) {
@@ -160,6 +167,23 @@
 		if (audioPlayer) {
 			audioPlayer.seekTo(startTime);
 		}
+	}
+
+	// Combat analysis state.
+	let combatAnalysis = $state<Map<number, CombatAnalysisResult>>(new Map());
+	let combatAnalysisLoading = $state<Set<number>>(new Set());
+
+	async function handleAnalyzeCombat(encounter: CombatEncounter) {
+		const next = new Set(combatAnalysisLoading);
+		next.add(encounter.id);
+		combatAnalysisLoading = next;
+		try {
+			const result = await fetchCombatAnalysis(encounter.id, encounter.summary);
+			combatAnalysis = new Map(combatAnalysis).set(encounter.id, result);
+		} catch {}
+		const next2 = new Set(combatAnalysisLoading);
+		next2.delete(encounter.id);
+		combatAnalysisLoading = next2;
 	}
 
 	function toggleEncounter(id: number) {
@@ -501,6 +525,24 @@
 										</tbody>
 									</table>
 								{/if}
+								<div class="analysis-section">
+									{#if combatAnalysis.has(encounter.id)}
+										{@const analysis = combatAnalysis.get(encounter.id)!}
+										<h4 class="analysis-heading">Tactical Analysis</h4>
+										<p class="analysis-text">{analysis.tactical_summary}</p>
+										<div class="analysis-highlights">
+											<div class="analysis-item"><span class="analysis-label">MVP:</span> {analysis.mvp}</div>
+											<div class="analysis-item"><span class="analysis-label">Closest Call:</span> {analysis.closest_call}</div>
+											{#if analysis.funniest_moment}
+												<div class="analysis-item"><span class="analysis-label">Funniest Moment:</span> {analysis.funniest_moment}</div>
+											{/if}
+										</div>
+									{:else}
+										<button class="btn btn-sm" onclick={() => handleAnalyzeCombat(encounter)} disabled={combatAnalysisLoading.has(encounter.id)}>
+											{combatAnalysisLoading.has(encounter.id) ? 'Analyzing...' : 'Analyze Combat'}
+										</button>
+									{/if}
+								</div>
 							</div>
 						{/if}
 					</div>
@@ -597,6 +639,7 @@
 		bind:endTime={clipEndTime}
 		users={transcriptUsers}
 		sessionDuration={sessionDuration}
+		transcriptExcerpt={clipTranscriptExcerpt}
 		onclose={() => showClipEditor = false}
 	/>
 {/if}
@@ -922,6 +965,38 @@
 		color: var(--text-secondary);
 		line-height: 1.5;
 		margin: 0;
+	}
+
+	.analysis-section {
+		padding: 0.75rem 0;
+		border-top: 1px solid var(--border);
+		margin-top: 0.75rem;
+	}
+	.analysis-heading {
+		color: var(--accent-gold);
+		font-size: 0.85rem;
+		font-weight: 600;
+		margin: 0 0 0.5rem;
+	}
+	.analysis-text {
+		color: var(--text-primary);
+		font-size: 0.85rem;
+		line-height: 1.6;
+		margin: 0 0 0.75rem;
+	}
+	.analysis-highlights {
+		display: flex;
+		flex-direction: column;
+		gap: 0.4rem;
+	}
+	.analysis-item {
+		font-size: 0.8rem;
+		color: var(--text-secondary);
+		line-height: 1.4;
+	}
+	.analysis-label {
+		color: var(--accent-gold);
+		font-weight: 600;
 	}
 
 	.actions-list {

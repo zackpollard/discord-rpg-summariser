@@ -127,8 +127,12 @@ func (c *ClaudeCLI) ExtractQuests(ctx context.Context, transcript, summary strin
 
 // GenerateRecap runs the claude CLI with the recap prompt and parses the
 // JSON response into a RecapResult.
-func (c *ClaudeCLI) GenerateRecap(ctx context.Context, sessionSummaries []string, dmName string) (*RecapResult, error) {
-	prompt := BuildRecapPrompt(sessionSummaries, dmName)
+func (c *ClaudeCLI) GenerateRecap(ctx context.Context, sessionSummaries []string, dmName string, style ...string) (*RecapResult, error) {
+	opts := RecapPromptOptions{}
+	if len(style) > 0 {
+		opts.Style = style[0]
+	}
+	prompt := BuildRecapPrompt(sessionSummaries, dmName, opts)
 	var result RecapResult
 	if err := c.runPrompt(ctx, "generate_recap", prompt, &result); err != nil {
 		return nil, err
@@ -163,6 +167,46 @@ func (c *ClaudeCLI) AnnotateTranscript(ctx context.Context, segments []Annotatio
 	prompt := BuildAnnotationPrompt(segments, vocab, dmName)
 	var result AnnotationResult
 	if err := c.runPrompt(ctx, "annotate_transcript", prompt, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GeneratePreviouslyOn runs the claude CLI with the "Previously on..." prompt.
+func (c *ClaudeCLI) GeneratePreviouslyOn(ctx context.Context, lastSessionSummary, campaignRecap string) (*PreviouslyOnResult, error) {
+	prompt := BuildPreviouslyOnPrompt(lastSessionSummary, campaignRecap)
+	var result PreviouslyOnResult
+	if err := c.runPrompt(ctx, "generate_previously_on", prompt, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// GenerateCharacterSummary runs the claude CLI with the character summary prompt.
+func (c *ClaudeCLI) GenerateCharacterSummary(ctx context.Context, characterName string, sessionSummaries []string, relationships []string) (*CharacterSummaryResult, error) {
+	prompt := BuildCharacterSummaryPrompt(characterName, sessionSummaries, relationships)
+	var result CharacterSummaryResult
+	if err := c.runPrompt(ctx, "generate_character_summary", prompt, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// AnalyzeCombat runs the claude CLI with the combat analysis prompt.
+func (c *ClaudeCLI) AnalyzeCombat(ctx context.Context, encounterSummary string, actions []string, playerCharacters []string) (*CombatAnalysisResult, error) {
+	prompt := BuildCombatAnalysisPrompt(encounterSummary, actions, playerCharacters)
+	var result CombatAnalysisResult
+	if err := c.runPrompt(ctx, "analyze_combat", prompt, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SuggestClipNames runs the claude CLI with the clip name suggestion prompt.
+func (c *ClaudeCLI) SuggestClipNames(ctx context.Context, transcriptExcerpt string) (*ClipNameResult, error) {
+	prompt := BuildClipNamePrompt(transcriptExcerpt)
+	var result ClipNameResult
+	if err := c.runPrompt(ctx, "suggest_clip_names", prompt, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

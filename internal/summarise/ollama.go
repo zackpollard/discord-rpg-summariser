@@ -126,8 +126,12 @@ func (o *Ollama) ExtractCombat(ctx context.Context, transcript, summary, dmName 
 }
 
 // GenerateRecap sends the recap prompt to Ollama and parses the JSON response.
-func (o *Ollama) GenerateRecap(ctx context.Context, sessionSummaries []string, dmName string) (*RecapResult, error) {
-	prompt := BuildRecapPrompt(sessionSummaries, dmName)
+func (o *Ollama) GenerateRecap(ctx context.Context, sessionSummaries []string, dmName string, style ...string) (*RecapResult, error) {
+	opts := RecapPromptOptions{}
+	if len(style) > 0 {
+		opts.Style = style[0]
+	}
+	prompt := BuildRecapPrompt(sessionSummaries, dmName, opts)
 	var result RecapResult
 	if err := o.runPrompt(ctx, prompt, &result); err != nil {
 		return nil, err

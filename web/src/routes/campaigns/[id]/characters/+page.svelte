@@ -1,13 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
 	import {
 		fetchCharacters,
 		fetchMembers,
 		upsertCharacter,
 		deleteCharacter,
+		fetchCharacterSummary,
 		type CharacterMapping,
-		type GuildMember
+		type GuildMember,
+		type CharacterSummaryResult
 	} from '$lib/api';
+
+	const campaignId = $derived(Number($page.params.id));
 
 	let characters = $state<CharacterMapping[]>([]);
 	let members = $state<GuildMember[]>([]);
@@ -27,6 +32,37 @@
 
 	// Delete confirmation
 	let deleteConfirm = $state<string | null>(null);
+
+	// Story arc state
+	let expandedArc = $state<string | null>(null);
+	let arcData = $state<Map<string, CharacterSummaryResult>>(new Map());
+	let arcLoading = $state<Set<string>>(new Set());
+	let arcError = $state<Map<string, string>>(new Map());
+
+	async function toggleArc(userId: string) {
+		if (expandedArc === userId) {
+			expandedArc = null;
+			return;
+		}
+		expandedArc = userId;
+		if (arcData.has(userId)) return;
+
+		const next = new Set(arcLoading);
+		next.add(userId);
+		arcLoading = next;
+		try {
+			const result = await fetchCharacterSummary(campaignId, userId);
+			arcData = new Map(arcData).set(userId, result);
+		} catch (e) {
+			const errMap = new Map(arcError);
+			errMap.set(userId, e instanceof Error ? e.message : 'Failed to load');
+			arcError = errMap;
+		} finally {
+			const next2 = new Set(arcLoading);
+			next2.delete(userId);
+			arcLoading = next2;
+		}
+	}
 
 	// Build a lookup for display names
 	const memberMap = $derived(
@@ -206,6 +242,9 @@
 							<td class="nowrap">{formatDate(mapping.updated_at)}</td>
 							<td class="actions">
 								{#if editingUserId !== mapping.user_id}
+									<button class="btn-sm" onclick={() => toggleArc(mapping.user_id)}>
+										{expandedArc === mapping.user_id ? 'Hide Arc' : 'Story Arc'}
+									</button>
 									<button class="btn-sm" onclick={() => startEdit(mapping)}>Edit</button>
 									{#if deleteConfirm === mapping.user_id}
 										<button class="btn-sm btn-danger" onclick={() => handleDelete(mapping.user_id)}>Confirm</button>
@@ -216,6 +255,37 @@
 								{/if}
 							</td>
 						</tr>
+						{#if expandedArc === mapping.user_id}
+							<tr>
+								<td colspan="4" class="arc-cell">
+									{#if arcLoading.has(mapping.user_id)}
+										<p class="muted">Generating story arc...</p>
+									{:else if arcError.has(mapping.user_id)}
+										<p class="arc-error">{arcError.get(mapping.user_id)}</p>
+									{:else if arcData.has(mapping.user_id)}
+										{@const arc = arcData.get(mapping.user_id)!}
+										<div class="arc-content">
+											<h4>Story Arc</h4>
+											<p>{arc.story_arc}</p>
+											{#if arc.key_moments.length > 0}
+												<h4>Key Moments</h4>
+												<ul>
+													{#each arc.key_moments as moment}
+														<li>{moment}</li>
+													{/each}
+												</ul>
+											{/if}
+											{#if arc.relationship_summaries.length > 0}
+												<h4>Relationships</h4>
+												{#each arc.relationship_summaries as rel}
+													<p class="arc-rel"><strong>{rel.character}:</strong> {rel.summary}</p>
+												{/each}
+											{/if}
+										</div>
+									{/if}
+								</td>
+							</tr>
+						{/if}
 					{/each}
 				</tbody>
 			</table>
@@ -380,6 +450,45 @@
 	}
 	.btn-danger { border-color: #7f1d1d; color: #fca5a5; }
 	.btn-danger:hover { background: rgba(185, 28, 28, 0.2); border-color: #b91c1c; }
+
+	.arc-cell {
+		padding: 1rem 1.25rem !important;
+		background: var(--bg-dark);
+	}
+	.arc-content h4 {
+		color: var(--accent-gold);
+		font-size: 0.85rem;
+		font-weight: 600;
+		margin: 0.75rem 0 0.35rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.arc-content h4:first-child {
+		margin-top: 0;
+	}
+	.arc-content p {
+		color: var(--text-primary);
+		font-size: 0.9rem;
+		line-height: 1.6;
+		margin: 0 0 0.5rem;
+	}
+	.arc-content ul {
+		margin: 0 0 0.5rem;
+		padding-left: 1.25rem;
+	}
+	.arc-content li {
+		color: var(--text-primary);
+		font-size: 0.85rem;
+		line-height: 1.5;
+		margin-bottom: 0.25rem;
+	}
+	.arc-rel {
+		font-size: 0.85rem !important;
+	}
+	.arc-error {
+		color: #fca5a5;
+		font-size: 0.85rem;
+	}
 
 	.empty-state {
 		text-align: center;

@@ -494,9 +494,10 @@ export async function fetchRecap(campaignId: number): Promise<CampaignRecap> {
 	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap`);
 }
 
-export async function regenerateRecap(campaignId: number, lastN?: number): Promise<CampaignRecap> {
+export async function regenerateRecap(campaignId: number, lastN?: number, style?: string): Promise<CampaignRecap> {
 	const params = new URLSearchParams();
 	if (lastN !== undefined) params.set('last', String(lastN));
+	if (style && style !== 'default') params.set('style', style);
 	const qs = params.toString();
 	return request<CampaignRecap>(`/api/campaigns/${campaignId}/recap${qs ? '?' + qs : ''}`, {
 		method: 'POST'
@@ -752,6 +753,62 @@ export function clipAudioURL(clipId: number): string {
 
 export async function fetchCampaignStats(campaignId: number): Promise<CampaignStats> {
 	return request<CampaignStats>(`/api/campaigns/${campaignId}/stats`);
+}
+
+// "Previously On..." types and functions
+
+export interface PreviouslyOnResult {
+	text: string;
+}
+
+export async function fetchPreviouslyOn(campaignId: number): Promise<PreviouslyOnResult> {
+	return request<PreviouslyOnResult>(`/api/campaigns/${campaignId}/previously-on`);
+}
+
+// Character summary types and functions
+
+export interface RelationshipNote {
+	character: string;
+	summary: string;
+}
+
+export interface CharacterSummaryResult {
+	story_arc: string;
+	key_moments: string[];
+	relationship_summaries: RelationshipNote[];
+}
+
+export async function fetchCharacterSummary(campaignId: number, userId: string): Promise<CharacterSummaryResult> {
+	return request<CharacterSummaryResult>(`/api/campaigns/${campaignId}/characters/${userId}/summary`);
+}
+
+// Combat analysis types and functions
+
+export interface CombatAnalysisResult {
+	tactical_summary: string;
+	mvp: string;
+	closest_call: string;
+	funniest_moment: string;
+}
+
+export async function fetchCombatAnalysis(encounterId: number, summary: string, characters?: string[]): Promise<CombatAnalysisResult> {
+	const params = new URLSearchParams({ summary });
+	if (characters && characters.length > 0) params.set('characters', characters.join(','));
+	return request<CombatAnalysisResult>(`/api/combat/${encounterId}/analysis?${params.toString()}`);
+}
+
+// Clip name suggestion types and functions
+
+export interface ClipNameSuggestions {
+	suggestions: string[];
+}
+
+export async function suggestClipNames(excerpt: string): Promise<ClipNameSuggestions> {
+	return request<ClipNameSuggestions>('/api/clips/suggest-name', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ transcript_excerpt: excerpt })
+	});
 }
 
 // PDF campaign book

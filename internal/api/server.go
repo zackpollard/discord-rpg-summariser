@@ -12,6 +12,7 @@ import (
 	"discord-rpg-summariser/internal/config"
 	"discord-rpg-summariser/internal/embed"
 	"discord-rpg-summariser/internal/storage"
+	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/voice"
 )
 
@@ -33,6 +34,7 @@ type Server struct {
 	embedder      embed.Embedder
 	ttsSvc        *ttsService
 	soundboardP   SoundboardPlayer
+	summariser    *summarise.ClaudeCLI
 	mux           *http.ServeMux
 	httpServer    *http.Server
 	sessions      *auth.SessionManager
@@ -130,6 +132,11 @@ func (s *Server) SetEmbedder(e embed.Embedder) {
 // SetSoundboardPlayer sets the soundboard player for voice channel playback.
 func (s *Server) SetSoundboardPlayer(sp SoundboardPlayer) {
 	s.soundboardP = sp
+}
+
+// SetSummariser sets the summariser for LLM-powered features.
+func (s *Server) SetSummariser(sum *summarise.ClaudeCLI) {
+	s.summariser = sum
 }
 
 // SetTTSService sets the TTS service for voice-cloned recap audio.

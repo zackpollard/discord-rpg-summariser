@@ -66,6 +66,7 @@ func main() {
 	log.Printf("Transcription engine configured: %s (lazy-loaded)", cfg.Transcribe.Engine)
 
 	var sum summarise.Summariser
+	var claudeCLI *summarise.ClaudeCLI
 	switch cfg.LLM.Provider {
 	case "ollama":
 		sum = summarise.NewOllama(cfg.LLM.OllamaURL, cfg.LLM.OllamaModel)
@@ -92,6 +93,7 @@ func main() {
 				log.Printf("Failed to save LLM log: %v", err)
 			}
 		}
+		claudeCLI = cli
 		sum = cli
 	}
 
@@ -143,6 +145,9 @@ func main() {
 		log.Println("TTS enabled: ZipVoice (voice-cloned recap)")
 	}
 
+	if claudeCLI != nil {
+		srv.SetSummariser(claudeCLI)
+	}
 	srv.SetSoundboardPlayer(discordBot)
 	srv.SetVoiceActivityProvider(discordBot)
 	srv.SetLiveTranscriptProvider(discordBot)

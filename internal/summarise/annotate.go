@@ -188,3 +188,197 @@ func formatAnnotationTime(secs float64) string {
 	s := int(secs) % 60
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
+
+// --- "Previously On..." Generator ---
+
+// PreviouslyOnGenerator generates a dramatic "Previously on..." narration.
+type PreviouslyOnGenerator interface {
+	GeneratePreviouslyOn(ctx context.Context, lastSessionSummary, campaignRecap string) (*PreviouslyOnResult, error)
+}
+
+// PreviouslyOnResult holds the generated "Previously on..." text.
+type PreviouslyOnResult struct {
+	Text string `json:"text"`
+}
+
+// BuildPreviouslyOnPrompt constructs the prompt for a dramatic "Previously on..." narration.
+func BuildPreviouslyOnPrompt(lastSessionSummary, campaignRecap string) string {
+	var b strings.Builder
+
+	b.WriteString("You are a dramatic narrator for a tabletop RPG show, similar to the voice-over at the start of a TV episode.\n\n")
+	b.WriteString("Your task: Write a dramatic 2-3 paragraph \"Previously on...\" narration designed to be read aloud at the start of the next session.\n\n")
+
+	b.WriteString("## Guidelines\n\n")
+	b.WriteString("- Focus on cliffhangers, unresolved tensions, and immediate context from the LAST session\n")
+	b.WriteString("- Use dramatic, cinematic language — build tension and anticipation\n")
+	b.WriteString("- End with a hook that makes players excited to continue\n")
+	b.WriteString("- Use character names, not player names\n")
+	b.WriteString("- Keep it to 2-3 short paragraphs (this will be read aloud, so brevity matters)\n")
+	b.WriteString("- Write in present tense for immediacy (\"The party stands at the threshold...\")\n\n")
+
+	if campaignRecap != "" {
+		b.WriteString("## Campaign Context (for background only)\n\n")
+		b.WriteString(campaignRecap)
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("## Last Session Summary (focus on this)\n\n")
+	b.WriteString(lastSessionSummary)
+	b.WriteString("\n\n")
+
+	b.WriteString("Return ONLY valid JSON with exactly this field:\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"text\": \"The full Previously On narration text.\"\n")
+	b.WriteString("}\n")
+
+	return b.String()
+}
+
+// --- Character Summary Generator ---
+
+// CharacterSummaryGenerator generates per-character story arc summaries.
+type CharacterSummaryGenerator interface {
+	GenerateCharacterSummary(ctx context.Context, characterName string, sessionSummaries []string, relationships []string) (*CharacterSummaryResult, error)
+}
+
+// CharacterSummaryResult holds the generated character story arc summary.
+type CharacterSummaryResult struct {
+	StoryArc              string             `json:"story_arc"`
+	KeyMoments            []string           `json:"key_moments"`
+	RelationshipSummaries []RelationshipNote `json:"relationship_summaries"`
+}
+
+// RelationshipNote describes a character's relationship with another character.
+type RelationshipNote struct {
+	Character string `json:"character"`
+	Summary   string `json:"summary"`
+}
+
+// BuildCharacterSummaryPrompt constructs the prompt for character story arc generation.
+func BuildCharacterSummaryPrompt(characterName string, sessionSummaries []string, relationships []string) string {
+	var b strings.Builder
+
+	b.WriteString("You are an expert storyteller analyzing a character's journey through a tabletop RPG campaign.\n\n")
+	fmt.Fprintf(&b, "## Character: %s\n\n", characterName)
+
+	b.WriteString("## Session Summaries (chronological)\n\n")
+	for i, summary := range sessionSummaries {
+		fmt.Fprintf(&b, "--- Session %d ---\n%s\n\n", i+1, summary)
+	}
+
+	if len(relationships) > 0 {
+		b.WriteString("## Known Relationships\n\n")
+		for _, rel := range relationships {
+			fmt.Fprintf(&b, "- %s\n", rel)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## Instructions\n\n")
+	fmt.Fprintf(&b, "Analyze %s's journey through this campaign and produce:\n\n", characterName)
+	b.WriteString("1. **story_arc**: A 1-2 paragraph narrative summary of this character's personal story arc, growth, and key decisions\n")
+	b.WriteString("2. **key_moments**: 3-8 pivotal moments for this character (brief descriptions)\n")
+	b.WriteString("3. **relationship_summaries**: For each significant relationship, a brief summary of how it developed\n\n")
+
+	b.WriteString("Return ONLY valid JSON:\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"story_arc\": \"Narrative summary...\",\n")
+	b.WriteString("  \"key_moments\": [\"Moment one\", \"Moment two\"],\n")
+	b.WriteString("  \"relationship_summaries\": [{\"character\": \"NPC Name\", \"summary\": \"How the relationship evolved\"}]\n")
+	b.WriteString("}\n")
+
+	return b.String()
+}
+
+// --- Combat Analyzer ---
+
+// CombatAnalyzer generates tactical analysis of combat encounters.
+type CombatAnalyzer interface {
+	AnalyzeCombat(ctx context.Context, encounterSummary string, actions []string, playerCharacters []string) (*CombatAnalysisResult, error)
+}
+
+// CombatAnalysisResult holds the generated combat analysis.
+type CombatAnalysisResult struct {
+	TacticalSummary string `json:"tactical_summary"`
+	MVP             string `json:"mvp"`
+	ClosestCall     string `json:"closest_call"`
+	FunniestMoment  string `json:"funniest_moment"`
+}
+
+// BuildCombatAnalysisPrompt constructs the prompt for combat encounter analysis.
+func BuildCombatAnalysisPrompt(encounterSummary string, actions []string, playerCharacters []string) string {
+	var b strings.Builder
+
+	b.WriteString("You are a tactical combat analyst for tabletop RPG sessions. Analyze this combat encounter with a mix of tactical insight and entertainment.\n\n")
+
+	b.WriteString("## Encounter Summary\n\n")
+	b.WriteString(encounterSummary)
+	b.WriteString("\n\n")
+
+	if len(playerCharacters) > 0 {
+		b.WriteString("## Player Characters\n\n")
+		b.WriteString(strings.Join(playerCharacters, ", "))
+		b.WriteString("\n\n")
+	}
+
+	b.WriteString("## Combat Actions\n\n")
+	for _, action := range actions {
+		fmt.Fprintf(&b, "- %s\n", action)
+	}
+	b.WriteString("\n")
+
+	b.WriteString("## Instructions\n\n")
+	b.WriteString("Produce a combat analysis with:\n")
+	b.WriteString("1. **tactical_summary**: 1-2 paragraph analysis of the combat tactics, strategy, and flow\n")
+	b.WriteString("2. **mvp**: Who performed best and why (1-2 sentences)\n")
+	b.WriteString("3. **closest_call**: The most dangerous moment where things almost went wrong (1-2 sentences)\n")
+	b.WriteString("4. **funniest_moment**: The most amusing or unexpected thing that happened (1-2 sentences, or empty string if nothing funny occurred)\n\n")
+
+	b.WriteString("Return ONLY valid JSON:\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"tactical_summary\": \"...\",\n")
+	b.WriteString("  \"mvp\": \"...\",\n")
+	b.WriteString("  \"closest_call\": \"...\",\n")
+	b.WriteString("  \"funniest_moment\": \"...\"\n")
+	b.WriteString("}\n")
+
+	return b.String()
+}
+
+// --- Clip Name Suggester ---
+
+// ClipNameSuggester suggests names for soundboard clips.
+type ClipNameSuggester interface {
+	SuggestClipNames(ctx context.Context, transcriptExcerpt string) (*ClipNameResult, error)
+}
+
+// ClipNameResult holds suggested clip names.
+type ClipNameResult struct {
+	Suggestions []string `json:"suggestions"`
+}
+
+// BuildClipNamePrompt constructs the prompt for clip name suggestions.
+func BuildClipNamePrompt(transcriptExcerpt string) string {
+	var b strings.Builder
+
+	b.WriteString("You are a creative soundboard clip naming assistant for a tabletop RPG group.\n\n")
+	b.WriteString("Given a transcript excerpt from a session, suggest 3-5 short, catchy names for a soundboard clip.\n\n")
+
+	b.WriteString("## Guidelines\n\n")
+	b.WriteString("- Names should be short (1-5 words)\n")
+	b.WriteString("- Be catchy, memorable, and fun\n")
+	b.WriteString("- Reference what's being said or the emotion/tone\n")
+	b.WriteString("- Think of names that would make sense on a soundboard button\n")
+	b.WriteString("- Include a mix: some literal, some funny, some referencing the moment\n\n")
+
+	b.WriteString("## Transcript Excerpt\n\n")
+	b.WriteString(transcriptExcerpt)
+	b.WriteString("\n\n")
+
+	b.WriteString("Return ONLY valid JSON:\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"suggestions\": [\"Name 1\", \"Name 2\", \"Name 3\"]\n")
+	b.WriteString("}\n")
+
+	return b.String()
+}

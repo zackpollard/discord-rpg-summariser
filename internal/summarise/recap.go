@@ -13,20 +13,36 @@ type RecapResult struct {
 
 // RecapGenerator produces a "story so far" narrative from session summaries.
 type RecapGenerator interface {
-	GenerateRecap(ctx context.Context, sessionSummaries []string, dmName string) (*RecapResult, error)
+	GenerateRecap(ctx context.Context, sessionSummaries []string, dmName string, style ...string) (*RecapResult, error)
+}
+
+// RecapPromptOptions holds optional parameters for BuildRecapPrompt.
+type RecapPromptOptions struct {
+	LastN int
+	Style string // "dramatic", "casual", "in-character", or "" for default
 }
 
 // BuildRecapPrompt constructs the LLM prompt for generating a "story so far"
 // narrative recap from chronological session summaries.
 // If lastN > 0, the prompt is adjusted to indicate a partial recap covering
 // only the most recent N sessions.
-func BuildRecapPrompt(sessionSummaries []string, dmName string, lastN ...int) string {
-	partial := 0
-	if len(lastN) > 0 && lastN[0] > 0 {
-		partial = lastN[0]
+func BuildRecapPrompt(sessionSummaries []string, dmName string, opts ...RecapPromptOptions) string {
+	var o RecapPromptOptions
+	if len(opts) > 0 {
+		o = opts[0]
 	}
 
 	var b strings.Builder
+
+	// Prepend style instructions if a non-default style is specified.
+	switch o.Style {
+	case "dramatic":
+		b.WriteString("IMPORTANT STYLE INSTRUCTION: Write in a dramatic, epic fantasy narrator voice. Use vivid, cinematic language. Build tension, emphasize heroic moments, and make the narrative feel like the opening crawl of a fantasy epic. Use rich metaphors and evocative descriptions.\n\n")
+	case "casual":
+		b.WriteString("IMPORTANT STYLE INSTRUCTION: Write in a casual, informal tone. Summarise events like you're telling a friend what happened over coffee. Use relaxed language, contractions, and a conversational style. Keep it fun and approachable.\n\n")
+	case "in-character":
+		b.WriteString("IMPORTANT STYLE INSTRUCTION: Write as if you are an NPC chronicler or bard within the game world. Use first-person perspective of a storyteller NPC. Include flourishes like \"Dear reader\" or \"As I witnessed...\" — make it feel like an in-world historical document or tavern tale.\n\n")
+	}
 
 	b.WriteString("You are an expert storyteller and lore-keeper for tabletop RPG campaigns (Dungeons & Dragons 5th Edition).\n\n")
 
@@ -34,8 +50,8 @@ func BuildRecapPrompt(sessionSummaries []string, dmName string, lastN ...int) st
 		b.WriteString("The Dungeon Master is: " + dmName + "\n\n")
 	}
 
-	if partial > 0 {
-		fmt.Fprintf(&b, "Below are summaries of the most recent %d sessions, in chronological order. ", partial)
+	if o.LastN > 0 {
+		fmt.Fprintf(&b, "Below are summaries of the most recent %d sessions, in chronological order. ", o.LastN)
 		b.WriteString("Synthesise them into a cohesive narrative recap of recent events.\n\n")
 	} else {
 		b.WriteString("Below are summaries of each session played so far, in chronological order. ")

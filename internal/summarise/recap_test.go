@@ -91,7 +91,7 @@ func TestBuildRecapPrompt_PartialLastN(t *testing.T) {
 		"Session five: the party confronted the lich.",
 	}
 
-	prompt := BuildRecapPrompt(summaries, "Matt", 2)
+	prompt := BuildRecapPrompt(summaries, "Matt", RecapPromptOptions{LastN: 2})
 
 	if !strings.Contains(prompt, "most recent 2 sessions") {
 		t.Error("partial prompt should mention 'most recent 2 sessions'")
@@ -117,7 +117,7 @@ func TestBuildRecapPrompt_PartialLastN(t *testing.T) {
 
 func TestBuildRecapPrompt_ZeroLastN(t *testing.T) {
 	// lastN=0 should behave the same as the default (full recap).
-	prompt := BuildRecapPrompt([]string{"A session happened."}, "", 0)
+	prompt := BuildRecapPrompt([]string{"A session happened."}, "", RecapPromptOptions{LastN: 0})
 
 	if !strings.Contains(prompt, "Story So Far") {
 		t.Error("prompt with lastN=0 should contain 'Story So Far'")

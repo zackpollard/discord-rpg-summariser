@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchRecap, regenerateRecap, campaignPDFURL, fetchRecapVoices, recapTTSURL, uploadVoiceProfile, deleteVoiceProfile, type CampaignRecap, type RecapVoice } from '$lib/api';
+	import { fetchRecap, regenerateRecap, fetchPreviouslyOn, campaignPDFURL, fetchRecapVoices, recapTTSURL, uploadVoiceProfile, deleteVoiceProfile, type CampaignRecap, type RecapVoice, type PreviouslyOnResult } from '$lib/api';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 
 	const campaignId = $derived(Number($page.params.id));
@@ -11,6 +11,24 @@
 	let generating = $state(false);
 	let error = $state<string | null>(null);
 	let lastN = $state<number | undefined>(undefined);
+	let recapStyle = $state('default');
+
+	// Previously On state.
+	let previouslyOn = $state<PreviouslyOnResult | null>(null);
+	let prevOnLoading = $state(false);
+	let prevOnError = $state<string | null>(null);
+
+	async function handleGeneratePreviouslyOn() {
+		prevOnLoading = true;
+		prevOnError = null;
+		try {
+			previouslyOn = await fetchPreviouslyOn(campaignId);
+		} catch (e) {
+			prevOnError = e instanceof Error ? e.message : 'Failed to generate';
+		} finally {
+			prevOnLoading = false;
+		}
+	}
 
 	// TTS voice picker state.
 	let voices = $state<RecapVoice[]>([]);
@@ -120,7 +138,7 @@
 		generating = true;
 		error = null;
 		try {
-			recap = await regenerateRecap(campaignId, lastN);
+			recap = await regenerateRecap(campaignId, lastN, recapStyle);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to generate recap';
 		} finally {
@@ -158,6 +176,15 @@
 						oninput={(e) => { const v = parseInt((e.target as HTMLInputElement).value); lastN = Number.isNaN(v) ? undefined : v; }}
 					/>
 				</label>
+				<label class="last-n-label">
+					Style:
+					<select class="style-select" bind:value={recapStyle}>
+						<option value="default">Default</option>
+						<option value="dramatic">Dramatic</option>
+						<option value="casual">Casual</option>
+						<option value="in-character">In-Character</option>
+					</select>
+				</label>
 			</div>
 			<button class="generate-btn" onclick={handleRegenerate} disabled={generating}>
 				{#if generating}
@@ -186,6 +213,15 @@
 						placeholder="All"
 						oninput={(e) => { const v = parseInt((e.target as HTMLInputElement).value); lastN = Number.isNaN(v) ? undefined : v; }}
 					/>
+				</label>
+				<label class="last-n-label">
+					Style:
+					<select class="style-select" bind:value={recapStyle}>
+						<option value="default">Default</option>
+						<option value="dramatic">Dramatic</option>
+						<option value="casual">Casual</option>
+						<option value="in-character">In-Character</option>
+					</select>
 				</label>
 				<button class="regenerate-btn" onclick={handleRegenerate} disabled={generating}>
 					{#if generating}
@@ -257,6 +293,34 @@
 				{/if}
 			</div>
 
+		<div class="previously-on-section">
+			<div class="previously-on-header">
+				<h2 class="previously-on-title">Previously On...</h2>
+				<button class="regenerate-btn" onclick={handleGeneratePreviouslyOn} disabled={prevOnLoading}>
+					{#if prevOnLoading}
+						<span class="spinner"></span>
+						Generating...
+					{:else}
+						{previouslyOn ? 'Regenerate' : 'Generate'}
+					{/if}
+				</button>
+			</div>
+			{#if prevOnError}
+				<div class="error-box">{prevOnError}</div>
+			{/if}
+			{#if previouslyOn}
+				<div class="previously-on-body">
+					{#each previouslyOn.text.split('\n\n') as paragraph}
+						{#if paragraph.trim()}
+							<p>{paragraph.trim()}</p>
+						{/if}
+					{/each}
+				</div>
+			{:else if !prevOnLoading}
+				<p class="muted" style="font-size: 0.85rem;">Generate a dramatic "Previously on..." narration from the last session, designed to be read aloud.</p>
+			{/if}
+		</div>
+
 		<div class="recap-body">
 			{#each recap.recap.split('\n\n') as paragraph}
 				{#if paragraph.trim()}
@@ -313,6 +377,15 @@
 	}
 	.last-n-input::placeholder {
 		color: var(--text-muted);
+	}
+
+	.style-select {
+		padding: 0.3rem 0.5rem;
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		color: var(--text-primary);
+		font-size: 0.85rem;
 	}
 
 	.pdf-btn {
@@ -434,6 +507,37 @@
 		background: var(--accent-gold);
 		border-radius: 3px;
 		transition: width 0.3s ease;
+	}
+
+	.previously-on-section {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 1.25rem 1.5rem;
+		margin-bottom: 1.25rem;
+	}
+	.previously-on-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.75rem;
+	}
+	.previously-on-title {
+		color: var(--accent-gold);
+		font-size: 1.1rem;
+		font-weight: 600;
+		margin: 0;
+		font-style: italic;
+	}
+	.previously-on-body p {
+		color: var(--text-primary);
+		font-size: 1rem;
+		line-height: 1.7;
+		font-style: italic;
+		margin-bottom: 1rem;
+	}
+	.previously-on-body p:last-child {
+		margin-bottom: 0;
 	}
 
 	.recap-body {

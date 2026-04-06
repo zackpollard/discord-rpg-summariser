@@ -38,6 +38,9 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/campaigns/{id}/recap/tts", s.handleGetRecapTTS)
 	s.handle("GET /api/campaigns/{id}/recap/ref", s.handleGetRefAudio)
 
+	s.handle("GET /api/campaigns/{id}/previously-on", s.handleGetPreviouslyOn)
+	s.handle("GET /api/campaigns/{id}/characters/{userId}/summary", s.handleGetCharacterSummary)
+
 	s.handle("GET /api/campaigns/{id}/clips", s.handleListClips)
 	s.handle("POST /api/campaigns/{id}/clips", s.handleCreateClip)
 	s.handle("DELETE /api/clips/{clipId}", s.handleDeleteClip)
@@ -53,6 +56,9 @@ func (s *Server) setupRoutes() {
 	s.handle("PATCH /api/entities/{id}", s.handleRenameEntity)
 	s.handle("POST /api/entities/{id}/merge", s.handleMergeEntity)
 	s.handle("GET /api/quests/{id}", s.handleGetQuest)
+
+	s.handle("GET /api/combat/{encounterId}/analysis", s.handleGetCombatAnalysis)
+	s.handle("POST /api/clips/suggest-name", s.handleSuggestClipNames)
 
 	s.handle("GET /api/sessions", s.handleListSessions)
 	s.handle("GET /api/sessions/{id}", s.handleGetSession)
