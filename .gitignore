@@ -8,3 +8,4 @@ web/build/
 models/
 /bot
 _deps/whisper.cpp/
+tmp/

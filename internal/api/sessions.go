@@ -20,6 +20,7 @@ type sessionResponse struct {
 	Status     string     `json:"status"`
 	Summary    *string    `json:"summary"`
 	KeyEvents  []string   `json:"key_events"`
+	Title      *string    `json:"title"`
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
@@ -38,6 +39,7 @@ func toSessionResponse(sess *storage.Session) sessionResponse {
 		Status:     sess.Status,
 		Summary:    sess.Summary,
 		KeyEvents:  events,
+		Title:      sess.Title,
 		CreatedAt:  sess.CreatedAt,
 	}
 }

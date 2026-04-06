@@ -15,7 +15,7 @@ type TranscriptAnnotator interface {
 // AnnotationInput represents a single transcript segment to annotate.
 type AnnotationInput struct {
 	ID        int64
-	Speaker   string  // character name, "DM", or discord display name
+	Speaker   string // character name, "DM", or discord display name
 	StartTime float64
 	Text      string
 }
@@ -30,12 +30,12 @@ type AnnotationVocabulary struct {
 // AnnotatedSegment is the per-segment annotation output from the LLM.
 type AnnotatedSegment struct {
 	ID             int64   `json:"id"`
-	Classification string  `json:"classification"`   // narrative, table_talk, ambiguous
-	CorrectedText  *string `json:"corrected_text"`   // null if no correction needed
-	Scene          *string `json:"scene"`             // scene label, null if same as previous
-	NPCVoice       *string `json:"npc_voice"`         // NPC name if DM is voicing, null otherwise
-	MergeWithNext  bool    `json:"merge_with_next"`   // true if this segment should be merged with the next
-	Tone           *string `json:"tone"`              // emotional tone: dramatic, funny, tense, sad, neutral, etc.
+	Classification string  `json:"classification"`  // narrative, table_talk, ambiguous
+	CorrectedText  *string `json:"corrected_text"`  // null if no correction needed
+	Scene          *string `json:"scene"`           // scene label, null if same as previous
+	NPCVoice       *string `json:"npc_voice"`       // NPC name if DM is voicing, null otherwise
+	MergeWithNext  bool    `json:"merge_with_next"` // true if this segment should be merged with the next
+	Tone           *string `json:"tone"`            // emotional tone: dramatic, funny, tense, sad, neutral, etc.
 }
 
 // AnnotationResult is the top-level JSON response.
@@ -120,6 +120,64 @@ Respond with a JSON object containing a "segments" array. Each element must have
 
 Output ONLY the JSON object, no other text.
 `)
+
+	return b.String()
+}
+
+// TitleAndQuotesExtractor generates a session title and extracts memorable quotes.
+type TitleAndQuotesExtractor interface {
+	ExtractTitleAndQuotes(ctx context.Context, transcript, summary, dmName string) (*TitleAndQuotesResult, error)
+}
+
+// TitleAndQuotesResult is the JSON response from the title/quotes LLM call.
+type TitleAndQuotesResult struct {
+	Title  string           `json:"title"`
+	Quotes []ExtractedQuote `json:"quotes"`
+}
+
+// ExtractedQuote is a single memorable quote extracted from the transcript.
+type ExtractedQuote struct {
+	Speaker   string  `json:"speaker"`
+	Text      string  `json:"text"`
+	StartTime float64 `json:"start_time"`
+	Tone      string  `json:"tone"`
+}
+
+// BuildTitleAndQuotesPrompt constructs the prompt for session title generation
+// and memorable quote extraction.
+func BuildTitleAndQuotesPrompt(transcript, summary, dmName string) string {
+	var b strings.Builder
+
+	b.WriteString("You are an expert at creating evocative titles for tabletop RPG sessions and identifying memorable moments.\n\n")
+
+	if dmName != "" {
+		fmt.Fprintf(&b, "The DM is %s.\n\n", dmName)
+	}
+
+	b.WriteString("## Session Summary\n\n")
+	b.WriteString(summary)
+	b.WriteString("\n\n## Session Transcript\n\n")
+	b.WriteString(transcript)
+
+	b.WriteString("\n\n## Instructions\n\n")
+	b.WriteString("Based on the summary and transcript above, produce:\n\n")
+	b.WriteString("1. **A session title** (3-8 words): dramatic, evocative, and specific to what happened. ")
+	b.WriteString("Good examples: \"The Ambush at Thornwall\", \"A Deal with the Devil\", \"Blood on the Altar\", \"The Crown of Forgotten Kings\". ")
+	b.WriteString("Avoid generic titles like \"An Adventurous Session\" or \"The Next Chapter\".\n\n")
+	b.WriteString("2. **3-10 memorable direct quotes** from the transcript. Pick lines that are:\n")
+	b.WriteString("   - Funny, dramatic, or emotionally impactful\n")
+	b.WriteString("   - Iconic character moments\n")
+	b.WriteString("   - Lines players would remember and laugh or gasp about\n")
+	b.WriteString("   - Include the exact speaker name, approximate start_time (in seconds from the transcript timestamps), and a tone tag\n")
+	b.WriteString("   - Tone tags: funny, dramatic, tense, sad, triumphant, mysterious, angry, badass, wholesome\n\n")
+
+	b.WriteString("Return ONLY valid JSON with exactly these fields:\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"title\": \"The Session Title Here\",\n")
+	b.WriteString("  \"quotes\": [\n")
+	b.WriteString("    {\"speaker\": \"CharacterName\", \"text\": \"The exact quote.\", \"start_time\": 1234.5, \"tone\": \"funny\"}\n")
+	b.WriteString("  ]\n")
+	b.WriteString("}\n")
 
 	return b.String()
 }

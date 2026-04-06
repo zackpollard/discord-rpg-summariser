@@ -63,6 +63,7 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/sessions/{id}/audio", s.handleGetSessionAudio)
 	s.handle("GET /api/sessions/{id}/waveform", s.handleGetSessionWaveform)
 	s.handle("GET /api/sessions/{id}/llm-logs", s.handleGetLLMLogs)
+	s.handle("GET /api/sessions/{id}/quotes", s.handleGetSessionQuotes)
 
 	s.handle("GET /api/characters", s.handleListCharacters)
 	s.handle("PUT /api/characters", s.handleUpsertCharacter)

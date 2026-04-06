@@ -20,10 +20,11 @@ type Session struct {
 	AudioDir   string
 	Summary    *string
 	KeyEvents  []string
+	Title      *string
 	CreatedAt  time.Time
 }
 
-const sessionColumns = `id, guild_id, campaign_id, channel_id, started_at, ended_at, status, audio_dir, summary, key_events, created_at`
+const sessionColumns = `id, guild_id, campaign_id, channel_id, started_at, ended_at, status, audio_dir, summary, key_events, title, created_at`
 
 func (s *Store) CreateSession(ctx context.Context, guildID string, campaignID int64, channelID, audioDir string) (int64, error) {
 	var id int64
@@ -172,13 +173,18 @@ func (s *Store) GetActiveSession(ctx context.Context, guildID string) (*Session,
 	return sess, err
 }
 
+func (s *Store) UpdateSessionTitle(ctx context.Context, id int64, title string) error {
+	_, err := s.Pool.Exec(ctx, "UPDATE sessions SET title = $1 WHERE id = $2", title, id)
+	return err
+}
+
 func scanSession(row pgx.Row) (*Session, error) {
 	var sess Session
 	var keyEventsJSON []byte
 
 	err := row.Scan(
 		&sess.ID, &sess.GuildID, &sess.CampaignID, &sess.ChannelID, &sess.StartedAt,
-		&sess.EndedAt, &sess.Status, &sess.AudioDir, &sess.Summary, &keyEventsJSON, &sess.CreatedAt,
+		&sess.EndedAt, &sess.Status, &sess.AudioDir, &sess.Summary, &keyEventsJSON, &sess.Title, &sess.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -195,7 +201,7 @@ func scanSessionRows(rows pgx.Rows) (*Session, error) {
 
 	err := rows.Scan(
 		&sess.ID, &sess.GuildID, &sess.CampaignID, &sess.ChannelID, &sess.StartedAt,
-		&sess.EndedAt, &sess.Status, &sess.AudioDir, &sess.Summary, &keyEventsJSON, &sess.CreatedAt,
+		&sess.EndedAt, &sess.Status, &sess.AudioDir, &sess.Summary, &keyEventsJSON, &sess.Title, &sess.CreatedAt,
 	)
 	if err != nil {
 		return nil, err

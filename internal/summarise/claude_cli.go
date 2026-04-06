@@ -147,6 +147,17 @@ func (c *ClaudeCLI) ExtractCombat(ctx context.Context, transcript, summary, dmNa
 	return &result, nil
 }
 
+// ExtractTitleAndQuotes runs the claude CLI to generate a session title and
+// extract memorable quotes from the transcript.
+func (c *ClaudeCLI) ExtractTitleAndQuotes(ctx context.Context, transcript, summary, dmName string) (*TitleAndQuotesResult, error) {
+	prompt := BuildTitleAndQuotesPrompt(transcript, summary, dmName)
+	var result TitleAndQuotesResult
+	if err := c.runPrompt(ctx, "extract_title_quotes", prompt, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // AnnotateTranscript runs the claude CLI with the annotation prompt.
 func (c *ClaudeCLI) AnnotateTranscript(ctx context.Context, segments []AnnotationInput, vocab AnnotationVocabulary, dmName string) (*AnnotationResult, error) {
 	prompt := BuildAnnotationPrompt(segments, vocab, dmName)

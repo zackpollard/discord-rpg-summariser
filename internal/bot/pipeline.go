@@ -261,6 +261,10 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 
 	b.sendNotification(sessionID, result.Summary)
 
+	// Extract title and memorable quotes (non-fatal on error).
+	b.progress.SetStage("extracting title", "Generating session title and quotes")
+	b.extractTitleAndQuotes(ctx, session, sessionID, transcript, result.Summary, dmName)
+
 	// Extract entities for the knowledge base (non-fatal on error).
 	b.progress.SetStage("extracting entities", "Extracting entities")
 	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
@@ -313,7 +317,6 @@ func (b *Bot) gatherCampaignVocabulary(ctx context.Context, campaignID int64) []
 
 	return words
 }
-
 
 // buildTranscriptWithTelegram persists Telegram messages to the DB, filters
 // them, and returns a formatted transcript with voice segments and Telegram
@@ -839,6 +842,51 @@ func (b *Bot) extractCombat(ctx context.Context, session *storage.Session, sessi
 	}
 
 	log.Printf("pipeline: extracted %d combat encounters", len(extraction.Encounters))
+}
+
+// ---------------------------------------------------------------------------
+// Title and quote extraction
+// ---------------------------------------------------------------------------
+
+func (b *Bot) extractTitleAndQuotes(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary, dmName string) {
+	extractor, ok := b.summariser.(summarise.TitleAndQuotesExtractor)
+	if !ok {
+		return
+	}
+
+	result, err := extractor.ExtractTitleAndQuotes(ctx, transcript, summary, dmName)
+	if err != nil {
+		log.Printf("pipeline: title/quotes extraction: %v", err)
+		return
+	}
+
+	if result.Title != "" {
+		if err := b.store.UpdateSessionTitle(ctx, sessionID, result.Title); err != nil {
+			log.Printf("pipeline: UpdateSessionTitle: %v", err)
+		}
+	}
+
+	if len(result.Quotes) > 0 {
+		var quotes []storage.SessionQuote
+		for _, q := range result.Quotes {
+			var tone *string
+			if q.Tone != "" {
+				tone = &q.Tone
+			}
+			quotes = append(quotes, storage.SessionQuote{
+				SessionID: sessionID,
+				Speaker:   q.Speaker,
+				Text:      q.Text,
+				StartTime: q.StartTime,
+				Tone:      tone,
+			})
+		}
+		if err := b.store.InsertQuotes(ctx, quotes); err != nil {
+			log.Printf("pipeline: InsertQuotes: %v", err)
+		}
+	}
+
+	log.Printf("pipeline: extracted title %q and %d quotes", result.Title, len(result.Quotes))
 }
 
 // sendNotification posts an embed to the configured notification channel with a

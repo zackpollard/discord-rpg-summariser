@@ -2,7 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { fetchSession, fetchTranscript, fetchSessionCombat, fetchLLMLogs, reprocessSession, deleteSession, sessionAudioURL, subscribePipelineProgress, type Session, type TranscriptSegment, type CombatEncounter, type PipelineProgressEvent, type LLMLog } from '$lib/api';
+	import { fetchSession, fetchTranscript, fetchSessionCombat, fetchQuotes, fetchLLMLogs, reprocessSession, deleteSession, sessionAudioURL, subscribePipelineProgress, type Session, type TranscriptSegment, type CombatEncounter, type SessionQuote, type PipelineProgressEvent, type LLMLog } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
@@ -11,6 +11,7 @@
 	let session = $state<Session | null>(null);
 	let transcript = $state<TranscriptSegment[]>([]);
 	let combatEncounters = $state<CombatEncounter[]>([]);
+	let quotes = $state<SessionQuote[]>([]);
 	let expandedEncounters = $state<Set<number>>(new Set());
 	let loading = $state(true);
 	let error = $state<string | null>(null);
@@ -105,14 +106,16 @@
 
 	async function reloadSession(sessionId: number) {
 		try {
-			const [sess, trans, combat] = await Promise.all([
+			const [sess, trans, combat, quot] = await Promise.all([
 				fetchSession(sessionId),
 				fetchTranscript(sessionId),
-				fetchSessionCombat(sessionId)
+				fetchSessionCombat(sessionId),
+				fetchQuotes(sessionId)
 			]);
 			session = sess;
 			transcript = trans;
 			combatEncounters = combat;
+			quotes = quot;
 			liveSegments = [];
 			reprocessMessage = null;
 			// Refresh debug logs if the panel is open.
@@ -261,11 +264,12 @@
 			return;
 		}
 
-		Promise.all([fetchSession(id), fetchTranscript(id), fetchSessionCombat(id)])
-			.then(async ([sess, trans, combat]) => {
+		Promise.all([fetchSession(id), fetchTranscript(id), fetchSessionCombat(id), fetchQuotes(id)])
+			.then(async ([sess, trans, combat, quot]) => {
 				session = sess;
 				transcript = trans;
 				combatEncounters = combat;
+				quotes = quot;
 				loading = false;
 
 				// Subscribe to progress if session is still being processed.
@@ -312,7 +316,10 @@
 		<div class="error-box">{error}</div>
 	{:else if session}
 		<div class="header">
-			<h1>Session #{session.id}</h1>
+			<h1>{session.title ? session.title : `Session #${session.id}`}</h1>
+			{#if session.title}
+				<span class="session-number">Session #{session.id}</span>
+			{/if}
 			<StatusBadge status={session.status} />
 		</div>
 
@@ -425,6 +432,28 @@
 						<li>{event}</li>
 					{/each}
 				</ul>
+			</section>
+		{/if}
+
+		{#if quotes.length > 0}
+			<section class="card quotes-section">
+				<h2>Memorable Quotes</h2>
+				<div class="quotes-list">
+					{#each quotes as quote (quote.id)}
+						<div class="quote-item">
+							<div class="quote-text">"{quote.text}"</div>
+							<div class="quote-meta">
+								<span class="quote-speaker">&mdash; {quote.speaker}</span>
+								{#if quote.tone}
+									<span class="quote-tone tone-{quote.tone}">{quote.tone}</span>
+								{/if}
+								<button class="quote-timestamp" onclick={() => handleSegmentClick(quote.start_time)}>
+									{formatTime(quote.start_time)}
+								</button>
+							</div>
+						</div>
+					{/each}
+				</div>
 			</section>
 		{/if}
 
@@ -1113,5 +1142,73 @@
 		word-break: break-word;
 		max-height: 400px;
 		overflow-y: auto;
+	}
+
+	/* Session title */
+	.session-number {
+		font-size: 0.85rem;
+		color: var(--text-muted);
+		font-weight: 400;
+	}
+
+	/* Quotes section */
+	.quotes-list {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+	.quote-item {
+		padding: 0.75rem 1rem;
+		background: var(--bg-dark);
+		border-left: 3px solid var(--accent-gold-dim);
+		border-radius: 0 var(--radius) var(--radius) 0;
+	}
+	.quote-text {
+		font-style: italic;
+		color: var(--text-primary);
+		font-size: 0.95rem;
+		line-height: 1.6;
+		margin-bottom: 0.4rem;
+	}
+	.quote-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		font-size: 0.8rem;
+	}
+	.quote-speaker {
+		color: var(--accent-gold);
+		font-weight: 500;
+	}
+	.quote-tone {
+		display: inline-block;
+		padding: 0.1rem 0.4rem;
+		border-radius: 3px;
+		font-size: 0.65rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+	.tone-funny { background: rgba(234, 179, 8, 0.2); color: #fde047; }
+	.tone-dramatic { background: rgba(139, 92, 246, 0.2); color: #c4b5fd; }
+	.tone-tense { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+	.tone-sad { background: rgba(59, 130, 246, 0.2); color: #93c5fd; }
+	.tone-triumphant { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+	.tone-mysterious { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
+	.tone-angry { background: rgba(249, 115, 22, 0.2); color: #fdba74; }
+	.tone-badass { background: rgba(220, 38, 38, 0.2); color: #f87171; }
+	.tone-wholesome { background: rgba(236, 72, 153, 0.2); color: #f9a8d4; }
+	.quote-timestamp {
+		background: none;
+		border: none;
+		color: var(--text-muted);
+		font-family: 'Courier New', Courier, monospace;
+		font-size: 0.75rem;
+		cursor: pointer;
+		padding: 0;
+		margin-left: auto;
+	}
+	.quote-timestamp:hover {
+		color: var(--accent-gold);
 	}
 </style>

@@ -8,6 +8,17 @@ export interface Session {
 	status: string;
 	summary: string | null;
 	key_events: string[];
+	title: string | null;
+	created_at: string;
+}
+
+export interface SessionQuote {
+	id: number;
+	session_id: number;
+	speaker: string;
+	text: string;
+	start_time: number;
+	tone: string | null;
 	created_at: string;
 }
 
@@ -552,6 +563,10 @@ export interface CombatEncounter {
 
 export async function fetchSessionCombat(sessionId: number): Promise<CombatEncounter[]> {
 	return request<CombatEncounter[]>(`/api/sessions/${sessionId}/combat`);
+}
+
+export async function fetchQuotes(sessionId: number): Promise<SessionQuote[]> {
+	return request<SessionQuote[]>(`/api/sessions/${sessionId}/quotes`);
 }
 
 export function sessionAudioURL(sessionId: number): string {
