@@ -52,10 +52,38 @@ ENV CGO_CFLAGS="-I/app/_deps/whisper.cpp/include -I/app/_deps/whisper.cpp/ggml/i
 ARG VERSION=dev
 RUN go build -tags nolibopusfile -ldflags "-X main.version=${VERSION}" -o /bot ./cmd/bot/
 
-# Stage 3: Runtime
+# Stage 3: Python TTS venv (built on same base as runtime for binary compat)
+FROM python:3.12-slim-bookworm AS python-tts
+
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a portable venv
+RUN python3 -m venv /opt/tts-venv
+
+# Install PyTorch CPU
+RUN /opt/tts-venv/bin/pip install --no-cache-dir \
+    torch==2.6.0+cpu torchaudio==2.6.0+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# Clone ZipVoice
+RUN git clone --depth 1 https://github.com/k2-fsa/ZipVoice.git /opt/tts-venv/ZipVoice
+
+# Install piper_phonemize from custom index
+RUN /opt/tts-venv/bin/pip install --no-cache-dir piper_phonemize \
+    -f https://k2-fsa.github.io/icefall/piper_phonemize.html
+
+# Install remaining ZipVoice requirements
+RUN /opt/tts-venv/bin/pip install --no-cache-dir \
+    -r /opt/tts-venv/ZipVoice/requirements.txt
+
+# Stage 4: Runtime
 FROM node:22-slim
+
+# Install runtime deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libopus0 libgomp1 \
+    libsndfile1 ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code \
     && npm cache clean --force
@@ -69,6 +97,19 @@ COPY --from=backend /app/_deps/whisper.cpp/build/ggml/src/libggml*.so* /usr/lib/
 # Copy sherpa-onnx shared libraries (speaker diarization)
 COPY --from=backend /sherpa-libs/*.so /usr/lib/
 RUN ldconfig
+
+# Copy the pre-built Python TTS venv (includes Python 3.12 binary + all packages)
+COPY --from=python-tts /opt/tts-venv /app/.venv
+
+# Copy the Python 3.12 runtime from the build stage (bookworm ships 3.11
+# but the venv packages need 3.12)
+COPY --from=python-tts /usr/local/lib/libpython3.12* /usr/local/lib/
+COPY --from=python-tts /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=python-tts /usr/local/bin/python3.12 /usr/local/bin/python3.12
+RUN ldconfig \
+    && rm -f /app/.venv/bin/python /app/.venv/bin/python3 \
+    && ln -s /usr/local/bin/python3.12 /app/.venv/bin/python \
+    && ln -s /usr/local/bin/python3.12 /app/.venv/bin/python3
 
 # Copy application
 COPY --from=backend /bot .

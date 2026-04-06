@@ -9,3 +9,5 @@ bot
 _deps/whisper.cpp/.git
 web/node_modules
 web/.svelte-kit
+.venv
+tmp
