@@ -147,6 +147,16 @@ func (c *ClaudeCLI) ExtractCombat(ctx context.Context, transcript, summary, dmNa
 	return &result, nil
 }
 
+// AnnotateTranscript runs the claude CLI with the annotation prompt.
+func (c *ClaudeCLI) AnnotateTranscript(ctx context.Context, segments []AnnotationInput, vocab AnnotationVocabulary, dmName string) (*AnnotationResult, error) {
+	prompt := BuildAnnotationPrompt(segments, vocab, dmName)
+	var result AnnotationResult
+	if err := c.runPrompt(ctx, "annotate_transcript", prompt, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // StripCodeFences extracts JSON from LLM output that may contain free text,
 // code fences, or both. It handles:
 //   - Pure JSON: {"key": "value"}
