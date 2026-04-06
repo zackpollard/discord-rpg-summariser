@@ -652,15 +652,45 @@ export interface CampaignStats {
 
 export interface RecapVoice {
 	user_id: string;
+	profile_id?: number;
 	display_name: string;
+	is_custom?: boolean;
 }
 
 export async function fetchRecapVoices(campaignId: number): Promise<RecapVoice[]> {
 	return request<RecapVoice[]>(`/api/campaigns/${campaignId}/recap/voices`);
 }
 
-export function recapTTSURL(campaignId: number, voiceUserId: string): string {
-	return `/api/campaigns/${campaignId}/recap/tts?voice=${encodeURIComponent(voiceUserId)}`;
+export function recapTTSURL(campaignId: number, voice: RecapVoice): string {
+	if (voice.is_custom && voice.profile_id) {
+		return `/api/campaigns/${campaignId}/recap/tts?profile=${voice.profile_id}`;
+	}
+	return `/api/campaigns/${campaignId}/recap/tts?voice=${encodeURIComponent(voice.user_id)}`;
+}
+
+export interface VoiceProfile {
+	id: number;
+	name: string;
+	transcript: string;
+	created_at: string;
+}
+
+export async function fetchVoiceProfiles(campaignId: number): Promise<VoiceProfile[]> {
+	return request<VoiceProfile[]>(`/api/campaigns/${campaignId}/voice-profiles`);
+}
+
+export async function uploadVoiceProfile(campaignId: number, name: string, audio: File, transcript: string): Promise<{ id: number }> {
+	const form = new FormData();
+	form.append('name', name);
+	form.append('audio', audio);
+	form.append('transcript', transcript);
+	const res = await fetch(`/api/campaigns/${campaignId}/voice-profiles`, { method: 'POST', body: form });
+	if (!res.ok) throw new Error('Upload failed');
+	return res.json();
+}
+
+export async function deleteVoiceProfile(profileId: number): Promise<void> {
+	await request<void>(`/api/voice-profiles/${profileId}`, { method: 'DELETE' });
 }
 
 export async function fetchCampaignStats(campaignId: number): Promise<CampaignStats> {

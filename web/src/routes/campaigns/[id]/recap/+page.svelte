@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchRecap, regenerateRecap, campaignPDFURL, fetchRecapVoices, recapTTSURL, type CampaignRecap, type RecapVoice } from '$lib/api';
+	import { fetchRecap, regenerateRecap, campaignPDFURL, fetchRecapVoices, recapTTSURL, uploadVoiceProfile, deleteVoiceProfile, type CampaignRecap, type RecapVoice } from '$lib/api';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 
 	const campaignId = $derived(Number($page.params.id));
@@ -14,14 +14,22 @@
 
 	// TTS voice picker state.
 	let voices = $state<RecapVoice[]>([]);
-	let selectedVoice = $state<string>('');
+	let selectedVoiceIdx = $state<number>(-1);
 	let ttsAudioSrc = $state<string>('');
 	let ttsGenerating = $state(false);
 	let ttsProgress = $state(0);
 
+	// Voice profile upload state.
+	let showUpload = $state(false);
+	let uploadName = $state('');
+	let uploadTranscript = $state('');
+	let uploadFile = $state<File | null>(null);
+	let uploading = $state(false);
+
+	const selectedVoice = $derived(selectedVoiceIdx >= 0 ? voices[selectedVoiceIdx] : null);
+
 	function handleVoiceChange(e: Event) {
-		const uid = (e.target as HTMLSelectElement).value;
-		selectedVoice = uid;
+		selectedVoiceIdx = parseInt((e.target as HTMLSelectElement).value);
 		ttsAudioSrc = '';
 	}
 
@@ -31,7 +39,6 @@
 		ttsProgress = 0;
 		ttsAudioSrc = '';
 
-		// Subscribe to progress SSE.
 		const progressSource = new EventSource('/api/tts/progress');
 		progressSource.onmessage = (e) => {
 			try {
@@ -42,7 +49,6 @@
 		};
 		progressSource.onerror = () => progressSource.close();
 
-		// Fetch the audio (blocks until generation is done).
 		try {
 			const url = recapTTSURL(campaignId, selectedVoice) + `&_t=${Date.now()}`;
 			const res = await fetch(url);
@@ -57,8 +63,35 @@
 		ttsProgress = 0;
 	}
 
+	async function handleUpload() {
+		if (!uploadName || !uploadFile) return;
+		uploading = true;
+		try {
+			await uploadVoiceProfile(campaignId, uploadName, uploadFile, uploadTranscript);
+			voices = await fetchRecapVoices(campaignId);
+			uploadName = '';
+			uploadTranscript = '';
+			uploadFile = null;
+			showUpload = false;
+		} catch {}
+		uploading = false;
+	}
+
+	async function handleDeleteProfile(profileId: number) {
+		try {
+			await deleteVoiceProfile(profileId);
+			voices = await fetchRecapVoices(campaignId);
+			selectedVoiceIdx = -1;
+			ttsAudioSrc = '';
+		} catch {}
+	}
+
 	const refAudioSrc = $derived(
-		selectedVoice ? `/api/campaigns/${campaignId}/recap/ref?voice=${encodeURIComponent(selectedVoice)}&_t=${Date.now()}` : ''
+		selectedVoice && !selectedVoice.is_custom
+			? `/api/campaigns/${campaignId}/recap/ref?voice=${encodeURIComponent(selectedVoice.user_id)}&_t=${Date.now()}`
+			: selectedVoice?.is_custom && selectedVoice.profile_id
+				? `/api/voice-profiles/${selectedVoice.profile_id}/audio`
+				: ''
 	);
 
 	function formatDate(dateStr: string): string {
@@ -165,29 +198,44 @@
 			</div>
 		</div>
 
-		{#if voices.length > 0}
-			<div class="tts-section">
-				<div class="tts-controls">
-					<label class="tts-label">
-						Listen with voice:
-						<select class="tts-select" onchange={handleVoiceChange} value={selectedVoice}>
-							<option value="">-- Select a voice --</option>
-							{#each voices as voice}
-								<option value={voice.user_id}>{voice.display_name}</option>
-							{/each}
-						</select>
-					</label>
-					{#if selectedVoice}
-						<button class="regenerate-btn" onclick={generateTTS} disabled={ttsGenerating}>
-							{#if ttsGenerating}
-								<span class="spinner"></span>
-								Generating...
-							{:else}
-								Generate
-							{/if}
-						</button>
+		<div class="tts-section">
+			<div class="tts-controls">
+				<label class="tts-label">
+					Listen with voice:
+					<select class="tts-select" onchange={handleVoiceChange} value={selectedVoiceIdx}>
+						<option value={-1}>-- Select a voice --</option>
+						{#each voices as voice, idx}
+							<option value={idx}>{voice.display_name}{voice.is_custom ? ' (custom)' : ''}</option>
+						{/each}
+					</select>
+				</label>
+				{#if selectedVoice}
+					<button class="regenerate-btn" onclick={generateTTS} disabled={ttsGenerating}>
+						{#if ttsGenerating}
+							<span class="spinner"></span>
+							Generating...
+						{:else}
+							Generate
+						{/if}
+					</button>
+					{#if selectedVoice.is_custom && selectedVoice.profile_id}
+						<button class="regenerate-btn" style="color: #f87171;" onclick={() => handleDeleteProfile(selectedVoice!.profile_id!)}>Delete</button>
 					{/if}
+				{/if}
+				<button class="regenerate-btn" onclick={() => showUpload = !showUpload}>
+					{showUpload ? 'Cancel' : 'Upload Voice'}
+				</button>
+			</div>
+			{#if showUpload}
+				<div class="upload-form">
+					<input class="upload-input" type="text" placeholder="Name (e.g. Matt Mercer)" bind:value={uploadName} />
+					<input class="upload-input" type="text" placeholder="Transcript of audio (optional, improves quality)" bind:value={uploadTranscript} />
+					<input type="file" accept="audio/*" onchange={(e) => { uploadFile = (e.target as HTMLInputElement).files?.[0] ?? null; }} />
+					<button class="regenerate-btn" onclick={handleUpload} disabled={uploading || !uploadName || !uploadFile}>
+						{uploading ? 'Uploading...' : 'Upload'}
+					</button>
 				</div>
+			{/if}
 				{#if ttsGenerating}
 					<div class="tts-progress">
 						<div class="tts-progress-header">
@@ -208,7 +256,6 @@
 					<AudioPlayer src={ttsAudioSrc} />
 				{/if}
 			</div>
-		{/if}
 
 		<div class="recap-body">
 			{#each recap.recap.split('\n\n') as paragraph}
@@ -334,6 +381,31 @@
 		border-radius: var(--radius);
 		color: var(--text-primary);
 		font-size: 0.85rem;
+	}
+
+	.upload-form {
+		margin-top: 0.75rem;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: center;
+		padding: 0.75rem;
+		background: var(--bg-dark);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+	}
+	.upload-input {
+		padding: 0.35rem 0.6rem;
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		color: var(--text-primary);
+		font-size: 0.85rem;
+		flex: 1;
+		min-width: 150px;
+	}
+	.upload-input::placeholder {
+		color: var(--text-muted);
 	}
 
 	.tts-progress {

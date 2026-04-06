@@ -38,6 +38,11 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/campaigns/{id}/recap/tts", s.handleGetRecapTTS)
 	s.handle("GET /api/campaigns/{id}/recap/ref", s.handleGetRefAudio)
 
+	s.handle("GET /api/campaigns/{id}/voice-profiles", s.handleListVoiceProfiles)
+	s.handle("POST /api/campaigns/{id}/voice-profiles", s.handleUploadVoiceProfile)
+	s.handle("DELETE /api/voice-profiles/{profileId}", s.handleDeleteVoiceProfile)
+	s.handle("GET /api/voice-profiles/{profileId}/audio", s.handleGetVoiceProfileAudio)
+
 	s.handle("GET /api/entities/{id}", s.handleGetEntity)
 	s.handle("PATCH /api/entities/{id}", s.handleRenameEntity)
 	s.handle("POST /api/entities/{id}/merge", s.handleMergeEntity)

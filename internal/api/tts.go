@@ -1,13 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
+	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/tts"
 )
@@ -35,6 +38,30 @@ func (t *ttsService) extractRef(campaignID int64, userID string) (*tts.Reference
 	return tts.ExtractReference(t.store, campaignID, userID)
 }
 
+func (t *ttsService) extractProfileRef(ctx context.Context, profileID int64) (*tts.ReferenceClip, error) {
+	profile, err := t.store.GetVoiceProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return nil, fmt.Errorf("voice profile %d not found", profileID)
+	}
+
+	samples, err := audio.LoadRaw48k(profile.AudioPath)
+	if err != nil {
+		return nil, fmt.Errorf("load profile audio: %w", err)
+	}
+
+	// Limit to first 10 seconds.
+	maxSamples := 10 * 48000
+	if len(samples) > maxSamples {
+		samples = samples[:maxSamples]
+	}
+
+	return &tts.ReferenceClip{
+		Samples:    samples,
+		SampleRate: 48000,
+		Text:       profile.Transcript,
+	}, nil
+}
+
 func (t *ttsService) getProgress() float64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -56,10 +83,24 @@ func (s *Server) handleListRecapVoices(w http.ResponseWriter, r *http.Request) {
 
 	type voiceEntry struct {
 		UserID      string `json:"user_id"`
+		ProfileID   int64  `json:"profile_id,omitempty"`
 		DisplayName string `json:"display_name"`
+		IsCustom    bool   `json:"is_custom"`
 	}
 
 	voices := make([]voiceEntry, 0, len(userIDs))
+
+	// Add custom voice profiles first.
+	profiles, _ := s.store.GetVoiceProfiles(r.Context(), campaignID)
+	for _, p := range profiles {
+		voices = append(voices, voiceEntry{
+			ProfileID:   p.ID,
+			DisplayName: p.Name,
+			IsCustom:    true,
+		})
+	}
+
+	// Add campaign members with audio.
 	for _, uid := range userIDs {
 		name := uid
 		u, err := s.store.GetDiscordUser(r.Context(), uid, s.guildID)
@@ -82,8 +123,9 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	voiceUserID := r.URL.Query().Get("voice")
-	if voiceUserID == "" {
-		writeError(w, http.StatusBadRequest, "voice query parameter required")
+	profileIDStr := r.URL.Query().Get("profile")
+	if voiceUserID == "" && profileIDStr == "" {
+		writeError(w, http.StatusBadRequest, "voice or profile query parameter required")
 		return
 	}
 
@@ -102,7 +144,14 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ref, err := s.ttsSvc.extractRef(campaignID, voiceUserID)
+	// Extract reference audio — either from a custom profile or a campaign member.
+	var ref *tts.ReferenceClip
+	if profileIDStr != "" {
+		profileID, _ := strconv.ParseInt(profileIDStr, 10, 64)
+		ref, err = s.ttsSvc.extractProfileRef(r.Context(), profileID)
+	} else {
+		ref, err = s.ttsSvc.extractRef(campaignID, voiceUserID)
+	}
 	if err != nil {
 		log.Printf("recap tts: extract ref: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to extract reference audio")
