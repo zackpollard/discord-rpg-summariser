@@ -80,9 +80,23 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 		sharedMicMap[m.DiscordUserID] = m
 	}
 
+	// Wire up intra-file progress if the transcriber supports it.
+	type progressSetter interface {
+		SetProgressCallback(func(float64))
+	}
+	setIntraProgress := func(doneUsers int) {
+		if ps, ok := transcriber.(progressSetter); ok {
+			ps.SetProgressCallback(func(filePct float64) {
+				p := (float64(doneUsers) + filePct) / float64(totalUsers)
+				b.progress.SetSubProgress(p)
+			})
+		}
+	}
+
 	userSegments := make(map[string][]transcribe.Segment, len(userFiles))
 	doneUsers := 0
 	for userID, wavPath := range userFiles {
+		setIntraProgress(doneUsers)
 		if mic, ok := sharedMicMap[userID]; ok {
 			// Shared mic: diarize then attribute segments.
 			b.transcribeSharedMic(ctx, transcriber, wavPath, mic, userSegments)

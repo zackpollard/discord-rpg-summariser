@@ -37,6 +37,7 @@ type ParakeetTranscriber struct {
 	recognizer *sherpa.OfflineRecognizer
 	threads    int
 	modelBase  string // path to extracted model directory
+	onProgress func(float64) // optional: called with 0.0-1.0 during TranscribeFile
 	mu         sync.Mutex
 }
 
@@ -162,10 +163,22 @@ func (p *ParakeetTranscriber) SetVocabulary(words []string) {
 	p.recognizer = recognizer
 }
 
+// SetProgressCallback sets a function called with progress (0.0-1.0) during
+// TranscribeFile as chunks are processed.
+func (p *ParakeetTranscriber) SetProgressCallback(fn func(float64)) {
+	p.onProgress = fn
+}
+
 // TranscribeFile transcribes a 48kHz WAV file and returns timestamped segments.
 // It streams the file in silence-delimited chunks to avoid loading the entire
 // file into memory.
 func (p *ParakeetTranscriber) TranscribeFile(ctx context.Context, wavPath string) ([]Segment, error) {
+	// Get the file duration for progress reporting.
+	var totalDuration float64
+	if info, err := os.Stat(wavPath); err == nil && info.Size() > wavHeaderSize {
+		totalDuration = float64(info.Size()-wavHeaderSize) / (48000 * 2) // 48kHz 16-bit mono
+	}
+
 	var allSegments []Segment
 
 	err := audio.StreamResample(wavPath, func(samples []float32, offsetSeconds float64) error {
@@ -175,6 +188,12 @@ func (p *ParakeetTranscriber) TranscribeFile(ctx context.Context, wavPath string
 			return err
 		}
 		allSegments = append(allSegments, segs...)
+
+		// Report intra-file progress.
+		if p.onProgress != nil && totalDuration > 0 {
+			p.onProgress(offsetSeconds / totalDuration)
+		}
+
 		// Hint the GC to reclaim ONNX inference buffers between chunks.
 		runtime.GC()
 		return nil
@@ -184,6 +203,8 @@ func (p *ParakeetTranscriber) TranscribeFile(ctx context.Context, wavPath string
 	}
 	return allSegments, nil
 }
+
+const wavHeaderSize = 44
 
 // TranscribeChunk transcribes pre-resampled 16kHz float32 mono samples.
 // timeOffset is added to all segment timestamps. The prompt parameter is
