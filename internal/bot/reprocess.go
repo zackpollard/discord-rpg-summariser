@@ -36,16 +36,22 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 		return fmt.Errorf("get session: %w", err)
 	}
 
-	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
-
 	if retranscribe {
+		b.store.UpdateSessionStatus(ctx, sessionID, "transcribing")
 		b.progress.SetStage("transcribing", "Re-transcribing audio")
 		if err := b.retranscribeSession(ctx, session); err != nil {
 			log.Printf("reprocess: retranscription failed for session %d: %v", sessionID, err)
 			b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 			return err
 		}
+	} else {
+		// Skip the transcription weight so the progress bar starts at the
+		// right place instead of jumping from 0% to 60%.
+		b.progress.SkipStage("transcribing")
+		b.progress.SkipStage("mixing")
 	}
+
+	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
 
 	// Load transcript segments from DB and format them.
 	segments, err := b.store.GetTranscript(ctx, sessionID)
@@ -255,7 +261,9 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 		sharedMicMap[m.DiscordUserID] = m
 	}
 
+	totalUsers := len(userFiles)
 	userSegments := make(map[string][]transcribe.Segment, len(userFiles))
+	doneUsers := 0
 	for userID, wavPath := range userFiles {
 		if mic, ok := sharedMicMap[userID]; ok {
 			b.transcribeSharedMic(ctx, transcriber, wavPath, mic, userSegments)
@@ -263,10 +271,15 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 			segs, err := transcriber.TranscribeFile(ctx, wavPath)
 			if err != nil {
 				log.Printf("reprocess: transcribe user %s: %v", userID, err)
+				doneUsers++
+				b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 				continue
 			}
 			userSegments[userID] = segs
 		}
+		doneUsers++
+		b.progress.SetDetail(fmt.Sprintf("Re-transcribing audio (%d of %d users)", doneUsers, totalUsers))
+		b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 	}
 
 	if len(userSegments) == 0 {

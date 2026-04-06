@@ -82,6 +82,19 @@ func (p *PipelineProgress) SessionID() int64 {
 	return p.sessionID
 }
 
+// SkipStage marks a stage as completed without running it, so the progress
+// bar accounts for its weight without getting stuck.
+func (p *PipelineProgress) SkipStage(name string) {
+	p.mu.Lock()
+	for _, s := range stages {
+		if s.Name == name {
+			p.completedWeight += s.Weight
+			break
+		}
+	}
+	p.mu.Unlock()
+}
+
 // SetStage transitions to a new pipeline stage.
 func (p *PipelineProgress) SetStage(name, detail string) {
 	p.mu.Lock()
