@@ -73,9 +73,9 @@ RUN git clone --depth 1 https://github.com/k2-fsa/ZipVoice.git /opt/tts-venv/Zip
 RUN /opt/tts-venv/bin/pip install --no-cache-dir piper_phonemize \
     -f https://k2-fsa.github.io/icefall/piper_phonemize.html
 
-# Install remaining ZipVoice requirements
+# Install remaining ZipVoice requirements + sentencepiece for bpe.vocab generation
 RUN /opt/tts-venv/bin/pip install --no-cache-dir \
-    -r /opt/tts-venv/ZipVoice/requirements.txt
+    -r /opt/tts-venv/ZipVoice/requirements.txt sentencepiece
 
 # Stage 4: Runtime
 FROM node:22-slim

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -102,8 +103,11 @@ func (p *ParakeetTranscriber) SetVocabulary(words []string) {
 
 	bpeVocabPath := filepath.Join(p.modelBase, "bpe.vocab")
 	if _, err := os.Stat(bpeVocabPath); os.IsNotExist(err) {
-		log.Printf("parakeet: bpe.vocab not found at %s — hot words disabled (run scripts/generate_bpe_vocab.py)", bpeVocabPath)
-		return
+		log.Printf("parakeet: bpe.vocab not found, attempting to generate...")
+		if err := generateBpeVocab(p.modelBase); err != nil {
+			log.Printf("parakeet: failed to generate bpe.vocab: %v — hot words disabled", err)
+			return
+		}
 	}
 
 	// Write hotwords file.
@@ -294,6 +298,58 @@ func downloadAndExtractParakeet(destDir string) error {
 	}
 
 	log.Printf("Downloaded and extracted Parakeet TDT model to %s", filepath.Join(destDir, parakeetModelDir))
+	return nil
+}
+
+// generateBpeVocab runs the Python script to generate bpe.vocab from the
+// NeMo tokenizer. It looks for a Python venv at the project root.
+func generateBpeVocab(modelBase string) error {
+	modelDir := filepath.Dir(modelBase)
+
+	// Try to find the generate script relative to common locations.
+	candidates := []string{
+		filepath.Join(modelDir, "..", "scripts", "generate_bpe_vocab.py"),
+		"scripts/generate_bpe_vocab.py",
+	}
+
+	var scriptPath string
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			scriptPath = c
+			break
+		}
+	}
+	if scriptPath == "" {
+		return fmt.Errorf("generate_bpe_vocab.py not found")
+	}
+
+	// Try the TTS venv first, then fall back to system python3.
+	venvPython := filepath.Join(modelDir, "..", ".venv", "bin", "python")
+	pythonCmd := "python3"
+	if _, err := os.Stat(venvPython); err == nil {
+		pythonCmd = venvPython
+	}
+
+	// Ensure sentencepiece is available.
+	installCmd := exec.Command(pythonCmd, "-m", "pip", "install", "-q", "sentencepiece", "huggingface_hub")
+	installCmd.Stdout = os.Stdout
+	installCmd.Stderr = os.Stderr
+	_ = installCmd.Run() // best effort
+
+	log.Printf("parakeet: generating bpe.vocab via %s...", scriptPath)
+	cmd := exec.Command(pythonCmd, scriptPath, "--model-dir", modelDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("generate_bpe_vocab.py failed: %w", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(modelBase, "bpe.vocab")); os.IsNotExist(err) {
+		return fmt.Errorf("bpe.vocab was not created")
+	}
+
+	log.Printf("parakeet: bpe.vocab generated successfully")
 	return nil
 }
 
