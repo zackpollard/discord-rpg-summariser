@@ -357,8 +357,9 @@ func (b *Bot) buildTranscriptWithTelegram(
 	return transcribe.FormatTranscriptWithTelegram(merged, entries)
 }
 
-// transcribeSharedMic diarizes a shared-mic WAV file and attributes each
-// transcription segment to the correct speaker.
+// transcribeSharedMic transcribes a shared-mic WAV file and attributes each
+// segment to the correct speaker using per-segment voice embeddings — the same
+// approach that works well in live transcription.
 func (b *Bot) transcribeSharedMic(ctx context.Context, transcriber transcribe.Transcriber, wavPath string, mic storage.SharedMic, userSegments map[string][]transcribe.Segment) {
 	d := b.getDiarizer()
 	if d == nil {
@@ -372,79 +373,91 @@ func (b *Bot) transcribeSharedMic(ctx context.Context, transcriber transcribe.Tr
 		return
 	}
 
-	// Resample to 16kHz for diarization.
-	samples, err := audio.LoadAndResample(wavPath)
-	if err != nil {
-		log.Printf("pipeline: resample for diarization %s: %v", mic.DiscordUserID, err)
+	// Load enrolled voice embeddings for speaker identification.
+	enrollments := make(map[string][]float32)
+	if enroll, _ := b.store.GetSpeakerEnrollment(ctx, mic.CampaignID, mic.DiscordUserID); enroll != nil {
+		enrollments[mic.DiscordUserID] = enroll.Embedding
+	}
+	if enroll, _ := b.store.GetSpeakerEnrollment(ctx, mic.CampaignID, mic.PartnerUserID); enroll != nil {
+		enrollments[mic.PartnerUserID] = enroll.Embedding
+	}
+
+	if len(enrollments) == 0 {
+		log.Printf("pipeline: no voice enrollments for shared mic %s, falling back to single speaker", mic.DiscordUserID)
+		segments, err := transcriber.TranscribeFile(ctx, wavPath)
+		if err != nil {
+			log.Printf("pipeline: transcribe shared mic user %s: %v", mic.DiscordUserID, err)
+			return
+		}
+		userSegments[mic.DiscordUserID] = segments
 		return
 	}
 
-	// Run speaker diarization.
-	diarSegments, err := d.Diarize(samples)
+	// Load the full audio at 16kHz for per-segment embedding extraction.
+	samples16k, err := audio.LoadAndResample(wavPath)
 	if err != nil {
-		log.Printf("pipeline: diarize %s: %v", mic.DiscordUserID, err)
-		// Fall back to single speaker.
-		segments, _ := transcriber.TranscribeFile(ctx, wavPath)
-		if segments != nil {
-			userSegments[mic.DiscordUserID] = segments
-		}
+		log.Printf("pipeline: resample for speaker ID %s: %v", mic.DiscordUserID, err)
 		return
 	}
 
-	// Try to identify speakers using enrolled voice embeddings.
-	primarySpeaker := -1
-	speakers := diarize.UniqueSpeakers(diarSegments)
-	if len(speakers) == 2 {
-		micOwnerEnroll, _ := b.store.GetSpeakerEnrollment(ctx, mic.CampaignID, mic.DiscordUserID)
-		partnerEnroll, _ := b.store.GetSpeakerEnrollment(ctx, mic.CampaignID, mic.PartnerUserID)
-
-		if micOwnerEnroll != nil || partnerEnroll != nil {
-			spk0Audio := diarize.ExtractSpeakerAudio(samples, diarSegments, speakers[0])
-			spk1Audio := diarize.ExtractSpeakerAudio(samples, diarSegments, speakers[1])
-			emb0, err0 := d.ExtractEmbedding(spk0Audio)
-			emb1, err1 := d.ExtractEmbedding(spk1Audio)
-
-			if err0 == nil && err1 == nil {
-				var ownerEmb, partnerEmb []float32
-				if micOwnerEnroll != nil {
-					ownerEmb = micOwnerEnroll.Embedding
-				}
-				if partnerEnroll != nil {
-					partnerEmb = partnerEnroll.Embedding
-				}
-				primarySpeaker = diarize.IdentifySpeakerByEmbedding(emb0, emb1, ownerEmb, partnerEmb)
-				if primarySpeaker >= 0 {
-					// Map from position (0/1) back to actual speaker ID.
-					primarySpeaker = speakers[primarySpeaker]
-					log.Printf("pipeline: identified speakers by voice enrollment for %s", mic.DiscordUserID)
-				}
-			}
-		}
-	}
-
-	if primarySpeaker < 0 {
-		// Fall back to speaking time heuristic.
-		primarySpeaker = diarize.IdentifyPrimarySpeaker(diarSegments)
-		log.Printf("pipeline: no voice enrollment, using speaking time heuristic for %s", mic.DiscordUserID)
-	}
-	log.Printf("pipeline: diarized %s: %d segments, mic owner is speaker %d", mic.DiscordUserID, len(diarSegments), primarySpeaker)
-
-	// Transcribe the full audio.
+	// Transcribe the full audio first.
 	allSegments, err := transcriber.TranscribeFile(ctx, wavPath)
 	if err != nil {
 		log.Printf("pipeline: transcribe shared mic %s: %v", mic.DiscordUserID, err)
 		return
 	}
 
-	// Attribute each segment to a speaker based on diarization overlap.
+	// Attribute each segment by extracting a voice embedding from that
+	// segment's audio and comparing against enrolled embeddings —
+	// the same approach used in live transcription.
+	ownerCount, partnerCount := 0, 0
 	for _, seg := range allSegments {
-		speaker := diarize.AttributeSegment(seg.StartTime, seg.EndTime, diarSegments)
-		if speaker == primarySpeaker {
+		// Extract the audio for this segment at 16kHz.
+		startIdx := int(seg.StartTime * 16000)
+		endIdx := int(seg.EndTime * 16000)
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if endIdx > len(samples16k) {
+			endIdx = len(samples16k)
+		}
+		if endIdx <= startIdx {
 			userSegments[mic.DiscordUserID] = append(userSegments[mic.DiscordUserID], seg)
+			continue
+		}
+
+		segAudio := samples16k[startIdx:endIdx]
+
+		// Extract embedding for this segment.
+		emb, err := d.ExtractEmbedding(segAudio)
+		if err != nil {
+			// Can't identify — default to mic owner.
+			userSegments[mic.DiscordUserID] = append(userSegments[mic.DiscordUserID], seg)
+			continue
+		}
+
+		// Find the best matching enrolled speaker.
+		var bestID string
+		bestSim := -1.0
+		for uid, enrolled := range enrollments {
+			sim := diarize.CosineSimilarity(emb, enrolled)
+			if sim > bestSim {
+				bestSim = sim
+				bestID = uid
+			}
+		}
+
+		if bestSim < 0.3 || bestID == mic.DiscordUserID {
+			userSegments[mic.DiscordUserID] = append(userSegments[mic.DiscordUserID], seg)
+			ownerCount++
 		} else {
 			userSegments[mic.PartnerUserID] = append(userSegments[mic.PartnerUserID], seg)
+			partnerCount++
 		}
 	}
+
+	log.Printf("pipeline: shared mic %s: %d segments attributed (%d owner, %d partner) using per-segment embeddings",
+		mic.DiscordUserID, len(allSegments), ownerCount, partnerCount)
 }
 
 // ---------------------------------------------------------------------------
