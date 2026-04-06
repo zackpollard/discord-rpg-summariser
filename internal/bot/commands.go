@@ -137,13 +137,26 @@ var commands = []*discordgo.ApplicationCommand{
 				},
 			},
 			{
-				Name:        "play-recap",
-				Description: "Play the campaign recap in your voice channel using TTS",
+				Name:        "generate-recap-audio",
+				Description: "Generate TTS audio of the campaign recap (must be done before play-recap)",
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Options: []*discordgo.ApplicationCommandOption{
 					{
 						Name:        "voice",
 						Description: "Whose voice to use (must have a recording)",
+						Type:        discordgo.ApplicationCommandOptionUser,
+						Required:    false,
+					},
+				},
+			},
+			{
+				Name:        "play-recap",
+				Description: "Play a previously generated recap in your voice channel",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "voice",
+						Description: "Whose voice was used to generate the audio",
 						Type:        discordgo.ApplicationCommandOptionUser,
 						Required:    false,
 					},

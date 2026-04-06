@@ -60,6 +60,8 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleCampaignDM(s, i)
 		case "recap":
 			b.handleCampaignRecap(s, i)
+		case "generate-recap-audio":
+			b.handleCampaignGenerateRecapAudio(s, i)
 		case "play-recap":
 			b.handleCampaignPlayRecap(s, i)
 		case "shared-mic":
