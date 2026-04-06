@@ -138,6 +138,7 @@ func main() {
 		log.Printf("Warning: TTS unavailable: %v", err)
 	} else {
 		srv.SetTTSService(api.NewTTSService(ttsSynth, store))
+		discordBot.SetTTSSynthesizer(ttsSynth)
 		defer ttsSynth.Close()
 		log.Println("TTS enabled: ZipVoice (voice-cloned recap)")
 	}

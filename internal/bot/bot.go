@@ -62,6 +62,11 @@ type Bot struct {
 
 	// Pipeline progress tracking (non-nil while a pipeline is running).
 	progress *PipelineProgress
+
+	// TTS synthesizer for voice-cloned recap playback (nil if not configured).
+	ttsSynth interface {
+		Synthesize(text string, refAudio []float32, refSampleRate int, refText string) ([]float32, int, error)
+	}
 }
 
 // acquireTranscriber loads the transcription model if not already loaded and
@@ -305,6 +310,13 @@ func (b *Bot) getDiarizer() *diarize.Diarizer {
 // SetTelegramClient sets the Telegram client for capturing group chat messages.
 func (b *Bot) SetTelegramClient(c *telegram.Client) {
 	b.telegramClient = c
+}
+
+// SetTTSSynthesizer sets the TTS synthesizer for voice-cloned recap playback.
+func (b *Bot) SetTTSSynthesizer(synth interface {
+	Synthesize(text string, refAudio []float32, refSampleRate int, refText string) ([]float32, int, error)
+}) {
+	b.ttsSynth = synth
 }
 
 // SetEmbedder sets the embedding generator for RAG-powered features.

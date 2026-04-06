@@ -137,6 +137,19 @@ var commands = []*discordgo.ApplicationCommand{
 				},
 			},
 			{
+				Name:        "play-recap",
+				Description: "Play the campaign recap in your voice channel using TTS",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:        "voice",
+						Description: "Whose voice to use (must have a recording)",
+						Type:        discordgo.ApplicationCommandOptionUser,
+						Required:    false,
+					},
+				},
+			},
+			{
 				Name:        "shared-mic",
 				Description: "Configure a shared microphone (two speakers on one mic)",
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
