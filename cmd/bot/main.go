@@ -143,6 +143,7 @@ func main() {
 		log.Println("TTS enabled: ZipVoice (voice-cloned recap)")
 	}
 
+	srv.SetSoundboardPlayer(discordBot)
 	srv.SetVoiceActivityProvider(discordBot)
 	srv.SetLiveTranscriptProvider(discordBot)
 	srv.SetPipelineProgressProvider(discordBot)

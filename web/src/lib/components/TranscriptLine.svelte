@@ -4,11 +4,13 @@
 	let {
 		segment,
 		active = false,
-		onclick
+		onclick,
+		onclip
 	}: {
 		segment: TranscriptSegment;
 		active?: boolean;
 		onclick?: () => void;
+		onclip?: () => void;
 	} = $props();
 
 	function hashColor(name: string): string {
@@ -44,6 +46,9 @@
 	<span class="timestamp">[{formatTime(segment.start_time)}]</span>
 	<span class="name" style:color={nameColor}>{displayName}:</span>
 	<span class="text">{segment.text}</span>
+	{#if onclip}
+		<button class="clip-btn" title="Create clip from this segment" onclick={(e) => { e.stopPropagation(); onclip?.(); }}>&#9986;</button>
+	{/if}
 </div>
 
 <style>
@@ -83,5 +88,22 @@
 	}
 	.text {
 		color: var(--text-primary);
+	}
+	.clip-btn {
+		opacity: 0;
+		background: none;
+		border: none;
+		color: var(--text-muted);
+		cursor: pointer;
+		font-size: 0.85rem;
+		padding: 0 0.25rem;
+		margin-left: 0.25rem;
+		transition: opacity 0.15s, color 0.15s;
+	}
+	.line:hover .clip-btn {
+		opacity: 1;
+	}
+	.clip-btn:hover {
+		color: var(--accent-gold);
 	}
 </style>

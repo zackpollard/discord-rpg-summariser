@@ -19,6 +19,14 @@ import (
 // Discord session. It routes to the correct handler based on command name and
 // subcommand.
 func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type == discordgo.InteractionApplicationCommandAutocomplete {
+		data := i.ApplicationCommandData()
+		if data.Name == "soundboard" {
+			b.handleSoundboardAutocomplete(s, i)
+		}
+		return
+	}
+
 	if i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
@@ -79,6 +87,13 @@ func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCr
 			b.handleQuestComplete(s, i)
 		case "fail":
 			b.handleQuestFail(s, i)
+		}
+	case "soundboard":
+		switch sub.Name {
+		case "play":
+			b.handleSoundboardPlay(s, i)
+		case "list":
+			b.handleSoundboardList(s, i)
 		}
 	}
 }

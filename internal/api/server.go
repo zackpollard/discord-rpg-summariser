@@ -32,6 +32,7 @@ type Server struct {
 	reprocessor   SessionReprocessor
 	embedder      embed.Embedder
 	ttsSvc        *ttsService
+	soundboardP   SoundboardPlayer
 	mux           *http.ServeMux
 	httpServer    *http.Server
 	sessions      *auth.SessionManager
@@ -124,6 +125,11 @@ func (s *Server) SetLoreQAProvider(lqp LoreQAProvider) {
 // SetEmbedder sets the embedding generator for RAG-powered features.
 func (s *Server) SetEmbedder(e embed.Embedder) {
 	s.embedder = e
+}
+
+// SetSoundboardPlayer sets the soundboard player for voice channel playback.
+func (s *Server) SetSoundboardPlayer(sp SoundboardPlayer) {
+	s.soundboardP = sp
 }
 
 // SetTTSService sets the TTS service for voice-cloned recap audio.

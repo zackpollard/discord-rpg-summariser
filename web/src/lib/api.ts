@@ -693,6 +693,48 @@ export async function deleteVoiceProfile(profileId: number): Promise<void> {
 	await request<void>(`/api/voice-profiles/${profileId}`, { method: 'DELETE' });
 }
 
+// Soundboard types and functions
+
+export interface SoundboardClip {
+	id: number;
+	session_id: number | null;
+	name: string;
+	start_time: number;
+	end_time: number;
+	user_ids: string[];
+	created_at: string;
+}
+
+export async function fetchClips(campaignId: number): Promise<SoundboardClip[]> {
+	return request<SoundboardClip[]>(`/api/campaigns/${campaignId}/clips`);
+}
+
+export async function createClip(campaignId: number, body: {
+	session_id: number;
+	name: string;
+	start_time: number;
+	end_time: number;
+	user_ids: string[];
+}): Promise<{ id: number }> {
+	return request<{ id: number }>(`/api/campaigns/${campaignId}/clips`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
+	});
+}
+
+export async function deleteClip(clipId: number): Promise<void> {
+	await request<void>(`/api/clips/${clipId}`, { method: 'DELETE' });
+}
+
+export async function playClipInVoice(clipId: number): Promise<void> {
+	await request<void>(`/api/clips/${clipId}/play`, { method: 'POST' });
+}
+
+export function clipAudioURL(clipId: number): string {
+	return `/api/clips/${clipId}/audio`;
+}
+
 export async function fetchCampaignStats(campaignId: number): Promise<CampaignStats> {
 	return request<CampaignStats>(`/api/campaigns/${campaignId}/stats`);
 }

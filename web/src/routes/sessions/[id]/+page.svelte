@@ -6,6 +6,7 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
+	import ClipEditor from '$lib/components/ClipEditor.svelte';
 
 	let session = $state<Session | null>(null);
 	let transcript = $state<TranscriptSegment[]>([]);
@@ -22,6 +23,27 @@
 	let transcriptScrollEl = $state<HTMLDivElement | null>(null);
 	let userScrolling = $state(false);
 	let userScrollTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// Clip editor state.
+	let showClipEditor = $state(false);
+	let clipStartTime = $state(0);
+	let clipEndTime = $state(0);
+
+	const transcriptUsers = $derived.by(() => {
+		const seen = new Map<string, string>();
+		for (const seg of transcript) {
+			if (!seen.has(seg.user_id)) {
+				seen.set(seg.user_id, seg.character_name ?? seg.display_name ?? seg.user_id);
+			}
+		}
+		return Array.from(seen.entries()).map(([user_id, display_name]) => ({ user_id, display_name }));
+	});
+
+	function openClipEditor(seg: TranscriptSegment) {
+		clipStartTime = seg.start_time;
+		clipEndTime = seg.end_time;
+		showClipEditor = true;
+	}
 
 	// LLM debug logs state.
 	let llmLogs = $state<LLMLog[]>([]);
@@ -474,6 +496,7 @@
 								{segment}
 								active={activeSegmentId === segment.id}
 								onclick={() => handleSegmentClick(segment.start_time)}
+								onclip={() => openClipEditor(segment)}
 							/>
 						</div>
 					{/each}
@@ -531,6 +554,17 @@
 		</section>
 	{/if}
 </div>
+
+{#if showClipEditor && session}
+	<ClipEditor
+		sessionId={session.id}
+		campaignId={session.campaign_id}
+		bind:startTime={clipStartTime}
+		bind:endTime={clipEndTime}
+		users={transcriptUsers}
+		onclose={() => showClipEditor = false}
+	/>
+{/if}
 
 <style>
 	.session-detail {

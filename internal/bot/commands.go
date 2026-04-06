@@ -258,6 +258,31 @@ var commands = []*discordgo.ApplicationCommand{
 			},
 		},
 	},
+	{
+		Name:        "soundboard",
+		Description: "Play audio clips in voice chat",
+		Options: []*discordgo.ApplicationCommandOption{
+			{
+				Name:        "play",
+				Description: "Play a clip in the voice channel",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+				Options: []*discordgo.ApplicationCommandOption{
+					{
+						Name:         "clip",
+						Description:  "Clip name",
+						Type:         discordgo.ApplicationCommandOptionString,
+						Required:     true,
+						Autocomplete: true,
+					},
+				},
+			},
+			{
+				Name:        "list",
+				Description: "List available clips",
+				Type:        discordgo.ApplicationCommandOptionSubCommand,
+			},
+		},
+	},
 }
 
 // floatPtr returns a pointer to a float64 value (used for Discord command option MinValue).
