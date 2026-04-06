@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.11](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.10...v0.1.11) (2026-04-06)
+
+
+### Features
+
+* add intra-file progress during transcription ([5c06f19](https://github.com/zackpollard/discord-rpg-summariser/commit/5c06f19b49f1450370cf87ae27e047cb97a1f06b))
+
+
+### Bug Fixes
+
+* add python TTS venv to docker build ([c1c0e09](https://github.com/zackpollard/discord-rpg-summariser/commit/c1c0e09b0038a1a12d66b8a6d6ca809072359d00))
+* auto-generate bpe.vocab for parakeet hot words ([4b21eae](https://github.com/zackpollard/discord-rpg-summariser/commit/4b21eaeab1cb63c4dfc0e31b40a5d8dafbba10c6))
+* improve reprocess progress tracking ([70a30b5](https://github.com/zackpollard/discord-rpg-summariser/commit/70a30b54881eedbcff8e1d96c06834aeb3275a08))
+* reduce peak memory usage during transcription ([b69c3c5](https://github.com/zackpollard/discord-rpg-summariser/commit/b69c3c595dfeb625306bd51993769988abd9c4a7))
+* use per-segment embeddings for shared mic speaker attribution ([bdd5586](https://github.com/zackpollard/discord-rpg-summariser/commit/bdd5586aaf86b89d288c1a6292a1de274b535bde))
+
 ## [0.1.10](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.9...v0.1.10) (2026-03-31)
 
 
