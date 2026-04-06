@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"unicode"
 
@@ -105,6 +106,9 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 			name := b.ResolveUsername(userID)
 			b.progress.BroadcastTranscript(name, seg.Text, seg.StartTime, seg.EndTime)
 		}
+
+		// Reclaim ONNX inference memory between users.
+		runtime.GC()
 	}
 
 	if len(userSegments) == 0 {

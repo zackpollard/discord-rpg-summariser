@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -174,6 +175,8 @@ func (p *ParakeetTranscriber) TranscribeFile(ctx context.Context, wavPath string
 			return err
 		}
 		allSegments = append(allSegments, segs...)
+		// Hint the GC to reclaim ONNX inference buffers between chunks.
+		runtime.GC()
 		return nil
 	})
 	if err != nil {

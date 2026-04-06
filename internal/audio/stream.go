@@ -26,12 +26,13 @@ const (
 	silenceMinFrames = 10
 
 	// minChunkSamples is the minimum number of 16kHz output samples a chunk
-	// must contain before a silence-based split is allowed (30 seconds).
-	minChunkSamples = 30 * outputRate
+	// must contain before a silence-based split is allowed (15 seconds).
+	minChunkSamples = 15 * outputRate
 
 	// maxChunkSamples is the hard limit at which a chunk is forcibly split
-	// even without silence (5 minutes).
-	maxChunkSamples = 300 * outputRate
+	// even without silence (90 seconds). Shorter chunks reduce peak memory
+	// usage during ONNX inference.
+	maxChunkSamples = 90 * outputRate
 
 	// streamReadBytes is the number of bytes to read per iteration from the
 	// WAV file (1 second of 48kHz 16-bit mono PCM).
