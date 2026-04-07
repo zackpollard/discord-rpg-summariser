@@ -25,12 +25,12 @@ func MixClip(userFiles map[string]string, outputPath string, joinOffsets map[str
 	}
 
 	type fileInfo struct {
-		path         string
-		peak         float64
-		dataStart    int64 // byte offset of PCM data in the WAV file
-		skipSamples  int64 // samples to skip from the start of the user's audio
-		readSamples  int64 // samples to read from the user's audio
-		mixOffset    int64 // sample offset within the output mix buffer
+		path        string
+		peak        float64
+		dataStart   int64 // byte offset of PCM data in the WAV file
+		skipSamples int64 // samples to skip from the start of the user's audio
+		readSamples int64 // samples to read from the user's audio
+		mixOffset   int64 // sample offset within the output mix buffer
 	}
 
 	files := make(map[string]*fileInfo)
@@ -62,7 +62,7 @@ func MixClip(userFiles map[string]string, outputPath string, joinOffsets map[str
 		userOffset := joinOffsets[userID]
 
 		// Compute what portion of this user's audio falls within [startSec, endSec).
-		userStartAbs := userOffset                                         // when user's audio begins (absolute)
+		userStartAbs := userOffset                                              // when user's audio begins (absolute)
 		userEndAbs := userOffset + float64(totalSamples)/float64(mixSampleRate) // when it ends
 
 		// Overlap between clip range and user's audio range.

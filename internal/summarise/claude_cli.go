@@ -76,8 +76,8 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 		var event struct {
 			Type  string `json:"type"`
 			Event struct {
-				Type    string `json:"type"`
-				Delta   struct {
+				Type  string `json:"type"`
+				Delta struct {
 					Type string `json:"type"`
 					Text string `json:"text"`
 				} `json:"delta"`

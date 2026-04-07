@@ -36,7 +36,7 @@ const (
 type ParakeetTranscriber struct {
 	recognizer *sherpa.OfflineRecognizer
 	threads    int
-	modelBase  string // path to extracted model directory
+	modelBase  string        // path to extracted model directory
 	onProgress func(float64) // optional: called with 0.0-1.0 during TranscribeFile
 	mu         sync.Mutex
 }

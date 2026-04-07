@@ -90,7 +90,7 @@ func TestMixClip_WithJoinOffsets(t *testing.T) {
 		map[string]string{"a": pathA, "b": pathB},
 		outPath,
 		map[string]float64{"b": 2.0}, // B joins 2s late
-		2.0, 3.0, // extract 2s-3s: both users should have audio here
+		2.0, 3.0,                     // extract 2s-3s: both users should have audio here
 	)
 	if err != nil {
 		t.Fatalf("MixClip: %v", err)

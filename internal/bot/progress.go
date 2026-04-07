@@ -58,12 +58,12 @@ type PipelineProgress struct {
 	startedAt time.Time
 
 	// Current stage tracking.
-	stageIdx       int
+	stageIdx        int
 	completedWeight float64 // sum of completed stage weights
-	currentWeight  float64 // weight of current stage
-	subProgress    float64 // 0.0-1.0 within current stage
-	stage          string
-	detail         string
+	currentWeight   float64 // weight of current stage
+	subProgress     float64 // 0.0-1.0 within current stage
+	stage           string
+	detail          string
 
 	subscribers map[chan ProgressEvent]struct{}
 }

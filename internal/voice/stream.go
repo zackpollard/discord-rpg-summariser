@@ -26,8 +26,8 @@ type UserStream struct {
 	lastTS        uint32
 	hasFirstTS    bool
 	daveState     *discordgo.ReceiverState
-	daveActive    bool // true after the first successful DAVE decrypt
-	daveFailCount int  // consecutive decryption failures
+	daveActive    bool                       // true after the first successful DAVE decrypt
+	daveFailCount int                        // consecutive decryption failures
 	daveVC        *discordgo.VoiceConnection // for re-deriving keys
 	liveBuf       *LiveBuffer
 }

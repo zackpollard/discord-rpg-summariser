@@ -53,15 +53,15 @@ func writeWAVHeader(w io.Writer, dataSize uint32, sampleRate int) error {
 	binary.LittleEndian.PutUint32(hdr[4:8], fileSize)
 	copy(hdr[8:12], "WAVE")
 	copy(hdr[12:16], "fmt ")
-	binary.LittleEndian.PutUint32(hdr[16:20], 16)                      // fmt chunk size
-	binary.LittleEndian.PutUint16(hdr[20:22], 1)                       // PCM
-	binary.LittleEndian.PutUint16(hdr[22:24], numChannels)             // channels
-	binary.LittleEndian.PutUint32(hdr[24:28], uint32(sampleRate))      // sample rate
-	binary.LittleEndian.PutUint32(hdr[28:32], byteRate)                // byte rate
-	binary.LittleEndian.PutUint16(hdr[32:34], blockAlign)              // block align
-	binary.LittleEndian.PutUint16(hdr[34:36], bitsPerSamp)             // bits per sample
+	binary.LittleEndian.PutUint32(hdr[16:20], 16)                 // fmt chunk size
+	binary.LittleEndian.PutUint16(hdr[20:22], 1)                  // PCM
+	binary.LittleEndian.PutUint16(hdr[22:24], numChannels)        // channels
+	binary.LittleEndian.PutUint32(hdr[24:28], uint32(sampleRate)) // sample rate
+	binary.LittleEndian.PutUint32(hdr[28:32], byteRate)           // byte rate
+	binary.LittleEndian.PutUint16(hdr[32:34], blockAlign)         // block align
+	binary.LittleEndian.PutUint16(hdr[34:36], bitsPerSamp)        // bits per sample
 	copy(hdr[36:40], "data")
-	binary.LittleEndian.PutUint32(hdr[40:44], dataSize)                // data size
+	binary.LittleEndian.PutUint32(hdr[40:44], dataSize) // data size
 
 	_, err := w.Write(hdr[:])
 	return err

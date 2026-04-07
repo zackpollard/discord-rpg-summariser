@@ -53,7 +53,7 @@ func (s *Server) handleGetSessionWaveform(w http.ResponseWriter, r *http.Request
 	numPeaks := 5000 // default: good for up to ~8 min at full view
 	if stat, err := os.Stat(mixedPath); err == nil && stat.Size() > 44 {
 		durationSec := float64(stat.Size()-44) / (48000 * 2) // 48kHz 16-bit mono
-		scaled := int(durationSec * 10)                       // ~10 peaks per second
+		scaled := int(durationSec * 10)                      // ~10 peaks per second
 		if scaled > numPeaks {
 			numPeaks = scaled
 		}

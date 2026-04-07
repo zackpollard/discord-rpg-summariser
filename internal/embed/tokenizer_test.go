@@ -132,8 +132,8 @@ func TestStripAccents(t *testing.T) {
 		in, want string
 	}{
 		{"cafe", "cafe"},
-		{"caf\u00e9", "cafe"},       // é → e
-		{"na\u00efve", "naive"},     // ï → i
+		{"caf\u00e9", "cafe"},   // é → e
+		{"na\u00efve", "naive"}, // ï → i
 		{"r\u00e9sum\u00e9", "resume"},
 	}
 	for _, tc := range tests {

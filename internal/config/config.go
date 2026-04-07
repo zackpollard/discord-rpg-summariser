@@ -18,8 +18,8 @@ type Config struct {
 }
 
 type TTSConfig struct {
-	Engine  string `yaml:"engine"`    // "f5tts" (default) or "zipvoice"
-	Threads int    `yaml:"threads"`   // defaults to transcribe.threads if 0
+	Engine  string `yaml:"engine"`  // "f5tts" (default) or "zipvoice"
+	Threads int    `yaml:"threads"` // defaults to transcribe.threads if 0
 }
 
 type DiscordConfig struct {
