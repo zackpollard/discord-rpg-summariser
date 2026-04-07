@@ -63,6 +63,8 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 	// Parse streaming JSON events from stdout.
 	var response string
 	var textAccum strings.Builder
+	var inputTokens, outputTokens int
+	var costUSD float64
 	scanner := bufio.NewScanner(stdoutPipe)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer for large responses
 	for scanner.Scan() {
@@ -71,17 +73,31 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 			continue
 		}
 
-		// Fast path: check type field without full parse for common events.
 		var event struct {
 			Type  string `json:"type"`
 			Event struct {
-				Type  string `json:"type"`
-				Delta struct {
+				Type    string `json:"type"`
+				Delta   struct {
 					Type string `json:"type"`
 					Text string `json:"text"`
 				} `json:"delta"`
+				Message struct {
+					Usage struct {
+						InputTokens  int `json:"input_tokens"`
+						OutputTokens int `json:"output_tokens"`
+					} `json:"usage"`
+				} `json:"message"`
+				Usage struct {
+					InputTokens  int `json:"input_tokens"`
+					OutputTokens int `json:"output_tokens"`
+				} `json:"usage"`
 			} `json:"event"`
-			Result string `json:"result"`
+			Result       string  `json:"result"`
+			TotalCostUSD float64 `json:"total_cost_usd"`
+			Usage        struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			continue
@@ -89,22 +105,39 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 
 		switch event.Type {
 		case "stream_event":
-			if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
-				chunk := event.Event.Delta.Text
-				textAccum.WriteString(chunk)
+			switch event.Event.Type {
+			case "content_block_delta":
+				if event.Event.Delta.Type == "text_delta" {
+					chunk := event.Event.Delta.Text
+					textAccum.WriteString(chunk)
 
-				// Stream a preview of the accumulated text.
-				if c.OnStream != nil {
-					full := textAccum.String()
-					preview := full
-					if len(preview) > 200 {
-						preview = "..." + preview[len(preview)-200:]
+					if c.OnStream != nil {
+						full := textAccum.String()
+						preview := full
+						if len(preview) > 200 {
+							preview = "..." + preview[len(preview)-200:]
+						}
+						tokens := fmt.Sprintf(" [%d tokens]", outputTokens)
+						c.OnStream(operation, preview+tokens)
 					}
-					c.OnStream(operation, preview)
 				}
+			case "message_start":
+				inputTokens = event.Event.Message.Usage.InputTokens
+				if c.OnStream != nil {
+					c.OnStream(operation, fmt.Sprintf("Processing %d input tokens...", inputTokens))
+				}
+			case "message_delta":
+				outputTokens = event.Event.Usage.OutputTokens
 			}
 		case "result":
 			response = event.Result
+			costUSD = event.TotalCostUSD
+			if event.Usage.InputTokens > 0 {
+				inputTokens = event.Usage.InputTokens
+			}
+			if event.Usage.OutputTokens > 0 {
+				outputTokens = event.Usage.OutputTokens
+			}
 		}
 	}
 
@@ -112,6 +145,9 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 	if response == "" {
 		response = textAccum.String()
 	}
+
+	log.Printf("llm: %s tokens: in=%d out=%d cost=$%.4f",
+		operation, inputTokens, outputTokens, costUSD)
 
 	runErr := cmd.Wait()
 	durationMS := int(time.Since(start).Milliseconds())
