@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
@@ -39,19 +40,55 @@ func NewClaudeCLI() *ClaudeCLI {
 func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, result any) error {
 	start := time.Now()
 
+	log.Printf("llm: starting %s (prompt: %d chars)", operation, len(prompt))
+
 	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "claude-opus-4-6", "--effort", "max")
 	cmd.Stdin = strings.NewReader(prompt)
 
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
 
-	runErr := cmd.Run()
+	// Stream stderr to the logger in real-time for visibility.
+	stderrPipe, pipeErr := cmd.StderrPipe()
+	if pipeErr != nil {
+		return fmt.Errorf("stderr pipe: %w", pipeErr)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start claude: %w", err)
+	}
+
+	// Read stderr lines as they come.
+	var stderrBuf bytes.Buffer
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := stderrPipe.Read(buf)
+			if n > 0 {
+				chunk := string(buf[:n])
+				stderrBuf.WriteString(chunk)
+				// Log non-empty lines.
+				for _, line := range strings.Split(strings.TrimSpace(chunk), "\n") {
+					if line != "" {
+						log.Printf("llm [%s]: %s", operation, line)
+					}
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	runErr := cmd.Wait()
 	durationMS := int(time.Since(start).Milliseconds())
 	response := stdout.String()
 
+	log.Printf("llm: %s completed in %.1fs (response: %d chars, err: %v)",
+		operation, float64(durationMS)/1000, len(response), runErr)
+
 	if runErr != nil {
-		errMsg := fmt.Sprintf("claude CLI failed: %v\nstderr: %s\nstdout: %s", runErr, stderr.String(), response)
+		errMsg := fmt.Sprintf("claude CLI failed: %v\nstderr: %s\nstdout: %s", runErr, stderrBuf.String(), response)
 		c.log(ctx, LLMLogEntry{
 			Operation:  operation,
 			Prompt:     prompt,
