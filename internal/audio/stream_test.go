@@ -120,9 +120,9 @@ func TestStreamResample_ChunkSplitOnSilence(t *testing.T) {
 }
 
 func TestStreamResample_MaxChunkEnforcement(t *testing.T) {
-	// Generate 6 minutes (360s) of continuous tone — no silence at all.
-	// Should be forcibly split into two chunks: 5 min + 1 min.
-	samples := genSine48(360, 300, 10000)
+	// Generate 3 minutes (180s) of continuous tone — no silence at all.
+	// Should be forcibly split into two chunks at maxChunkSamples (90s each).
+	samples := genSine48(180, 300, 10000)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "max_chunk.wav")

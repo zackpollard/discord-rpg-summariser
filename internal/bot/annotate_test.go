@@ -44,8 +44,11 @@ func TestBuildAnnotatedTranscript_FilterTableTalk(t *testing.T) {
 
 	result := buildAnnotatedTranscript(segs, annotations, "DM")
 
-	if strings.Contains(result, "pizza") {
-		t.Error("table_talk segment should be filtered out")
+	if !strings.Contains(result, "[TABLE TALK]") {
+		t.Error("table_talk segment should be marked with [TABLE TALK]")
+	}
+	if !strings.Contains(result, "pizza") {
+		t.Error("table_talk segment should still be present (marked, not removed)")
 	}
 	if !strings.Contains(result, "dragon") {
 		t.Error("narrative segment should be present")

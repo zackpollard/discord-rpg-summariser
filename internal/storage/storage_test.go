@@ -2397,20 +2397,20 @@ func TestGetEntityTimeline(t *testing.T) {
 	// (entity_id, segment_id) pairs.
 	var seg1, seg2, seg3 int64
 	err = store.Pool.QueryRow(ctx,
-		`INSERT INTO transcript_segments (session_id, user_id, display_name, start_time, end_time, text)
-		 VALUES ($1, 'u1', 'User1', 0, 10, 'text') RETURNING id`, sess1).Scan(&seg1)
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'u1', 0, 10, 'text') RETURNING id`, sess1).Scan(&seg1)
 	if err != nil {
 		t.Fatalf("insert segment: %v", err)
 	}
 	err = store.Pool.QueryRow(ctx,
-		`INSERT INTO transcript_segments (session_id, user_id, display_name, start_time, end_time, text)
-		 VALUES ($1, 'u1', 'User1', 10, 20, 'text') RETURNING id`, sess1).Scan(&seg2)
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'u1', 10, 20, 'text') RETURNING id`, sess1).Scan(&seg2)
 	if err != nil {
 		t.Fatalf("insert segment: %v", err)
 	}
 	err = store.Pool.QueryRow(ctx,
-		`INSERT INTO transcript_segments (session_id, user_id, display_name, start_time, end_time, text)
-		 VALUES ($1, 'u1', 'User1', 0, 10, 'text') RETURNING id`, sess2).Scan(&seg3)
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'u1', 0, 10, 'text') RETURNING id`, sess2).Scan(&seg3)
 	if err != nil {
 		t.Fatalf("insert segment: %v", err)
 	}

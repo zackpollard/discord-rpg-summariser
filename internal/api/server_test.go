@@ -878,8 +878,8 @@ func TestHandleGetEntityTimeline_WithData(t *testing.T) {
 	// Insert a segment for the entity reference.
 	var segID int64
 	store.Pool.QueryRow(ctx,
-		`INSERT INTO transcript_segments (session_id, user_id, display_name, start_time, end_time, text)
-		 VALUES ($1, 'u1', 'User1', 0, 10, 'text') RETURNING id`, sessID).Scan(&segID)
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'u1', 0, 10, 'text') RETURNING id`, sessID).Scan(&segID)
 
 	store.InsertEntityReferences(ctx, []storage.EntityReference{
 		{EntityID: entityID, SessionID: sessID, SegmentID: &segID, Context: "hero ref"},
