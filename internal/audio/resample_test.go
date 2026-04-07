@@ -183,3 +183,102 @@ func TestResampleChunk_EmptyInput(t *testing.T) {
 		t.Errorf("ResampleChunk([]int16{}): got %d samples, want 0", len(out))
 	}
 }
+
+func TestExtractTimeRange_Normal(t *testing.T) {
+	// 3 seconds at 48kHz.
+	samples := make([]float32, 3*48000)
+	for i := range samples {
+		samples[i] = float32(i) / float32(len(samples))
+	}
+
+	// Extract 1s-2s.
+	got := ExtractTimeRange(samples, 48000, 1.0, 2.0)
+	wantLen := 48000
+	if len(got) != wantLen {
+		t.Errorf("extracted length = %d, want %d", len(got), wantLen)
+	}
+
+	// Verify the first sample corresponds to index 48000 in the original.
+	if got[0] != samples[48000] {
+		t.Errorf("first sample = %f, want %f", got[0], samples[48000])
+	}
+}
+
+func TestExtractTimeRange_Clamped(t *testing.T) {
+	// 1 second of samples.
+	samples := make([]float32, 48000)
+	for i := range samples {
+		samples[i] = 0.5
+	}
+
+	// Request 0-5s, should clamp to 0-1s.
+	got := ExtractTimeRange(samples, 48000, 0.0, 5.0)
+	if len(got) != 48000 {
+		t.Errorf("clamped length = %d, want %d", len(got), 48000)
+	}
+}
+
+func TestExtractTimeRange_Negative(t *testing.T) {
+	samples := make([]float32, 48000)
+	for i := range samples {
+		samples[i] = 0.5
+	}
+
+	// Negative start should clamp to 0.
+	got := ExtractTimeRange(samples, 48000, -1.0, 0.5)
+	wantLen := 24000 // 0.5s at 48kHz
+	if len(got) != wantLen {
+		t.Errorf("length = %d, want %d", len(got), wantLen)
+	}
+}
+
+func TestExtractTimeRange_EmptyResult(t *testing.T) {
+	samples := make([]float32, 48000)
+
+	// start >= end.
+	got := ExtractTimeRange(samples, 48000, 2.0, 1.0)
+	if got != nil {
+		t.Errorf("expected nil for start >= end, got %d samples", len(got))
+	}
+
+	// Both beyond range.
+	got = ExtractTimeRange(samples, 48000, 5.0, 6.0)
+	if got != nil {
+		t.Errorf("expected nil for out-of-range, got %d samples", len(got))
+	}
+}
+
+func TestLoadRaw48k(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.wav")
+
+	// Create a 0.5s WAV at amplitude 0.5.
+	const durSec = 0.5
+	const numSamples = int(durSec * 48000)
+	samples := make([]int16, numSamples)
+	for i := range samples {
+		samples[i] = 16384 // ~0.5 amplitude
+	}
+	writeTestWAV(t, path, samples)
+
+	got, err := LoadRaw48k(path)
+	if err != nil {
+		t.Fatalf("LoadRaw48k: %v", err)
+	}
+
+	if len(got) != numSamples {
+		t.Errorf("sample count = %d, want %d", len(got), numSamples)
+	}
+
+	// Verify values are approximately 0.5.
+	for i := 0; i < 10 && i < len(got); i++ {
+		expected := float32(16384) / 32768.0
+		diff := got[i] - expected
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 0.001 {
+			t.Errorf("sample[%d] = %f, want ~%f", i, got[i], expected)
+		}
+	}
+}
