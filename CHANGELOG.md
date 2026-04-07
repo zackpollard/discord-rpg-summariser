@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.13...v0.1.14) (2026-04-07)
+
+
+### Bug Fixes
+
+* scale waveform peaks with session duration for better resolution ([869979d](https://github.com/zackpollard/discord-rpg-summariser/commit/869979db1a544c27dbaab0f5aefade65f3bb4d4e))
+
 ## [0.1.13](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.12...v0.1.13) (2026-04-07)
 
 
