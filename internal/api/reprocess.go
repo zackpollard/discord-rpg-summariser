@@ -9,10 +9,10 @@ import (
 )
 
 // SessionReprocessor re-runs the summarisation and extraction pipeline on an
-// existing session's transcript data. If retranscribe is true, it also
-// re-runs audio transcription from the original WAV files.
+// existing session's transcript data.
 type SessionReprocessor interface {
 	ReprocessSession(ctx context.Context, sessionID int64, retranscribe bool) error
+	RerunStages(ctx context.Context, sessionID int64, stages []string) error
 }
 
 func (s *Server) SetSessionReprocessor(rp SessionReprocessor) {
@@ -20,7 +20,8 @@ func (s *Server) SetSessionReprocessor(rp SessionReprocessor) {
 }
 
 type reprocessRequest struct {
-	Retranscribe bool `json:"retranscribe"`
+	Retranscribe bool     `json:"retranscribe"`
+	Stages       []string `json:"stages"` // optional: specific stages to re-run
 }
 
 func (s *Server) handleReprocessSession(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +50,11 @@ func (s *Server) handleReprocessSession(w http.ResponseWriter, r *http.Request) 
 		json.NewDecoder(r.Body).Decode(&req) // ignore errors, defaults to false
 	}
 
-	go s.reprocessor.ReprocessSession(context.Background(), sess.ID, req.Retranscribe)
+	if len(req.Stages) > 0 {
+		go s.reprocessor.RerunStages(context.Background(), sess.ID, req.Stages)
+	} else {
+		go s.reprocessor.ReprocessSession(context.Background(), sess.ID, req.Retranscribe)
+	}
 
 	writeJSON(w, http.StatusAccepted, map[string]string{
 		"status": "reprocessing started",

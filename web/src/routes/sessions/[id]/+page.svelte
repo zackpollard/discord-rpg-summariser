@@ -270,6 +270,20 @@
 		}
 	}
 
+	async function handleRerunStage(stage: string) {
+		if (!session) return;
+		reprocessing = true;
+		reprocessMessage = null;
+		try {
+			await reprocessSession(session.id, false, [stage]);
+			reprocessing = false;
+			subscribeToProgress(session.id);
+		} catch (e) {
+			reprocessMessage = e instanceof Error ? e.message : 'Failed to start reprocessing';
+			reprocessing = false;
+		}
+	}
+
 	function formatDate(dateStr: string): string {
 		return new Date(dateStr).toLocaleDateString('en-GB', {
 			weekday: 'long',
@@ -434,6 +448,23 @@
 			>
 				{reprocessing ? 'Processing...' : 'Re-run Full Pipeline (incl. Transcription)'}
 			</button>
+			<select
+				class="btn btn-secondary"
+				disabled={reprocessing}
+				onchange={(e) => {
+					const val = (e.target as HTMLSelectElement).value;
+					if (val) { handleRerunStage(val); (e.target as HTMLSelectElement).value = ''; }
+				}}
+			>
+				<option value="">Re-run Stage...</option>
+				<option value="annotate">Annotate Transcript</option>
+				<option value="summarise">Summarise</option>
+				<option value="title_quotes">Title & Quotes</option>
+				<option value="entities">Extract Entities</option>
+				<option value="quests">Extract Quests</option>
+				<option value="combat">Extract Combat</option>
+				<option value="embeddings">Generate Embeddings</option>
+			</select>
 			<button
 				class="btn btn-danger"
 				disabled={deleting}

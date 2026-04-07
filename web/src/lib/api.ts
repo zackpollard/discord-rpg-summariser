@@ -116,11 +116,11 @@ export async function deleteSession(sessionId: number): Promise<void> {
 	await request<void>(`/api/sessions/${sessionId}`, { method: 'DELETE' });
 }
 
-export async function reprocessSession(sessionId: number, retranscribe: boolean = false): Promise<void> {
+export async function reprocessSession(sessionId: number, retranscribe: boolean = false, stages?: string[]): Promise<void> {
 	await request<void>(`/api/sessions/${sessionId}/reprocess`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ retranscribe })
+		body: JSON.stringify({ retranscribe, stages })
 	});
 }
 
