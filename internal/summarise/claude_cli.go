@@ -54,7 +54,10 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 	if pipeErr != nil {
 		return fmt.Errorf("stdout pipe: %w", pipeErr)
 	}
-	cmd.Stderr = nil // stream-json outputs everything to stdout
+
+	// Capture stderr for error diagnostics.
+	var stderrBuf strings.Builder
+	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start claude: %w", err)
@@ -152,11 +155,12 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 	runErr := cmd.Wait()
 	durationMS := int(time.Since(start).Milliseconds())
 
-	log.Printf("llm: %s completed in %.1fs (response: %d chars, err: %v)",
-		operation, float64(durationMS)/1000, len(response), runErr)
+	stderrStr := stderrBuf.String()
+	log.Printf("llm: %s completed in %.1fs (response: %d chars, stderr: %d chars, err: %v)",
+		operation, float64(durationMS)/1000, len(response), len(stderrStr), runErr)
 
 	if runErr != nil {
-		errMsg := fmt.Sprintf("claude CLI failed: %v\nresponse: %s", runErr, response)
+		errMsg := fmt.Sprintf("claude CLI failed: %v\nstderr: %s\nresponse: %s", runErr, stderrStr, response)
 		c.log(ctx, LLMLogEntry{
 			Operation:  operation,
 			Prompt:     prompt,
@@ -170,7 +174,7 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 	output := StripCodeFences([]byte(response))
 
 	if err := json.Unmarshal(output, result); err != nil {
-		errMsg := fmt.Sprintf("parse claude CLI JSON response: %v\nraw output: %s", err, response)
+		errMsg := fmt.Sprintf("parse claude CLI JSON response: %v\nstderr: %s\nraw output: %s", err, stderrStr, response)
 		c.log(ctx, LLMLogEntry{
 			Operation:  operation,
 			Prompt:     prompt,
