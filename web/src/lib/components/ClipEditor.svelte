@@ -79,6 +79,10 @@
 	}
 </script>
 
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape') onclose(); }} />
+
+<!-- svelte-ignore a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="clip-overlay" onclick={onclose}>
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -122,7 +126,7 @@
 			</div>
 			<div class="clip-field">
 				<label>Duration</label>
-				<span class="clip-duration">{formatTime(endTime - startTime)}</span>
+				<span class="clip-duration">{formatTime(Math.max(0, endTime - startTime))}</span>
 			</div>
 		</div>
 

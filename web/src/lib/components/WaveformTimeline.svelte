@@ -264,9 +264,24 @@
 		loadWaveform();
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
+
+		let resizeObserver: ResizeObserver | null = null;
+		if (container) {
+			resizeObserver = new ResizeObserver(() => {
+				if (canvas && container) {
+					const w = container.clientWidth;
+					canvas.width = w;
+					canvas.height = 80;
+					if (peaks.length > 0) drawWaveform();
+				}
+			});
+			resizeObserver.observe(container);
+		}
+
 		return () => {
 			window.removeEventListener('mousemove', handleMouseMove);
 			window.removeEventListener('mouseup', handleMouseUp);
+			resizeObserver?.disconnect();
 		};
 	});
 </script>

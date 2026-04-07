@@ -320,6 +320,7 @@
 
 	onDestroy(() => {
 		unsubProgress?.();
+		if (userScrollTimer) clearTimeout(userScrollTimer);
 	});
 </script>
 
@@ -448,7 +449,7 @@
 			</section>
 		{/if}
 
-		{#if session.key_events.length > 0}
+		{#if session.key_events?.length > 0}
 			<section class="card">
 				<h2>Key Events</h2>
 				<ul class="events-list">
@@ -808,6 +809,10 @@
 	.btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+	.btn-sm {
+		padding: 0.3rem 0.6rem;
+		font-size: 0.75rem;
 	}
 	.btn-secondary {
 		background: var(--bg-surface);

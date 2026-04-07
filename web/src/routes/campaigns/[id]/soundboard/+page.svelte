@@ -9,26 +9,36 @@
 	let clips = $state<SoundboardClip[]>([]);
 	let loading = $state(true);
 	let botInVoice = $state(false);
+	let error = $state<string | null>(null);
 
 	async function loadClips() {
 		loading = true;
+		error = null;
 		try {
 			clips = await fetchClips(campaignId);
-		} catch {}
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to load clips';
+		}
 		loading = false;
 	}
 
 	async function handleDelete(clipId: number) {
+		error = null;
 		try {
 			await deleteClip(clipId);
 			clips = clips.filter(c => c.id !== clipId);
-		} catch {}
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to delete clip';
+		}
 	}
 
 	async function handlePlay(clipId: number) {
+		error = null;
 		try {
 			await playClipInVoice(clipId);
-		} catch {}
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to play clip in voice';
+		}
 	}
 
 	function formatDuration(start: number, end: number): string {
@@ -59,6 +69,9 @@
 </svelte:head>
 
 <div class="soundboard-page">
+	{#if error}
+		<div class="error-box">{error}</div>
+	{/if}
 	{#if loading}
 		<p class="muted">Loading clips...</p>
 	{:else if clips.length === 0}
@@ -189,4 +202,5 @@
 	}
 
 	.muted { color: var(--text-muted); }
+	.error-box { background: rgba(185, 28, 28, 0.15); border: 1px solid #7f1d1d; color: #fca5a5; padding: 0.75rem; border-radius: var(--radius); font-size: 0.9rem; margin-bottom: 1rem; }
 </style>

@@ -9,3 +9,4 @@ models/
 /bot
 _deps/whisper.cpp/
 tmp/
+dogfood-output/

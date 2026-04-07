@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
+
 	let {
 		src,
 		currentTime = $bindable(0),
@@ -19,6 +21,16 @@
 	let error = $state(false);
 
 	const speeds = [0.5, 1, 1.5, 2];
+
+	// Reset state when src changes.
+	$effect(() => {
+		void src;
+		playing = false;
+		duration = 0;
+		seekValue = 0;
+		loaded = false;
+		error = false;
+	});
 
 	function formatTime(seconds: number): string {
 		if (!isFinite(seconds) || seconds < 0) return '0:00';
@@ -71,6 +83,20 @@
 		playbackRate = rate;
 		if (audioEl) audioEl.playbackRate = rate;
 	}
+
+	function handleWindowSeekEnd() {
+		if (seeking) handleSeekEnd();
+	}
+
+	onMount(() => {
+		window.addEventListener('mouseup', handleWindowSeekEnd);
+		window.addEventListener('touchend', handleWindowSeekEnd);
+	});
+
+	onDestroy(() => {
+		window.removeEventListener('mouseup', handleWindowSeekEnd);
+		window.removeEventListener('touchend', handleWindowSeekEnd);
+	});
 
 	export function seekTo(time: number) {
 		if (!audioEl) return;

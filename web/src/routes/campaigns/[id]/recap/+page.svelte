@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { fetchRecap, regenerateRecap, fetchPreviouslyOn, campaignPDFURL, fetchRecapVoices, recapTTSURL, uploadVoiceProfile, deleteVoiceProfile, type CampaignRecap, type RecapVoice, type PreviouslyOnResult } from '$lib/api';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
@@ -36,6 +36,8 @@
 	let ttsAudioSrc = $state<string>('');
 	let ttsGenerating = $state(false);
 	let ttsProgress = $state(0);
+	let ttsError = $state<string | null>(null);
+	let activeEventSource = $state<EventSource | null>(null);
 
 	// Voice profile upload state.
 	let showUpload = $state(false);
@@ -46,18 +48,42 @@
 
 	const selectedVoice = $derived(selectedVoiceIdx >= 0 ? voices[selectedVoiceIdx] : null);
 
+	// Compute refAudioSrc reactively based on selectedVoiceIdx (not Date.now()).
+	let refAudioSrc = $state('');
+	$effect(() => {
+		const voice = selectedVoiceIdx >= 0 ? voices[selectedVoiceIdx] : null;
+		if (voice && !voice.is_custom) {
+			refAudioSrc = `/api/campaigns/${campaignId}/recap/ref?voice=${encodeURIComponent(voice.user_id)}&_t=${Date.now()}`;
+		} else if (voice?.is_custom && voice.profile_id) {
+			refAudioSrc = `/api/voice-profiles/${voice.profile_id}/audio`;
+		} else {
+			refAudioSrc = '';
+		}
+	});
+
 	function handleVoiceChange(e: Event) {
 		selectedVoiceIdx = parseInt((e.target as HTMLSelectElement).value);
 		ttsAudioSrc = '';
+	}
+
+	function revokeTtsBlob() {
+		if (ttsAudioSrc && ttsAudioSrc.startsWith('blob:')) {
+			URL.revokeObjectURL(ttsAudioSrc);
+		}
 	}
 
 	async function generateTTS() {
 		if (!selectedVoice) return;
 		ttsGenerating = true;
 		ttsProgress = 0;
+		ttsError = null;
+		revokeTtsBlob();
 		ttsAudioSrc = '';
 
+		// Close any previous EventSource before opening a new one.
+		activeEventSource?.close();
 		const progressSource = new EventSource('/api/tts/progress');
+		activeEventSource = progressSource;
 		progressSource.onmessage = (e) => {
 			try {
 				const data = JSON.parse(e.data);
@@ -72,11 +98,17 @@
 			const res = await fetch(url);
 			if (res.ok) {
 				const blob = await res.blob();
+				revokeTtsBlob();
 				ttsAudioSrc = URL.createObjectURL(blob);
+			} else {
+				ttsError = `TTS generation failed (${res.status})`;
 			}
-		} catch {}
+		} catch (e) {
+			ttsError = e instanceof Error ? e.message : 'TTS generation failed';
+		}
 
 		progressSource.close();
+		activeEventSource = null;
 		ttsGenerating = false;
 		ttsProgress = 0;
 	}
@@ -84,6 +116,7 @@
 	async function handleUpload() {
 		if (!uploadName || !uploadFile) return;
 		uploading = true;
+		ttsError = null;
 		try {
 			await uploadVoiceProfile(campaignId, uploadName, uploadFile, uploadTranscript);
 			voices = await fetchRecapVoices(campaignId);
@@ -91,26 +124,24 @@
 			uploadTranscript = '';
 			uploadFile = null;
 			showUpload = false;
-		} catch {}
+		} catch (e) {
+			ttsError = e instanceof Error ? e.message : 'Upload failed';
+		}
 		uploading = false;
 	}
 
 	async function handleDeleteProfile(profileId: number) {
+		ttsError = null;
 		try {
 			await deleteVoiceProfile(profileId);
 			voices = await fetchRecapVoices(campaignId);
 			selectedVoiceIdx = -1;
+			revokeTtsBlob();
 			ttsAudioSrc = '';
-		} catch {}
+		} catch (e) {
+			ttsError = e instanceof Error ? e.message : 'Delete failed';
+		}
 	}
-
-	const refAudioSrc = $derived(
-		selectedVoice && !selectedVoice.is_custom
-			? `/api/campaigns/${campaignId}/recap/ref?voice=${encodeURIComponent(selectedVoice.user_id)}&_t=${Date.now()}`
-			: selectedVoice?.is_custom && selectedVoice.profile_id
-				? `/api/voice-profiles/${selectedVoice.profile_id}/audio`
-				: ''
-	);
 
 	function formatDate(dateStr: string): string {
 		return new Date(dateStr).toLocaleDateString('en-GB', {
@@ -149,6 +180,11 @@
 	onMount(() => {
 		loadRecap();
 		fetchRecapVoices(campaignId).then(v => { voices = v; }).catch(() => {});
+	});
+
+	onDestroy(() => {
+		activeEventSource?.close();
+		revokeTtsBlob();
 	});
 </script>
 
@@ -272,6 +308,9 @@
 					</button>
 				</div>
 			{/if}
+				{#if ttsError}
+					<div class="error-box" style="margin-top: 0.75rem;">{ttsError}</div>
+				{/if}
 				{#if ttsGenerating}
 					<div class="tts-progress">
 						<div class="tts-progress-header">

@@ -75,6 +75,9 @@
 		gap: 0;
 		border-bottom: 1px solid var(--border);
 		margin-bottom: 1.25rem;
+		overflow-x: auto;
+		flex-wrap: nowrap;
+		-webkit-overflow-scrolling: touch;
 	}
 	.nav-tab {
 		padding: 0.6rem 1.25rem;
@@ -82,6 +85,8 @@
 		color: var(--text-secondary);
 		border-bottom: 2px solid transparent;
 		transition: color 0.15s, border-color 0.15s;
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 	.nav-tab:hover {
 		color: var(--accent-gold);
