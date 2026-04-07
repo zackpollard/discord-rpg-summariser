@@ -4,24 +4,54 @@ A Discord bot that records D&D voice sessions, transcribes them with whisper.cpp
 
 ## Features
 
+### Recording & Transcription
 - **Voice Recording** — Records per-user audio from Discord voice channels with DAVE E2EE decryption
 - **Live Transcription** — Sliding-window transcription streamed to the web panel in real time
+- **Shared Microphone Support** — Speaker diarization separates two people sharing one mic using voice embeddings
+- **Transcript Annotation** — LLM-powered pre-processing classifies table talk, corrects ASR errors, detects scene boundaries, identifies NPC voices, merges split sentences, and tags emotional tone
+
+### AI-Powered Analysis
 - **Session Summaries** — LLM-generated narrative summaries with key events
-- **Knowledge Base** — Automatic extraction of NPCs, places, items, organisations, and events with status tracking (alive/dead) and location hierarchy
-- **Quest Tracker** — Quests are extracted from sessions and tracked across the campaign
-- **Combat Encounters** — Automatic detection and extraction of combat encounters from sessions
+- **Session Titles** — Auto-generated evocative titles for each session (e.g. "The Ambush at Thornwall")
+- **Memorable Quotes** — Extracts funny, dramatic, and iconic lines with tone tags
+- **Knowledge Base** — Automatic extraction of NPCs, places, items, organisations with status tracking and location hierarchy
+- **Quest Tracker** — Quests are extracted and tracked across the campaign
+- **Combat Encounters** — Automatic detection with tactical analysis, MVP, closest calls, and funniest moments
+- **Entity Relationships** — Interactive D3.js force graph showing connections between characters, places, and items
+- **Character Story Arcs** — On-demand per-character summaries with key moments and relationship notes
+
+### Campaign Tools
+- **Story Recap** — Generate narrative recaps with selectable style (dramatic, casual, in-character)
+- **"Previously On..."** — Short dramatic narration of the last session, designed to be read aloud
+- **Voice-Cloned TTS** — Recap read aloud in any campaign member's voice using ZipVoice
+- **Custom Voice Profiles** — Upload audio to create named voices (e.g. a famous D&D YouTuber)
+- **Discord Playback** — Play generated recap audio directly in the voice channel
+- **PDF Campaign Book** — Export your campaign as a D&D-style PDF book
+
+### Soundboard
+- **Clip Creation** — Create audio clips from transcript segments with waveform editor
+- **Waveform Visualization** — Zoomable waveform with draggable start/end handles
+- **AI Name Suggestions** — Get clip name suggestions based on what's being said
+- **Voice Channel Playback** — Play clips through the bot's voice connection
+- **Download** — Download clips as WAV files
+
+### Search & Analytics
+- **Lore Q&A** — RAG-powered semantic search using pgvector embeddings
+- **Transcript Search** — Full-text search across all session transcripts
 - **Campaign Timeline** — Unified chronological view of sessions, entities, and quest milestones
 - **Entity Timeline** — Swimlane chart visualising entity involvement across sessions
 - **Campaign Stats** — Dashboard with Chart.js visualisations of session metrics
-- **Relationship Graph** — Interactive D3.js force graph showing entity relationships
-- **PDF Campaign Book** — Export your campaign as a D&D-style PDF book
-- **Lore Q&A** — RAG-powered semantic search using pgvector embeddings
-- **Story Recap** — Generate a narrative recap of your entire campaign
-- **Transcript Search** — Full-text search across all session transcripts
+
+### Pipeline & Progress
+- **Real-time Progress** — SSE-based progress tracking for all pipeline stages with live LLM output streaming
+- **LLM Debug Logs** — View prompts and responses for every LLM call on the session detail page
+- **Token Counts** — Live display of input/output tokens and cost during generation
+
+### Infrastructure
 - **Audio Playback** — Play session recordings with synchronised transcript highlighting
-- **Discord OAuth2** — Optional authentication for the web panel via Discord login
+- **Discord OAuth2** — Optional authentication for the web panel
 - **Telegram Integration** — Capture DM text messages from a Telegram group chat during sessions
-- **Web Panel** — Dark-themed D&D UI for browsing all campaign data
+- **Dark-themed Web Panel** — D&D-inspired UI for browsing all campaign data
 
 ## Demo
 
@@ -58,15 +88,17 @@ A Discord bot that records D&D voice sessions, transcribes them with whisper.cpp
 - **SvelteKit** frontend (static adapter, served by the Go server)
 - **PostgreSQL** with pgvector for storage and semantic search
 - **Claude CLI** or **Ollama** for LLM summarisation and extraction
+- **Python** (ZipVoice) for voice-cloned TTS via subprocess
 
 ## Prerequisites
 
 - Go 1.23+
 - Node.js 22+
-- PostgreSQL 17+
+- PostgreSQL 17+ with pgvector
 - CMake and a C/C++ compiler (for whisper.cpp)
 - `libopus-dev` (for opus audio decoding)
 - `claude` CLI installed (if using Claude for summarisation), or Ollama running locally
+- Python 3.12 with venv (optional, for TTS voice cloning)
 
 ## Quick Start
 
@@ -119,7 +151,20 @@ In Discord:
 /session stop     # stops recording and begins processing
 ```
 
-The bot will transcribe the audio, generate a summary, extract entities and quests, and post a notification in Discord.
+The bot will transcribe the audio, annotate the transcript, generate a summary with title and quotes, extract entities and quests, and post a notification in Discord.
+
+### 7. Set up TTS (optional)
+
+For voice-cloned recap playback:
+
+```bash
+# Create Python venv with ZipVoice
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python torch==2.6.0+cpu torchaudio==2.6.0+cpu --index-url https://download.pytorch.org/whl/cpu
+git clone --depth 1 https://github.com/k2-fsa/ZipVoice.git .venv/ZipVoice
+uv pip install --python .venv/bin/python piper_phonemize -f https://k2-fsa.github.io/icefall/piper_phonemize.html
+uv pip install --python .venv/bin/python -r .venv/ZipVoice/requirements.txt
+```
 
 ## Shared Microphone Support
 
@@ -146,8 +191,6 @@ The bot automatically enrols each user's voice print during regular sessions. Fo
 /campaign enroll user:@Alice partner:true   # enrol Alice's shared-mic partner
                                             # (only the partner should speak)
 ```
-
-The bot joins voice, records a 10-second sample, extracts a speaker embedding, and saves it for the campaign. Future shared-mic sessions use these voice prints to identify who is speaking instead of falling back to a speaking-time heuristic.
 
 ### Transcription Engine
 
@@ -199,9 +242,17 @@ All configuration is in `config.yaml`. Environment variables override config fil
 
 ### LLM Provider
 
-**Claude CLI** (default): Install the [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) and ensure `claude --print` works. In Docker, claude-cli is pre-installed — authenticate with `docker exec -it <container> claude login` or set the `ANTHROPIC_API_KEY` environment variable.
+**Claude CLI** (default): Install the [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) and ensure `claude --print` works. Uses Claude Opus 4.6 with max effort and 1M context window. In Docker, claude-cli is pre-installed — authenticate with `docker exec -it <container> claude login` or set the `ANTHROPIC_API_KEY` environment variable.
 
 **Ollama**: Set `llm.provider: ollama` and configure `ollama_url` and `ollama_model` in config.yaml.
+
+### TTS Configuration
+
+```yaml
+tts:
+  engine: "zipvoice"     # voice cloning engine
+  threads: 8             # CPU threads for TTS (defaults to transcribe.threads)
+```
 
 ### Whisper Model
 
@@ -255,6 +306,10 @@ Telegram messages from the DM are filtered for relevance (short chatter is exclu
 | `/campaign enroll` | Record a voice sample for speaker identification |
 | `/campaign telegram-dm` | Set the DM's Telegram user ID |
 | `/campaign recap` | Generate or view the story recap |
+| `/campaign generate-recap-audio` | Generate TTS audio of the recap |
+| `/campaign play-recap` | Play generated recap in voice channel |
+| `/soundboard play` | Play a soundboard clip in voice (with autocomplete) |
+| `/soundboard list` | List available soundboard clips |
 | `/character set` | Set a character name mapping |
 | `/character list` | List character mappings |
 | `/character remove` | Remove a character mapping |
@@ -281,18 +336,20 @@ cmd/bot/              Go entrypoint
 internal/
   api/                HTTP API handlers
   auth/               Discord OAuth2 authentication and session management
-  audio/              Audio utilities (mixing, resampling)
-  bot/                Discord bot, command handlers, pipeline
+  audio/              Audio utilities (mixing, resampling, clip extraction)
+  bot/                Discord bot, command handlers, pipeline, annotations
   config/             Configuration loading
   diarize/            Speaker diarization (sherpa-onnx)
-  embed/              Vector embeddings (Ollama) for RAG semantic search
+  embed/              Vector embeddings for RAG semantic search
   pdf/                D&D-style PDF campaign book generation
   storage/            PostgreSQL storage layer
   summarise/          LLM prompts and clients (Claude CLI, Ollama)
   telegram/           Telegram Bot API client
-  transcribe/         Whisper.cpp bindings and transcript merging
-  voice/              Discord voice recording, DAVE decryption, live transcription
+  transcribe/         Whisper.cpp / Parakeet bindings and transcript merging
+  tts/                Voice-cloned TTS (ZipVoice via Python subprocess)
+  voice/              Discord voice recording, DAVE decryption, live transcription, playback
 web/                  SvelteKit frontend
+scripts/              Helper scripts (TTS generation, bpe vocab)
 migrations/           PostgreSQL schema migrations
 _deps/                Vendored dependencies (discordgo fork, whisper.cpp)
 ```
