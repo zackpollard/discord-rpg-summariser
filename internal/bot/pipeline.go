@@ -227,27 +227,26 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	}
 
 	// Annotate transcript: classify segments, correct ASR errors, detect
-	// scene boundaries, and identify NPC voices. Non-fatal on error.
+	// scene boundaries, and identify NPC voices. Required — downstream
+	// stages depend on the annotated transcript for quality.
 	b.progress.SetStage("summarising", "Annotating transcript")
 	annotations := b.annotateTranscript(ctx, session, sessionID, merged, charNames, dmName)
 
-	// Build the transcript for summarisation, applying annotations if available.
-	var transcript string
-	if len(annotations) > 0 {
-		transcript = buildAnnotatedTranscript(merged, annotations, dmName)
-		log.Printf("pipeline: annotated transcript built (%d annotations, %d narrative, %d table_talk)",
-			len(annotations),
-			countClassification(annotations, "narrative"),
-			countClassification(annotations, "table_talk"))
-	} else {
-		// Fall back to unannotated transcript.
-		transcript = b.buildTranscriptWithTelegram(ctx, session, campaign, merged, telegramMsgs, dmName)
+	if len(annotations) == 0 {
+		log.Printf("pipeline: annotation failed for session %d, aborting pipeline", sessionID)
+		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
+		b.sendNotification(sessionID, "Transcript annotation failed. Please retry.")
+		return
 	}
 
-	// Interleave Telegram messages if we used annotated transcript.
-	if len(annotations) > 0 {
-		transcript = b.interleaveTelegramIntoAnnotated(ctx, session, campaign, transcript, telegramMsgs, dmName)
-	}
+	transcript := buildAnnotatedTranscript(merged, annotations, dmName)
+	log.Printf("pipeline: annotated transcript built (%d annotations, %d narrative, %d table_talk)",
+		len(annotations),
+		countClassification(annotations, "narrative"),
+		countClassification(annotations, "table_talk"))
+
+	// Interleave Telegram messages.
+	transcript = b.interleaveTelegramIntoAnnotated(ctx, session, campaign, transcript, telegramMsgs, dmName)
 
 	// Summarise.
 	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")

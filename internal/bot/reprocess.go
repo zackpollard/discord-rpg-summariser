@@ -116,17 +116,18 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	}
 
 	// Annotate transcript: classify segments, correct ASR errors, detect
-	// scene boundaries, and identify NPC voices. Non-fatal on error.
+	// scene boundaries, and identify NPC voices. Required — downstream
+	// stages depend on the annotated transcript for quality.
 	b.progress.SetStage("summarising", "Annotating transcript")
 	annotations := b.annotateTranscript(ctx, session, sessionID, merged, charNames, dmName)
 
-	// Build the transcript for summarisation, applying annotations if available.
-	var transcript string
-	if len(annotations) > 0 {
-		transcript = buildAnnotatedTranscript(merged, annotations, dmName)
-	} else {
-		transcript = b.buildTranscriptFromDB(ctx, session, campaign, merged, dmName)
+	if len(annotations) == 0 {
+		log.Printf("reprocess: annotation failed for session %d, aborting", sessionID)
+		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
+		return fmt.Errorf("transcript annotation failed")
 	}
+
+	transcript := buildAnnotatedTranscript(merged, annotations, dmName)
 
 	// Summarise.
 	b.progress.SetStage("summarising", "Generating summary")
