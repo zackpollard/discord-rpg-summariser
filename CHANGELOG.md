@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.15](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.14...v0.1.15) (2026-04-07)
+
+
+### Features
+
+* add real-time logging for LLM operations ([fbe93d0](https://github.com/zackpollard/discord-rpg-summariser/commit/fbe93d007f3ef648157da63800c39e75e41e7e1e))
+* show token counts and cost in LLM progress stream ([4ec1e1e](https://github.com/zackpollard/discord-rpg-summariser/commit/4ec1e1e73a28b12ee94af35c7da955d97bbd4aca))
+* stream LLM generation text to progress window in real-time ([b81f6e7](https://github.com/zackpollard/discord-rpg-summariser/commit/b81f6e764b9f0f6ddba7a0ff890fcdf56fdf68fb))
+* stream LLM stderr to pipeline progress window ([19c990a](https://github.com/zackpollard/discord-rpg-summariser/commit/19c990ab1e6d707a99db656f5ed2091b55314966))
+
+
+### Bug Fixes
+
+* add --include-partial-messages for streaming LLM events ([3142300](https://github.com/zackpollard/discord-rpg-summariser/commit/3142300e021245926369a8a5cc5e20851b96370c))
+* show LLM streaming output in separate area below progress bar ([82ba1f3](https://github.com/zackpollard/discord-rpg-summariser/commit/82ba1f3a384eb0ec90b3268e38ec30e69ae05651))
+
 ## [0.1.14](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.13...v0.1.14) (2026-04-07)
 
 
