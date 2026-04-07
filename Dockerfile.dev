@@ -1,0 +1,77 @@
+# Stage 1: Build whisper.cpp and download Go deps
+FROM golang:1.23-bookworm AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake build-essential git pkg-config libopus-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Clone and build whisper.cpp
+RUN git clone --depth 1 --branch v1.8.4 https://github.com/ggerganov/whisper.cpp _deps/whisper.cpp \
+    && cmake -B _deps/whisper.cpp/build -S _deps/whisper.cpp \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_NATIVE=OFF \
+        -DWHISPER_BUILD_EXAMPLES=OFF \
+        -DWHISPER_BUILD_TESTS=OFF \
+    && cmake --build _deps/whisper.cpp/build --config Release -j$(nproc)
+
+# Download Go dependencies
+COPY go.mod go.sum ./
+COPY _deps/discordgo-fork/ _deps/discordgo-fork/
+RUN go mod download
+
+# Collect sherpa-onnx shared libraries
+RUN SHERPA_MOD=/go/pkg/mod/github.com/k2-fsa/sherpa-onnx-go-linux@v1.12.30/lib \
+    && ARCH=$(uname -m) \
+    && case "$ARCH" in \
+         x86_64)  SHERPA_ARCH=x86_64-unknown-linux-gnu ;; \
+         aarch64) SHERPA_ARCH=aarch64-unknown-linux-gnu ;; \
+         *)       echo "Unsupported arch: $ARCH" && exit 1 ;; \
+       esac \
+    && mkdir -p /sherpa-libs \
+    && cp "$SHERPA_MOD/$SHERPA_ARCH"/*.so /sherpa-libs/
+
+# Install air for hot reload
+RUN go install github.com/air-verse/air@v1.61.7
+
+# Stage 2: Dev runtime (keeps Go toolchain for air rebuilds)
+FROM golang:1.23-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libopus-dev libgomp1 libsndfile1 ffmpeg pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy whisper shared libraries and headers
+COPY --from=builder /app/_deps/whisper.cpp/build/src/libwhisper.so* /usr/lib/
+COPY --from=builder /app/_deps/whisper.cpp/build/ggml/src/libggml*.so* /usr/lib/
+COPY --from=builder /app/_deps/whisper.cpp/include/ /usr/local/include/whisper/
+COPY --from=builder /app/_deps/whisper.cpp/ggml/include/ /usr/local/include/ggml/
+
+# Copy sherpa-onnx shared libraries
+COPY --from=builder /sherpa-libs/*.so /usr/lib/
+RUN ldconfig
+
+# Copy Go module cache and air binary
+COPY --from=builder /go/pkg/mod /go/pkg/mod
+COPY --from=builder /go/bin/air /usr/local/bin/air
+
+# Copy go.mod/go.sum and local deps (needed for builds)
+COPY go.mod go.sum ./
+COPY _deps/discordgo-fork/ _deps/discordgo-fork/
+
+# CGO flags for whisper.cpp
+ENV CGO_ENABLED=1
+ENV CGO_CFLAGS="-I/usr/local/include/whisper -I/usr/local/include/ggml"
+ENV CGO_LDFLAGS="-lwhisper -lggml -lggml-base -lggml-cpu -lm -lstdc++ -fopenmp"
+
+# Source code is mounted as volumes — not copied
+# Create data directories
+RUN mkdir -p /data/audio /data/models /data/claude tmp \
+    && ln -s /data/claude /root/.claude
+
+EXPOSE 8080
+
+CMD ["air", "-c", ".air.docker.toml"]

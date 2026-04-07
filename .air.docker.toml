@@ -1,0 +1,18 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -tags nolibopusfile -o ./tmp/bot ./cmd/bot"
+  bin = "./tmp/bot"
+  full_bin = "./tmp/bot -config /app/config.yaml"
+  include_ext = ["go"]
+  exclude_dir = ["tmp", "web", "node_modules", "models", "data", "_deps"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 1000
+  kill_delay = 500
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

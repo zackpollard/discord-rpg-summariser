@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: rpg
+      POSTGRES_PASSWORD: rpg
+      POSTGRES_DB: rpg_summariser
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rpg -d rpg_summariser"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./cmd:/app/cmd
+      - ./internal:/app/internal
+      - ./migrations:/app/migrations
+      - ./scripts:/app/scripts
+      - ./config.yaml:/app/config.yaml:ro
+      - ./.air.docker.toml:/app/.air.docker.toml:ro
+      - botdata:/data
+    environment:
+      DATABASE_URL: postgres://rpg:rpg@postgres:5432/rpg_summariser?sslmode=disable
+
+volumes:
+  pgdata:
+  botdata:

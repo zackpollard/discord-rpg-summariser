@@ -34,7 +34,7 @@ export CGO_LDFLAGS      += -L$(abspath $(WHISPER_LIB)) -L$(abspath $(WHISPER_GGM
 export CGO_CFLAGS       += -I$(abspath $(WHISPER_INCLUDE)) -I$(abspath $(WHISPER_DIR)/ggml/include)
 export LD_LIBRARY_PATH  := $(abspath $(WHISPER_LIB)):$(abspath $(WHISPER_GGML_LIB)):$(LD_LIBRARY_PATH)
 
-.PHONY: dev dev-deps dev-stop build test test-unit test-integration test-web lint clean help whisper
+.PHONY: dev dev-local dev-deps dev-stop build test test-unit test-integration test-web lint clean help whisper
 
 help: ## Show this help
 	@grep -E '^[a-z][a-z_-]+:.*## ' $(MAKEFILE_LIST) | sort | \
@@ -58,11 +58,11 @@ $(WHISPER_LIB)/libwhisper.so:
 	cmake --build "$(WHISPER_BUILD)" --config Release -j
 
 dev-deps: ## Start PostgreSQL via Docker Compose
-	docker compose up -d --wait
+	docker compose -f docker-compose.dev.yml up -d --wait postgres
 	@echo "PostgreSQL ready at localhost:5432"
 
-dev-stop: ## Stop PostgreSQL
-	docker compose down
+dev-stop: ## Stop dev services
+	docker compose -f docker-compose.dev.yml down
 
 web/node_modules: web/package.json
 	cd web && npm install
@@ -72,7 +72,14 @@ web/node_modules: web/package.json
 # Development
 # ---------------------------------------------------------------------------
 
-dev: dev-deps whisper web/node_modules ## Start postgres, Go backend, and Svelte dev server
+dev: web/node_modules ## Start postgres, Go backend (Docker), and Svelte dev server
+	@echo "Starting dev servers (Ctrl+C to stop)..."
+	@trap 'docker compose -f docker-compose.dev.yml down; kill 0' EXIT; \
+	docker compose -f docker-compose.dev.yml up --build & \
+	sleep 5 && cd web && npm run dev & \
+	wait
+
+dev-local: dev-deps whisper web/node_modules ## Start dev servers locally (requires native deps)
 	@echo "Starting dev servers (Ctrl+C to stop)..."
 	@trap 'kill 0' EXIT; \
 	DATABASE_URL="$(DATABASE_URL)" \
