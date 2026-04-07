@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"discord-rpg-summariser/internal/audio"
 
@@ -47,7 +48,26 @@ func (s *Server) handleGetSessionWaveform(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	peaks, err := computePeaks(mixedPath, 1000)
+	// Scale peaks to ~10 per second of audio for good resolution at any zoom.
+	// The client can also request a specific count via ?peaks=N.
+	numPeaks := 5000 // default: good for up to ~8 min at full view
+	if stat, err := os.Stat(mixedPath); err == nil && stat.Size() > 44 {
+		durationSec := float64(stat.Size()-44) / (48000 * 2) // 48kHz 16-bit mono
+		scaled := int(durationSec * 10)                       // ~10 peaks per second
+		if scaled > numPeaks {
+			numPeaks = scaled
+		}
+		if numPeaks > 50000 {
+			numPeaks = 50000 // cap to keep response size reasonable
+		}
+	}
+	if q := r.URL.Query().Get("peaks"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 100000 {
+			numPeaks = n
+		}
+	}
+
+	peaks, err := computePeaks(mixedPath, numPeaks)
 	if err != nil {
 		log.Printf("compute waveform peaks: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to compute waveform")
