@@ -1,7 +1,7 @@
 package summarise
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -46,55 +46,81 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 
 	log.Printf("llm: starting %s (prompt: %d chars)", operation, len(prompt))
 
-	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "claude-opus-4-6", "--effort", "max")
+	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "claude-opus-4-6", "--effort", "max",
+		"--output-format", "stream-json", "--verbose")
 	cmd.Stdin = strings.NewReader(prompt)
 
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-
-	// Stream stderr to the logger in real-time for visibility.
-	stderrPipe, pipeErr := cmd.StderrPipe()
+	stdoutPipe, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
-		return fmt.Errorf("stderr pipe: %w", pipeErr)
+		return fmt.Errorf("stdout pipe: %w", pipeErr)
 	}
+	cmd.Stderr = nil // stream-json outputs everything to stdout
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start claude: %w", err)
 	}
 
-	// Read stderr lines as they come for real-time visibility.
-	var stderrBuf bytes.Buffer
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := stderrPipe.Read(buf)
-			if n > 0 {
-				chunk := string(buf[:n])
-				stderrBuf.WriteString(chunk)
-				for _, line := range strings.Split(strings.TrimSpace(chunk), "\n") {
-					if line != "" {
-						log.Printf("llm [%s]: %s", operation, line)
-						if c.OnStream != nil {
-							c.OnStream(operation, line)
-						}
+	// Parse streaming JSON events from stdout.
+	var response string
+	var textAccum strings.Builder
+	scanner := bufio.NewScanner(stdoutPipe)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer for large responses
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		// Fast path: check type field without full parse for common events.
+		var event struct {
+			Type  string `json:"type"`
+			Event struct {
+				Type  string `json:"type"`
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			} `json:"event"`
+			Result string `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			continue
+		}
+
+		switch event.Type {
+		case "stream_event":
+			if event.Event.Type == "content_block_delta" && event.Event.Delta.Type == "text_delta" {
+				chunk := event.Event.Delta.Text
+				textAccum.WriteString(chunk)
+
+				// Stream a preview of the accumulated text.
+				if c.OnStream != nil {
+					full := textAccum.String()
+					preview := full
+					if len(preview) > 200 {
+						preview = "..." + preview[len(preview)-200:]
 					}
+					c.OnStream(operation, preview)
 				}
 			}
-			if err != nil {
-				break
-			}
+		case "result":
+			response = event.Result
 		}
-	}()
+	}
+
+	// If no result event, use accumulated text.
+	if response == "" {
+		response = textAccum.String()
+	}
 
 	runErr := cmd.Wait()
 	durationMS := int(time.Since(start).Milliseconds())
-	response := stdout.String()
 
 	log.Printf("llm: %s completed in %.1fs (response: %d chars, err: %v)",
 		operation, float64(durationMS)/1000, len(response), runErr)
 
 	if runErr != nil {
-		errMsg := fmt.Sprintf("claude CLI failed: %v\nstderr: %s\nstdout: %s", runErr, stderrBuf.String(), response)
+		errMsg := fmt.Sprintf("claude CLI failed: %v\nresponse: %s", runErr, response)
 		c.log(ctx, LLMLogEntry{
 			Operation:  operation,
 			Prompt:     prompt,
@@ -105,7 +131,7 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 		return fmt.Errorf("%s", errMsg)
 	}
 
-	output := StripCodeFences(stdout.Bytes())
+	output := StripCodeFences([]byte(response))
 
 	if err := json.Unmarshal(output, result); err != nil {
 		errMsg := fmt.Sprintf("parse claude CLI JSON response: %v\nraw output: %s", err, response)
