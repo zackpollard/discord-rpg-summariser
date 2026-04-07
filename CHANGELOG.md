@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.16](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.15...v0.1.16) (2026-04-07)
+
+
+### Features
+
+* re-run individual pipeline stages without reprocessing everything ([db0c4fa](https://github.com/zackpollard/discord-rpg-summariser/commit/db0c4face9d772348a6f87a1f49a6ac912a57b44))
+* use Claude session resume for annotation batching ([04acadc](https://github.com/zackpollard/discord-rpg-summariser/commit/04acadcc25651e8a873ca976aa6e178c3a47daf1))
+
+
+### Bug Fixes
+
+* abort pipeline if transcript annotation fails ([85f3751](https://github.com/zackpollard/discord-rpg-summariser/commit/85f3751adab98ccc6e45706568619c4e9934640d))
+* add 20-segment context overlap between annotation batches ([f9f6f56](https://github.com/zackpollard/discord-rpg-summariser/commit/f9f6f56669eabc7af2330ffa39343738dc2c29cb))
+* cap transcript size in LLM extraction prompts ([9105863](https://github.com/zackpollard/discord-rpg-summariser/commit/9105863cd28d32f79cceaedf695802720e2c5874))
+* capture stderr for error diagnostics in LLM calls ([710a8d3](https://github.com/zackpollard/discord-rpg-summariser/commit/710a8d300d9dd253a4f49a5be30f9710b14f686c))
+* chunk transcript annotation into batches of 200 segments ([5847911](https://github.com/zackpollard/discord-rpg-summariser/commit/5847911a13debaff461316cbb88ce18ccaf640a6))
+* CI failures — gofmt formatting and pgvector for integration tests ([89251a9](https://github.com/zackpollard/discord-rpg-summariser/commit/89251a9c66cfbaac43adf4109b94578067aecf86))
+* update tests for new features ([4864999](https://github.com/zackpollard/discord-rpg-summariser/commit/4864999885c7a1ca6e29272b4381b52cb6b23bb8))
+
+
+### Documentation
+
+* update README with all new features ([305e634](https://github.com/zackpollard/discord-rpg-summariser/commit/305e634179ec1d2962dbcdcd61e2ba66bf373278))
+
 ## [0.1.15](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.14...v0.1.15) (2026-04-07)
 
 
