@@ -73,6 +73,9 @@
 						<td class="nowrap">{formatDuration(session.started_at, session.ended_at)}</td>
 						<td><StatusBadge status={session.status} /></td>
 						<td class="summary-cell">
+							{#if session.title}
+								<span class="session-title">{session.title}</span>
+							{/if}
 							{#if session.summary}
 								{session.summary.slice(0, 100)}{session.summary.length > 100 ? '...' : ''}
 							{:else}
@@ -101,6 +104,7 @@
 	tbody tr:hover { background: var(--surface-hover); }
 	.nowrap { white-space: nowrap; }
 	.summary-cell { color: var(--text-secondary); max-width: 400px; }
+	.session-title { display: block; color: var(--accent-gold); font-weight: 600; font-size: 0.85rem; margin-bottom: 0.15rem; }
 	.pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 1rem; }
 	.page-info { font-size: 0.9rem; color: var(--text-secondary); }
 	button { background: var(--bg-surface-2); border: 1px solid var(--border); color: var(--text-primary); padding: 0.4rem 1rem; border-radius: var(--radius); cursor: pointer; font-size: 0.85rem; }

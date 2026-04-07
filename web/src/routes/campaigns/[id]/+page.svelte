@@ -163,6 +163,9 @@
 						<span class="session-date">{formatDate(session.started_at)}</span>
 						<StatusBadge status={session.status} />
 					</div>
+					{#if session.title}
+						<p class="session-title-preview">{session.title}</p>
+					{/if}
 					{#if session.summary}
 						<p class="session-summary">{session.summary.slice(0, 120)}{session.summary.length > 120 ? '...' : ''}</p>
 					{:else}
@@ -223,6 +226,7 @@
 	.session-row:hover { background: var(--surface-hover); border-color: var(--accent-gold-dim); text-decoration: none; }
 	.session-info { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.35rem; }
 	.session-date { font-weight: 500; font-size: 0.9rem; }
+	.session-title-preview { color: var(--accent-gold); font-weight: 600; font-size: 0.85rem; margin: 0; }
 	.session-summary { color: var(--text-secondary); font-size: 0.85rem; line-height: 1.4; }
 
 	.pdf-section p { font-size: 0.85rem; line-height: 1.4; }
