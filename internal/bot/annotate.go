@@ -67,10 +67,33 @@ func (b *Bot) annotateTranscript(
 		vocab.EntityNames = append(vocab.EntityNames, e.Name)
 	}
 
-	// Run annotation.
-	result, err := annotator.AnnotateTranscript(ctx, inputs, vocab, dmName)
-	if err != nil {
-		log.Printf("pipeline: annotation failed: %v", err)
+	// Chunk the segments to avoid overwhelming the LLM with a massive prompt.
+	// ~200 segments per batch keeps each call manageable.
+	const batchSize = 200
+	var allAnnotated []summarise.AnnotatedSegment
+
+	for i := 0; i < len(inputs); i += batchSize {
+		end := i + batchSize
+		if end > len(inputs) {
+			end = len(inputs)
+		}
+		batch := inputs[i:end]
+
+		log.Printf("pipeline: annotating batch %d-%d of %d segments", i+1, end, len(inputs))
+		if b.progress != nil {
+			b.progress.SetDetail(fmt.Sprintf("Annotating transcript (%d/%d segments)", end, len(inputs)))
+		}
+
+		result, err := annotator.AnnotateTranscript(ctx, batch, vocab, dmName)
+		if err != nil {
+			log.Printf("pipeline: annotation batch %d-%d failed: %v", i+1, end, err)
+			continue // skip failed batches, annotate what we can
+		}
+		allAnnotated = append(allAnnotated, result.Segments...)
+	}
+
+	if len(allAnnotated) == 0 {
+		log.Printf("pipeline: all annotation batches failed")
 		return nil
 	}
 
@@ -80,7 +103,7 @@ func (b *Bot) annotateTranscript(
 	var dbAnnotations []storage.TranscriptAnnotation
 	annotationMap := make(map[int64]*storage.TranscriptAnnotation)
 
-	for _, seg := range result.Segments {
+	for _, seg := range allAnnotated {
 		a := storage.TranscriptAnnotation{
 			SegmentID:      seg.ID,
 			SessionID:      sessionID,
@@ -91,7 +114,6 @@ func (b *Bot) annotateTranscript(
 			MergeWithNext:  seg.MergeWithNext,
 			Tone:           seg.Tone,
 		}
-		// Validate classification.
 		switch a.Classification {
 		case "narrative", "table_talk", "ambiguous":
 		default:
@@ -105,6 +127,9 @@ func (b *Bot) annotateTranscript(
 	if err := b.store.InsertAnnotations(ctx, dbAnnotations); err != nil {
 		log.Printf("pipeline: insert annotations: %v", err)
 	}
+
+	log.Printf("pipeline: annotated %d/%d segments across %d batches",
+		len(allAnnotated), len(inputs), (len(inputs)+batchSize-1)/batchSize)
 
 	return annotationMap
 }
