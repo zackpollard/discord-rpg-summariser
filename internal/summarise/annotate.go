@@ -164,10 +164,11 @@ func BuildTitleAndQuotesPrompt(transcript, summary, dmName string) string {
 	b.WriteString("1. **A session title** (3-8 words): dramatic, evocative, and specific to what happened. ")
 	b.WriteString("Good examples: \"The Ambush at Thornwall\", \"A Deal with the Devil\", \"Blood on the Altar\", \"The Crown of Forgotten Kings\". ")
 	b.WriteString("Avoid generic titles like \"An Adventurous Session\" or \"The Next Chapter\".\n\n")
-	b.WriteString("2. **3-10 memorable direct quotes** from the transcript. Pick lines that are:\n")
+	b.WriteString("2. **Memorable direct quotes** from the transcript (0-10). Only include quotes that are genuinely:\n")
 	b.WriteString("   - Funny, dramatic, or emotionally impactful\n")
 	b.WriteString("   - Iconic character moments\n")
 	b.WriteString("   - Lines players would remember and laugh or gasp about\n")
+	b.WriteString("   - If nothing stands out as truly quote-worthy, return an empty array — do NOT force quotes\n")
 	b.WriteString("   - Include the exact speaker name, approximate start_time (in seconds from the transcript timestamps), and a tone tag\n")
 	b.WriteString("   - Tone tags: funny, dramatic, tense, sad, triumphant, mysterious, angry, badass, wholesome\n\n")
 
