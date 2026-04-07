@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.13](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.12...v0.1.13) (2026-04-07)
+
+
+### Features
+
+* show transcript annotations in the UI ([c0f2955](https://github.com/zackpollard/discord-rpg-summariser/commit/c0f29554ad572f4dfad91fa24bd0efa202bf037c))
+
+
+### Bug Fixes
+
+* add annotation and title/quotes stages to reprocess pipeline ([6ee8b6a](https://github.com/zackpollard/discord-rpg-summariser/commit/6ee8b6a8e4091ceaaa62dd41f9ea06444622ee80))
+* allow empty quotes array when nothing is quote-worthy ([0dfec4c](https://github.com/zackpollard/discord-rpg-summariser/commit/0dfec4c2108438da35cbd87ccc4144e8c15ea403))
+* auth bypass for local dev and hidden nav scrollbar ([3682a67](https://github.com/zackpollard/discord-rpg-summariser/commit/3682a67b3dffee618bd16c99c0cce7795a28ad36))
+* keep table talk in transcript marked as [TABLE TALK] ([717abce](https://github.com/zackpollard/discord-rpg-summariser/commit/717abce12c2c09c5b613fd23d2c7fb1985ebf908))
+* UI polish from code review ([a8583c6](https://github.com/zackpollard/discord-rpg-summariser/commit/a8583c6dffed4dead09efa93a7ff5b403a020644))
+
 ## [0.1.12](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.11...v0.1.12) (2026-04-07)
 
 
