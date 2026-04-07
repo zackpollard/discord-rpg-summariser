@@ -6,15 +6,20 @@ import (
 )
 
 type transcriptSegmentResponse struct {
-	ID            int64     `json:"id"`
-	SessionID     int64     `json:"session_id"`
-	UserID        string    `json:"user_id"`
-	DisplayName   string    `json:"display_name"`
-	CharacterName *string   `json:"character_name"`
-	StartTime     float64   `json:"start_time"`
-	EndTime       float64   `json:"end_time"`
-	Text          string    `json:"text"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID             int64     `json:"id"`
+	SessionID      int64     `json:"session_id"`
+	UserID         string    `json:"user_id"`
+	DisplayName    string    `json:"display_name"`
+	CharacterName  *string   `json:"character_name"`
+	StartTime      float64   `json:"start_time"`
+	EndTime        float64   `json:"end_time"`
+	Text           string    `json:"text"`
+	CorrectedText  *string   `json:"corrected_text,omitempty"`
+	Classification *string   `json:"classification,omitempty"`
+	Scene          *string   `json:"scene,omitempty"`
+	NPCVoice       *string   `json:"npc_voice,omitempty"`
+	Tone           *string   `json:"tone,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +55,13 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Load annotations if available.
+	annotations, _ := s.store.GetAnnotations(r.Context(), id)
+	annMap := make(map[int64]int, len(annotations))
+	for i, a := range annotations {
+		annMap[a.SegmentID] = i
+	}
+
 	resolveDisplay := s.displayNameResolver()
 
 	resp := make([]transcriptSegmentResponse, len(segments))
@@ -71,6 +83,16 @@ func (s *Server) handleGetTranscript(w http.ResponseWriter, r *http.Request) {
 			EndTime:       seg.EndTime,
 			Text:          seg.Text,
 			CreatedAt:     seg.CreatedAt,
+		}
+
+		// Attach annotation data if available.
+		if idx, ok := annMap[seg.ID]; ok {
+			a := &annotations[idx]
+			resp[i].Classification = &a.Classification
+			resp[i].CorrectedText = a.CorrectedText
+			resp[i].Scene = a.Scene
+			resp[i].NPCVoice = a.NPCVoice
+			resp[i].Tone = a.Tone
 		}
 	}
 

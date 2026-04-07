@@ -31,6 +31,11 @@ export interface TranscriptSegment {
 	start_time: number;
 	end_time: number;
 	text: string;
+	corrected_text?: string | null;
+	classification?: string | null;
+	scene?: string | null;
+	npc_voice?: string | null;
+	tone?: string | null;
 	created_at: string;
 }
 
