@@ -78,6 +78,10 @@
 		overflow-x: auto;
 		flex-wrap: nowrap;
 		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none; /* Firefox */
+	}
+	.campaign-nav::-webkit-scrollbar {
+		display: none; /* Chrome/Safari */
 	}
 	.nav-tab {
 		padding: 0.6rem 1.25rem;

@@ -129,6 +129,16 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 // handleAuthMe returns the current authenticated user.
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	// When auth is disabled, return a dummy user so the frontend works.
+	if !s.authEnabled || s.sessions == nil {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"id":       "0",
+			"username": "local",
+			"avatar":   "",
+		})
+		return
+	}
+
 	session, err := s.sessions.Decode(r)
 	if err != nil || session == nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
