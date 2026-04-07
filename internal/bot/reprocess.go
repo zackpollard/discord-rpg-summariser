@@ -31,6 +31,15 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 		b.mu.Unlock()
 	}()
 
+	// Stream LLM stderr to the progress window.
+	if cli, ok := b.summariser.(*summarise.ClaudeCLI); ok {
+		progress := b.progress
+		cli.OnStream = func(operation, message string) {
+			progress.BroadcastLog(fmt.Sprintf("[%s] %s", operation, message))
+		}
+		defer func() { cli.OnStream = nil }()
+	}
+
 	session, err := b.store.GetSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("get session: %w", err)

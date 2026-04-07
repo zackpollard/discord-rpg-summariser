@@ -24,9 +24,13 @@ type LLMLogEntry struct {
 // The context carries the session ID set by the caller.
 type LogFunc func(ctx context.Context, entry LLMLogEntry)
 
+// LLMStreamFunc is called with real-time log lines from the LLM process.
+type LLMStreamFunc func(operation, message string)
+
 // ClaudeCLI implements Summariser by shelling out to the `claude` CLI tool.
 type ClaudeCLI struct {
-	OnLog LogFunc
+	OnLog    LogFunc
+	OnStream LLMStreamFunc // called with real-time stderr lines during generation
 }
 
 // NewClaudeCLI creates a new ClaudeCLI summariser.
@@ -58,7 +62,7 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 		return fmt.Errorf("start claude: %w", err)
 	}
 
-	// Read stderr lines as they come.
+	// Read stderr lines as they come for real-time visibility.
 	var stderrBuf bytes.Buffer
 	go func() {
 		buf := make([]byte, 4096)
@@ -67,10 +71,12 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 			if n > 0 {
 				chunk := string(buf[:n])
 				stderrBuf.WriteString(chunk)
-				// Log non-empty lines.
 				for _, line := range strings.Split(strings.TrimSpace(chunk), "\n") {
 					if line != "" {
 						log.Printf("llm [%s]: %s", operation, line)
+						if c.OnStream != nil {
+							c.OnStream(operation, line)
+						}
 					}
 				}
 			}

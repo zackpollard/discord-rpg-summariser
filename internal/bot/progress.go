@@ -145,6 +145,21 @@ func (p *PipelineProgress) Complete() {
 	})
 }
 
+// BroadcastLog sends a log line to subscribers for live display.
+func (p *PipelineProgress) BroadcastLog(message string) {
+	p.mu.RLock()
+	pct := (p.completedWeight + p.currentWeight*p.subProgress) / float64(totalWeight) * 100
+	p.mu.RUnlock()
+
+	p.broadcast(ProgressEvent{
+		Type:    "progress",
+		Stage:   p.stage,
+		Detail:  message,
+		Percent: pct,
+		ETA:     -1,
+	})
+}
+
 // BroadcastTranscript sends a transcript segment to subscribers.
 func (p *PipelineProgress) BroadcastTranscript(speaker, text string, startTime, endTime float64) {
 	p.broadcast(ProgressEvent{
