@@ -42,17 +42,29 @@ func NewClaudeCLI() *ClaudeCLI {
 // JSON response into result. This eliminates duplication across all extraction
 // methods which follow the identical pattern: build prompt, run CLI, parse JSON.
 func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, result any) error {
+	_, err := c.runPromptSession(ctx, operation, prompt, "", result)
+	return err
+}
+
+// runPromptSession is like runPrompt but supports resuming a previous session.
+// Pass resumeSessionID to continue a conversation (Claude keeps full context).
+// Returns the session ID for chaining subsequent calls.
+func (c *ClaudeCLI) runPromptSession(ctx context.Context, operation, prompt, resumeSessionID string, result any) (string, error) {
 	start := time.Now()
 
-	log.Printf("llm: starting %s (prompt: %d chars)", operation, len(prompt))
+	log.Printf("llm: starting %s (prompt: %d chars, resume: %s)", operation, len(prompt), resumeSessionID)
 
-	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "claude-opus-4-6", "--effort", "max",
-		"--output-format", "stream-json", "--verbose", "--include-partial-messages")
+	args := []string{"--print", "--model", "claude-opus-4-6", "--effort", "max",
+		"--output-format", "stream-json", "--verbose", "--include-partial-messages"}
+	if resumeSessionID != "" {
+		args = append(args, "--resume", resumeSessionID)
+	}
+	cmd := exec.CommandContext(ctx, "claude", args...)
 	cmd.Stdin = strings.NewReader(prompt)
 
 	stdoutPipe, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
-		return fmt.Errorf("stdout pipe: %w", pipeErr)
+		return "", fmt.Errorf("stdout pipe: %w", pipeErr)
 	}
 
 	// Capture stderr for error diagnostics.
@@ -60,11 +72,12 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start claude: %w", err)
+		return "", fmt.Errorf("start claude: %w", err)
 	}
 
 	// Parse streaming JSON events from stdout.
 	var response string
+	var sessionID string
 	var textAccum strings.Builder
 	var inputTokens, outputTokens int
 	var costUSD float64
@@ -77,8 +90,9 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 		}
 
 		var event struct {
-			Type  string `json:"type"`
-			Event struct {
+			Type      string `json:"type"`
+			SessionID string `json:"session_id"`
+			Event     struct {
 				Type  string `json:"type"`
 				Delta struct {
 					Type string `json:"type"`
@@ -104,6 +118,11 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 		}
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			continue
+		}
+
+		// Capture session ID from any event that has it.
+		if event.SessionID != "" && sessionID == "" {
+			sessionID = event.SessionID
 		}
 
 		switch event.Type {
@@ -168,7 +187,7 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 			Error:      errMsg,
 			DurationMS: durationMS,
 		})
-		return fmt.Errorf("%s", errMsg)
+		return sessionID, fmt.Errorf("%s", errMsg)
 	}
 
 	output := StripCodeFences([]byte(response))
@@ -182,7 +201,7 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 			Error:      errMsg,
 			DurationMS: durationMS,
 		})
-		return fmt.Errorf("%s", errMsg)
+		return sessionID, fmt.Errorf("%s", errMsg)
 	}
 
 	c.log(ctx, LLMLogEntry{
@@ -192,7 +211,7 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 		DurationMS: durationMS,
 	})
 
-	return nil
+	return sessionID, nil
 }
 
 func (c *ClaudeCLI) log(ctx context.Context, entry LLMLogEntry) {
@@ -279,6 +298,34 @@ func (c *ClaudeCLI) AnnotateTranscript(ctx context.Context, segments []Annotatio
 		return nil, err
 	}
 	return &result, nil
+}
+
+// AnnotateTranscriptBatch annotates a batch of segments, resuming a previous
+// session so Claude has full context from prior batches. Returns the session ID
+// for chaining.
+func (c *ClaudeCLI) AnnotateTranscriptBatch(ctx context.Context, segments []AnnotationInput, vocab AnnotationVocabulary, dmName string, resumeSessionID string) (*AnnotationResult, string, error) {
+	var prompt string
+	if resumeSessionID == "" {
+		// First batch: include full instructions and vocabulary.
+		prompt = BuildAnnotationPrompt(segments, vocab, dmName)
+	} else {
+		// Continuation: just send the next batch of segments.
+		var b strings.Builder
+		b.WriteString("Here are the next segments to annotate. Apply the same rules as before.\n\n")
+		for _, seg := range segments {
+			ts := formatAnnotationTime(seg.StartTime)
+			fmt.Fprintf(&b, "#%d [%s] %s: %s\n", seg.ID, ts, seg.Speaker, seg.Text)
+		}
+		b.WriteString("\nReturn ONLY the JSON for these segments, same format as before.\n")
+		prompt = b.String()
+	}
+
+	var result AnnotationResult
+	sid, err := c.runPromptSession(ctx, "annotate_transcript", prompt, resumeSessionID, &result)
+	if err != nil {
+		return nil, sid, err
+	}
+	return &result, sid, nil
 }
 
 // GeneratePreviouslyOn runs the claude CLI with the "Previously on..." prompt.

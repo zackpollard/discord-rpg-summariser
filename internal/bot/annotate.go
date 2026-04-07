@@ -67,50 +67,47 @@ func (b *Bot) annotateTranscript(
 		vocab.EntityNames = append(vocab.EntityNames, e.Name)
 	}
 
-	// Chunk the segments to avoid overwhelming the LLM with a massive prompt.
-	// ~200 segments per batch keeps each call manageable. We include a context
-	// overlap of 20 segments from the previous batch so the LLM has surrounding
-	// context for scene boundaries, table talk detection, and NPC attribution.
+	// Chunk the segments to avoid overwhelming the LLM. Use Claude's session
+	// resume to maintain full context across batches — Claude keeps the entire
+	// conversation history internally so it knows what was said in prior batches.
 	const batchSize = 200
-	const contextOverlap = 20
 	var allAnnotated []summarise.AnnotatedSegment
 
-	// Track which segment IDs we've already collected annotations for,
-	// so we only keep annotations from the "new" portion of each batch.
-	annotatedIDs := make(map[int64]bool)
+	// Try the session-aware batch method first.
+	batchAnnotator, hasBatch := annotator.(*summarise.ClaudeCLI)
 
+	var claudeSessionID string
 	for i := 0; i < len(inputs); i += batchSize {
 		end := i + batchSize
 		if end > len(inputs) {
 			end = len(inputs)
 		}
+		batch := inputs[i:end]
 
-		// Include context from previous segments for continuity.
-		contextStart := i - contextOverlap
-		if contextStart < 0 {
-			contextStart = 0
-		}
-		batch := inputs[contextStart:end]
-
-		log.Printf("pipeline: annotating batch %d-%d of %d segments (with %d context segments)",
-			i+1, end, len(inputs), i-contextStart)
+		log.Printf("pipeline: annotating batch %d-%d of %d segments (session: %s)",
+			i+1, end, len(inputs), claudeSessionID)
 		if b.progress != nil {
 			b.progress.SetDetail(fmt.Sprintf("Annotating transcript (%d/%d segments)", end, len(inputs)))
 		}
 
-		result, err := annotator.AnnotateTranscript(ctx, batch, vocab, dmName)
-		if err != nil {
-			log.Printf("pipeline: annotation batch %d-%d failed: %v", i+1, end, err)
-			continue // skip failed batches, annotate what we can
+		var result *summarise.AnnotationResult
+		var err error
+
+		if hasBatch {
+			var sid string
+			result, sid, err = batchAnnotator.AnnotateTranscriptBatch(ctx, batch, vocab, dmName, claudeSessionID)
+			if sid != "" {
+				claudeSessionID = sid
+			}
+		} else {
+			result, err = annotator.AnnotateTranscript(ctx, batch, vocab, dmName)
 		}
 
-		// Only keep annotations for the new segments (not the context overlap).
-		for _, seg := range result.Segments {
-			if !annotatedIDs[seg.ID] {
-				allAnnotated = append(allAnnotated, seg)
-				annotatedIDs[seg.ID] = true
-			}
+		if err != nil {
+			log.Printf("pipeline: annotation batch %d-%d failed: %v", i+1, end, err)
+			continue
 		}
+		allAnnotated = append(allAnnotated, result.Segments...)
 	}
 
 	if len(allAnnotated) == 0 {
