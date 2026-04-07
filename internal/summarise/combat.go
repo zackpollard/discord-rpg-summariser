@@ -93,7 +93,7 @@ func BuildCombatExtractionPrompt(transcript, summary, dmName string, playerChara
 	b.WriteString("\n\n---\n\n")
 
 	b.WriteString("Transcript:\n")
-	b.WriteString(transcript)
+	b.WriteString(truncateTranscript(transcript, 100000))
 
 	return b.String()
 }
