@@ -2612,3 +2612,697 @@ func TestGetCampaignStats_WithData(t *testing.T) {
 		t.Fatalf("expected at least 1 npc in entity counts, got %v", stats.EntityCounts)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// UpdateSessionTitle
+// ---------------------------------------------------------------------------
+
+func TestUpdateSessionTitle(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sessID, err := store.CreateSession(ctx, guildID, campID, "ch-title", "/tmp/title")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Session should have no title initially.
+	sess, err := store.GetSession(ctx, sessID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if sess.Title != nil {
+		t.Fatalf("expected nil title initially, got %v", sess.Title)
+	}
+
+	// Update the title.
+	if err := store.UpdateSessionTitle(ctx, sessID, "The Battle of Nightstone"); err != nil {
+		t.Fatalf("UpdateSessionTitle: %v", err)
+	}
+
+	sess, err = store.GetSession(ctx, sessID)
+	if err != nil {
+		t.Fatalf("GetSession after update: %v", err)
+	}
+	if sess.Title == nil || *sess.Title != "The Battle of Nightstone" {
+		t.Fatalf("expected title 'The Battle of Nightstone', got %v", sess.Title)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Annotations
+// ---------------------------------------------------------------------------
+
+func TestInsertAndGetAnnotations(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sessID, err := store.CreateSession(ctx, guildID, campID, "ch-ann", "/tmp/ann")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Insert transcript segments as prerequisites.
+	var seg1, seg2 int64
+	err = store.Pool.QueryRow(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'u1', 0, 10, 'The dragon attacks') RETURNING id`, sessID).Scan(&seg1)
+	if err != nil {
+		t.Fatalf("insert segment 1: %v", err)
+	}
+	err = store.Pool.QueryRow(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'u2', 10, 20, 'I cast fireball') RETURNING id`, sessID).Scan(&seg2)
+	if err != nil {
+		t.Fatalf("insert segment 2: %v", err)
+	}
+
+	corrected := "The dragon attacks the party!"
+	scene := "Dragon's Lair"
+	npcVoice := "Smaug"
+	tone1 := "dramatic"
+	tone2 := "funny"
+
+	annotations := []TranscriptAnnotation{
+		{
+			SegmentID:      seg1,
+			SessionID:      sessID,
+			Classification: "narrative",
+			CorrectedText:  &corrected,
+			Scene:          &scene,
+			NPCVoice:       &npcVoice,
+			MergeWithNext:  true,
+			Tone:           &tone1,
+		},
+		{
+			SegmentID:      seg2,
+			SessionID:      sessID,
+			Classification: "table_talk",
+			CorrectedText:  nil,
+			Scene:          nil,
+			NPCVoice:       nil,
+			MergeWithNext:  false,
+			Tone:           &tone2,
+		},
+	}
+
+	if err := store.InsertAnnotations(ctx, annotations); err != nil {
+		t.Fatalf("InsertAnnotations: %v", err)
+	}
+
+	got, err := store.GetAnnotations(ctx, sessID)
+	if err != nil {
+		t.Fatalf("GetAnnotations: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 annotations, got %d", len(got))
+	}
+
+	// Ordered by segment_id, so seg1 comes first.
+	a := got[0]
+	if a.SegmentID != seg1 {
+		t.Fatalf("expected segment_id %d, got %d", seg1, a.SegmentID)
+	}
+	if a.SessionID != sessID {
+		t.Fatalf("expected session_id %d, got %d", sessID, a.SessionID)
+	}
+	if a.Classification != "narrative" {
+		t.Fatalf("expected classification 'narrative', got %q", a.Classification)
+	}
+	if a.CorrectedText == nil || *a.CorrectedText != corrected {
+		t.Fatalf("expected corrected_text %q, got %v", corrected, a.CorrectedText)
+	}
+	if a.Scene == nil || *a.Scene != scene {
+		t.Fatalf("expected scene %q, got %v", scene, a.Scene)
+	}
+	if a.NPCVoice == nil || *a.NPCVoice != npcVoice {
+		t.Fatalf("expected npc_voice %q, got %v", npcVoice, a.NPCVoice)
+	}
+	if !a.MergeWithNext {
+		t.Fatal("expected merge_with_next to be true")
+	}
+	if a.Tone == nil || *a.Tone != tone1 {
+		t.Fatalf("expected tone %q, got %v", tone1, a.Tone)
+	}
+	if a.CreatedAt.IsZero() {
+		t.Fatal("expected created_at to be set")
+	}
+
+	// Second annotation.
+	b := got[1]
+	if b.Classification != "table_talk" {
+		t.Fatalf("expected classification 'table_talk', got %q", b.Classification)
+	}
+	if b.CorrectedText != nil {
+		t.Fatalf("expected nil corrected_text, got %v", b.CorrectedText)
+	}
+	if b.MergeWithNext {
+		t.Fatal("expected merge_with_next to be false")
+	}
+	if b.Tone == nil || *b.Tone != tone2 {
+		t.Fatalf("expected tone %q, got %v", tone2, b.Tone)
+	}
+}
+
+func TestDeleteAnnotations(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sessID, err := store.CreateSession(ctx, guildID, campID, "ch-del-ann", "/tmp/del-ann")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	var segID int64
+	err = store.Pool.QueryRow(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'u1', 0, 10, 'text') RETURNING id`, sessID).Scan(&segID)
+	if err != nil {
+		t.Fatalf("insert segment: %v", err)
+	}
+
+	tone := "tense"
+	annotations := []TranscriptAnnotation{
+		{
+			SegmentID:      segID,
+			SessionID:      sessID,
+			Classification: "narrative",
+			Tone:           &tone,
+		},
+	}
+	if err := store.InsertAnnotations(ctx, annotations); err != nil {
+		t.Fatalf("InsertAnnotations: %v", err)
+	}
+
+	// Verify annotation exists.
+	got, _ := store.GetAnnotations(ctx, sessID)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 annotation before delete, got %d", len(got))
+	}
+
+	// Delete.
+	if err := store.DeleteAnnotations(ctx, sessID); err != nil {
+		t.Fatalf("DeleteAnnotations: %v", err)
+	}
+
+	got, err = store.GetAnnotations(ctx, sessID)
+	if err != nil {
+		t.Fatalf("GetAnnotations after delete: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 annotations after delete, got %d", len(got))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Soundboard Clips
+// ---------------------------------------------------------------------------
+
+func TestSoundboardClipCRUD(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sessID, err := store.CreateSession(ctx, guildID, campID, "ch-sb", "/tmp/sb")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	clip := SoundboardClip{
+		CampaignID: campID,
+		SessionID:  &sessID,
+		Name:       "Epic Moment",
+		AudioPath:  "/audio/epic.ogg",
+		StartTime:  12.5,
+		EndTime:    18.3,
+		UserIDs:    []string{"user-1", "user-2"},
+	}
+
+	id, err := store.InsertSoundboardClip(ctx, clip)
+	if err != nil {
+		t.Fatalf("InsertSoundboardClip: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("expected non-zero clip id")
+	}
+
+	// List by campaign.
+	clips, err := store.ListSoundboardClips(ctx, campID)
+	if err != nil {
+		t.Fatalf("ListSoundboardClips: %v", err)
+	}
+	if len(clips) != 1 {
+		t.Fatalf("expected 1 clip, got %d", len(clips))
+	}
+
+	c := clips[0]
+	if c.ID != id {
+		t.Fatalf("expected clip id %d, got %d", id, c.ID)
+	}
+	if c.CampaignID != campID {
+		t.Fatalf("expected campaign_id %d, got %d", campID, c.CampaignID)
+	}
+	if c.SessionID == nil || *c.SessionID != sessID {
+		t.Fatalf("expected session_id %d, got %v", sessID, c.SessionID)
+	}
+	if c.Name != "Epic Moment" {
+		t.Fatalf("expected name 'Epic Moment', got %q", c.Name)
+	}
+	if c.AudioPath != "/audio/epic.ogg" {
+		t.Fatalf("expected audio_path '/audio/epic.ogg', got %q", c.AudioPath)
+	}
+	if c.StartTime != 12.5 {
+		t.Fatalf("expected start_time 12.5, got %f", c.StartTime)
+	}
+	if c.EndTime != 18.3 {
+		t.Fatalf("expected end_time 18.3, got %f", c.EndTime)
+	}
+	if len(c.UserIDs) != 2 || c.UserIDs[0] != "user-1" || c.UserIDs[1] != "user-2" {
+		t.Fatalf("expected user_ids [user-1, user-2], got %v", c.UserIDs)
+	}
+	if c.CreatedAt.IsZero() {
+		t.Fatal("expected created_at to be set")
+	}
+
+	// Get by ID.
+	got, err := store.GetSoundboardClip(ctx, id)
+	if err != nil {
+		t.Fatalf("GetSoundboardClip: %v", err)
+	}
+	if got.Name != "Epic Moment" {
+		t.Fatalf("expected name 'Epic Moment', got %q", got.Name)
+	}
+
+	// Delete.
+	if err := store.DeleteSoundboardClip(ctx, id); err != nil {
+		t.Fatalf("DeleteSoundboardClip: %v", err)
+	}
+
+	clips, err = store.ListSoundboardClips(ctx, campID)
+	if err != nil {
+		t.Fatalf("ListSoundboardClips after delete: %v", err)
+	}
+	if len(clips) != 0 {
+		t.Fatalf("expected 0 clips after delete, got %d", len(clips))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Voice Profiles
+// ---------------------------------------------------------------------------
+
+func TestVoiceProfileCRUD(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	id, err := store.InsertVoiceProfile(ctx, campID, "Gandalf", "/audio/gandalf.wav", "You shall not pass")
+	if err != nil {
+		t.Fatalf("InsertVoiceProfile: %v", err)
+	}
+	if id == 0 {
+		t.Fatal("expected non-zero profile id")
+	}
+
+	// List by campaign.
+	profiles, err := store.GetVoiceProfiles(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetVoiceProfiles: %v", err)
+	}
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(profiles))
+	}
+
+	p := profiles[0]
+	if p.ID != id {
+		t.Fatalf("expected profile id %d, got %d", id, p.ID)
+	}
+	if p.CampaignID != campID {
+		t.Fatalf("expected campaign_id %d, got %d", campID, p.CampaignID)
+	}
+	if p.Name != "Gandalf" {
+		t.Fatalf("expected name 'Gandalf', got %q", p.Name)
+	}
+	if p.AudioPath != "/audio/gandalf.wav" {
+		t.Fatalf("expected audio_path '/audio/gandalf.wav', got %q", p.AudioPath)
+	}
+	if p.Transcript != "You shall not pass" {
+		t.Fatalf("expected transcript 'You shall not pass', got %q", p.Transcript)
+	}
+	if p.CreatedAt.IsZero() {
+		t.Fatal("expected created_at to be set")
+	}
+
+	// Get by ID.
+	got, err := store.GetVoiceProfile(ctx, id)
+	if err != nil {
+		t.Fatalf("GetVoiceProfile: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil voice profile")
+	}
+	if got.Name != "Gandalf" {
+		t.Fatalf("expected name 'Gandalf', got %q", got.Name)
+	}
+
+	// Delete.
+	if err := store.DeleteVoiceProfile(ctx, id); err != nil {
+		t.Fatalf("DeleteVoiceProfile: %v", err)
+	}
+
+	got, err = store.GetVoiceProfile(ctx, id)
+	if err != nil {
+		t.Fatalf("GetVoiceProfile after delete: %v", err)
+	}
+	if got != nil {
+		t.Fatal("expected nil after delete")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Quotes
+// ---------------------------------------------------------------------------
+
+func TestInsertAndGetQuotes(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sessID, err := store.CreateSession(ctx, guildID, campID, "ch-quotes", "/tmp/quotes")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	toneFunny := "funny"
+	toneDramatic := "dramatic"
+
+	quotes := []SessionQuote{
+		{
+			SessionID: sessID,
+			Speaker:   "Gandalf",
+			Text:      "You shall not pass!",
+			StartTime: 42.5,
+			Tone:      &toneDramatic,
+		},
+		{
+			SessionID: sessID,
+			Speaker:   "Pippin",
+			Text:      "What about second breakfast?",
+			StartTime: 10.0,
+			Tone:      &toneFunny,
+		},
+	}
+
+	if err := store.InsertQuotes(ctx, quotes); err != nil {
+		t.Fatalf("InsertQuotes: %v", err)
+	}
+
+	got, err := store.GetQuotes(ctx, sessID)
+	if err != nil {
+		t.Fatalf("GetQuotes: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 quotes, got %d", len(got))
+	}
+
+	// Ordered by start_time, so Pippin (10.0) comes first.
+	if got[0].Speaker != "Pippin" {
+		t.Fatalf("expected first quote speaker 'Pippin', got %q", got[0].Speaker)
+	}
+	if got[0].Text != "What about second breakfast?" {
+		t.Fatalf("expected first quote text, got %q", got[0].Text)
+	}
+	if got[0].StartTime != 10.0 {
+		t.Fatalf("expected start_time 10.0, got %f", got[0].StartTime)
+	}
+	if got[0].Tone == nil || *got[0].Tone != "funny" {
+		t.Fatalf("expected tone 'funny', got %v", got[0].Tone)
+	}
+	if got[0].CreatedAt.IsZero() {
+		t.Fatal("expected created_at to be set")
+	}
+
+	if got[1].Speaker != "Gandalf" {
+		t.Fatalf("expected second quote speaker 'Gandalf', got %q", got[1].Speaker)
+	}
+	if got[1].Tone == nil || *got[1].Tone != "dramatic" {
+		t.Fatalf("expected tone 'dramatic', got %v", got[1].Tone)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LLM Logs
+// ---------------------------------------------------------------------------
+
+func TestInsertAndGetLLMLogs(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	sessID, err := store.CreateSession(ctx, guildID, campID, "ch-llm", "/tmp/llm")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	errMsg := "timeout"
+
+	// Insert with session_id.
+	id1, err := store.InsertLLMLog(ctx, LLMLog{
+		SessionID:  &sessID,
+		Operation:  "summarise",
+		Prompt:     "Summarise this session",
+		Response:   "The heroes fought bravely",
+		Error:      nil,
+		DurationMS: 1500,
+	})
+	if err != nil {
+		t.Fatalf("InsertLLMLog with session: %v", err)
+	}
+	if id1 == 0 {
+		t.Fatal("expected non-zero log id")
+	}
+
+	// Insert another with session_id and an error.
+	id2, err := store.InsertLLMLog(ctx, LLMLog{
+		SessionID:  &sessID,
+		Operation:  "annotate",
+		Prompt:     "Annotate segments",
+		Response:   "",
+		Error:      &errMsg,
+		DurationMS: 500,
+	})
+	if err != nil {
+		t.Fatalf("InsertLLMLog with error: %v", err)
+	}
+
+	// Insert without session_id.
+	_, err = store.InsertLLMLog(ctx, LLMLog{
+		SessionID:  nil,
+		Operation:  "recap",
+		Prompt:     "Generate campaign recap",
+		Response:   "The campaign so far...",
+		Error:      nil,
+		DurationMS: 2000,
+	})
+	if err != nil {
+		t.Fatalf("InsertLLMLog without session: %v", err)
+	}
+
+	// Get logs for the session — should only return the two with session_id.
+	logs, err := store.GetLLMLogsForSession(ctx, sessID)
+	if err != nil {
+		t.Fatalf("GetLLMLogsForSession: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 logs for session, got %d", len(logs))
+	}
+
+	// Ordered by created_at ASC.
+	l := logs[0]
+	if l.ID != id1 {
+		t.Fatalf("expected log id %d, got %d", id1, l.ID)
+	}
+	if l.SessionID == nil || *l.SessionID != sessID {
+		t.Fatalf("expected session_id %d, got %v", sessID, l.SessionID)
+	}
+	if l.Operation != "summarise" {
+		t.Fatalf("expected operation 'summarise', got %q", l.Operation)
+	}
+	if l.Prompt != "Summarise this session" {
+		t.Fatalf("expected prompt, got %q", l.Prompt)
+	}
+	if l.Response != "The heroes fought bravely" {
+		t.Fatalf("expected response, got %q", l.Response)
+	}
+	if l.Error != nil {
+		t.Fatalf("expected nil error, got %v", l.Error)
+	}
+	if l.DurationMS != 1500 {
+		t.Fatalf("expected duration_ms 1500, got %d", l.DurationMS)
+	}
+	if l.CreatedAt.IsZero() {
+		t.Fatal("expected created_at to be set")
+	}
+
+	// Second log should have the error.
+	l2 := logs[1]
+	if l2.ID != id2 {
+		t.Fatalf("expected log id %d, got %d", id2, l2.ID)
+	}
+	if l2.Error == nil || *l2.Error != "timeout" {
+		t.Fatalf("expected error 'timeout', got %v", l2.Error)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TTS / Audio helpers
+// ---------------------------------------------------------------------------
+
+func TestGetUsersWithAudio(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create a complete session with audio_dir.
+	sessID, err := store.CreateSession(ctx, guildID, campID, "ch-tts", "/tmp/tts-audio")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	_ = store.EndSession(ctx, sessID)
+	_ = store.UpdateSessionSummary(ctx, sessID, "summary", []string{"event"})
+
+	// Insert transcript segments for two users.
+	_, err = store.Pool.Exec(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'audio-user-1', 0, 10, 'Hello')`, sessID)
+	if err != nil {
+		t.Fatalf("insert segment user-1: %v", err)
+	}
+	_, err = store.Pool.Exec(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'audio-user-2', 10, 20, 'World')`, sessID)
+	if err != nil {
+		t.Fatalf("insert segment user-2: %v", err)
+	}
+
+	// Create a session WITHOUT audio_dir (empty string) — its users should NOT appear.
+	sessNoAudio, err := store.CreateSession(ctx, guildID, campID, "ch-noaudio", "")
+	if err != nil {
+		t.Fatalf("CreateSession no audio: %v", err)
+	}
+	_ = store.EndSession(ctx, sessNoAudio)
+	_ = store.UpdateSessionSummary(ctx, sessNoAudio, "summary", []string{"event"})
+	_, err = store.Pool.Exec(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'audio-user-3', 0, 10, 'No audio here')`, sessNoAudio)
+	if err != nil {
+		t.Fatalf("insert segment user-3: %v", err)
+	}
+
+	userIDs, err := store.GetUsersWithAudio(ctx, campID)
+	if err != nil {
+		t.Fatalf("GetUsersWithAudio: %v", err)
+	}
+
+	// Should contain audio-user-1 and audio-user-2 but NOT audio-user-3.
+	found := make(map[string]bool)
+	for _, uid := range userIDs {
+		found[uid] = true
+	}
+	if !found["audio-user-1"] {
+		t.Fatal("expected audio-user-1 in results")
+	}
+	if !found["audio-user-2"] {
+		t.Fatal("expected audio-user-2 in results")
+	}
+	if found["audio-user-3"] {
+		t.Fatal("did not expect audio-user-3 in results (no audio_dir)")
+	}
+}
+
+func TestGetUserSessionsWithAudio(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	// Create two complete sessions with audio.
+	sess1, err := store.CreateSession(ctx, guildID, campID, "ch-usa-1", "/tmp/usa1")
+	if err != nil {
+		t.Fatalf("CreateSession 1: %v", err)
+	}
+	_ = store.EndSession(ctx, sess1)
+	_ = store.UpdateSessionSummary(ctx, sess1, "summary1", []string{"e1"})
+
+	// Small delay to ensure different started_at timestamps.
+	time.Sleep(10 * time.Millisecond)
+
+	sess2, err := store.CreateSession(ctx, guildID, campID, "ch-usa-2", "/tmp/usa2")
+	if err != nil {
+		t.Fatalf("CreateSession 2: %v", err)
+	}
+	_ = store.EndSession(ctx, sess2)
+	_ = store.UpdateSessionSummary(ctx, sess2, "summary2", []string{"e2"})
+
+	// Add transcript segments for user in both sessions.
+	_, err = store.Pool.Exec(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'multi-user', 0, 10, 'Session 1 text')`, sess1)
+	if err != nil {
+		t.Fatalf("insert segment sess1: %v", err)
+	}
+	_, err = store.Pool.Exec(ctx,
+		`INSERT INTO transcript_segments (session_id, user_id, start_time, end_time, text)
+		 VALUES ($1, 'multi-user', 0, 10, 'Session 2 text')`, sess2)
+	if err != nil {
+		t.Fatalf("insert segment sess2: %v", err)
+	}
+
+	// Get up to 5 sessions — should return both, most recent first.
+	sessions, err := store.GetUserSessionsWithAudio(ctx, campID, "multi-user", 5)
+	if err != nil {
+		t.Fatalf("GetUserSessionsWithAudio: %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(sessions))
+	}
+	// Most recent first.
+	if sessions[0].ID != sess2 {
+		t.Fatalf("expected most recent session id %d first, got %d", sess2, sessions[0].ID)
+	}
+	if sessions[1].ID != sess1 {
+		t.Fatalf("expected older session id %d second, got %d", sess1, sessions[1].ID)
+	}
+
+	// GetUserSessionWithAudio should return only the most recent.
+	single, err := store.GetUserSessionWithAudio(ctx, campID, "multi-user")
+	if err != nil {
+		t.Fatalf("GetUserSessionWithAudio: %v", err)
+	}
+	if single == nil {
+		t.Fatal("expected non-nil session")
+	}
+	if single.ID != sess2 {
+		t.Fatalf("expected most recent session id %d, got %d", sess2, single.ID)
+	}
+
+	// Non-existent user should return nil.
+	none, err := store.GetUserSessionWithAudio(ctx, campID, "no-such-user")
+	if err != nil {
+		t.Fatalf("GetUserSessionWithAudio non-existent: %v", err)
+	}
+	if none != nil {
+		t.Fatal("expected nil for non-existent user")
+	}
+}
