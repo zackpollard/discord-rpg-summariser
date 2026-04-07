@@ -79,6 +79,8 @@
 
 	// Pipeline progress state.
 	let progressEvent = $state<PipelineProgressEvent | null>(null);
+	let llmOutput = $state<string>('');
+	let lastStage = $state<string>('');
 	let liveSegments = $state<{ speaker: string; text: string; start_time: number; end_time: number }[]>([]);
 	let unsubProgress: (() => void) | null = null;
 
@@ -86,10 +88,23 @@
 		unsubProgress?.();
 		liveSegments = [];
 		progressEvent = null;
+		llmOutput = '';
+		lastStage = '';
 		unsubProgress = subscribePipelineProgress(
 			sessionId,
 			(evt) => {
 				if (evt.type === 'progress') {
+					// Detect LLM streaming text (contains [...] prefix from OnStream).
+					const detail = evt.detail || '';
+					if (detail.startsWith('[') || detail.startsWith('...')) {
+						llmOutput = detail;
+					} else {
+						// Regular stage update — reset LLM output when stage changes.
+						if (evt.stage !== lastStage) {
+							llmOutput = '';
+							lastStage = evt.stage;
+						}
+					}
 					progressEvent = evt;
 				} else if (evt.type === 'transcript' && evt.speaker && evt.text) {
 					liveSegments = [...liveSegments, {
@@ -366,7 +381,7 @@
 		{#if progressEvent}
 			<div class="progress-panel">
 				<div class="progress-header">
-					<span class="progress-stage">{progressEvent.detail || progressEvent.stage}</span>
+					<span class="progress-stage">{progressEvent.stage}</span>
 					<span class="progress-pct">{Math.round(progressEvent.percent)}%</span>
 				</div>
 				<div class="progress-bar-track">
@@ -378,6 +393,11 @@
 							? `${Math.round(progressEvent.eta_seconds)}s`
 							: `${Math.round(progressEvent.eta_seconds / 60)}m`} remaining
 					</span>
+				{/if}
+				{#if llmOutput}
+					<div class="llm-output">
+						<pre>{llmOutput}</pre>
+					</div>
 				{/if}
 				{#if liveSegments.length > 0}
 					<div class="live-transcript-preview">
@@ -741,6 +761,24 @@
 	.progress-eta {
 		font-size: 0.75rem;
 		color: var(--text-muted);
+	}
+	.llm-output {
+		margin-top: 0.5rem;
+		background: var(--bg-dark);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		max-height: 120px;
+		overflow-y: auto;
+	}
+	.llm-output pre {
+		margin: 0;
+		padding: 0.5rem;
+		font-size: 0.75rem;
+		line-height: 1.4;
+		color: var(--text-secondary);
+		white-space: pre-wrap;
+		word-break: break-word;
+		font-family: 'Courier New', Courier, monospace;
 	}
 	.live-transcript-preview {
 		margin-top: 0.75rem;
