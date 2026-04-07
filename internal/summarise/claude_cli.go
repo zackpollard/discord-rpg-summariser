@@ -47,7 +47,7 @@ func (c *ClaudeCLI) runPrompt(ctx context.Context, operation, prompt string, res
 	log.Printf("llm: starting %s (prompt: %d chars)", operation, len(prompt))
 
 	cmd := exec.CommandContext(ctx, "claude", "--print", "--model", "claude-opus-4-6", "--effort", "max",
-		"--output-format", "stream-json", "--verbose")
+		"--output-format", "stream-json", "--verbose", "--include-partial-messages")
 	cmd.Stdin = strings.NewReader(prompt)
 
 	stdoutPipe, pipeErr := cmd.StdoutPipe()
