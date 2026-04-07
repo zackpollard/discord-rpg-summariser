@@ -110,8 +110,9 @@ func (b *Bot) annotateTranscript(
 }
 
 // buildAnnotatedTranscript produces a transcript string from merged segments
-// and annotations. Table talk is excluded, corrected text is used when
-// available, scene boundaries are inserted, and NPC voices are labelled.
+// and annotations. Table talk is marked with [TABLE TALK] so the summariser
+// can deprioritize it while still having full context. Corrected text is used
+// when available, scene boundaries are inserted, and NPC voices are labelled.
 func buildAnnotatedTranscript(
 	merged []transcribe.UserSegment,
 	annotations map[int64]*storage.TranscriptAnnotation,
@@ -151,13 +152,12 @@ func buildAnnotatedTranscript(
 			ann = orderedAnnotations[i]
 		}
 
-		// Skip table talk.
-		if ann != nil && ann.Classification == "table_talk" {
-			continue
-		}
+		// Mark table talk so the summariser can deprioritize it, but keep
+		// it in the transcript so context isn't lost.
+		isTableTalk := ann != nil && ann.Classification == "table_talk"
 
 		// Insert scene boundary.
-		if ann != nil && ann.Scene != nil && *ann.Scene != "" && *ann.Scene != lastScene {
+		if !isTableTalk && ann != nil && ann.Scene != nil && *ann.Scene != "" && *ann.Scene != lastScene {
 			flushMerge()
 			lastScene = *ann.Scene
 			fmt.Fprintf(&b, "\n--- %s ---\n\n", strings.ToUpper(lastScene[:1])+lastScene[1:])
@@ -176,6 +176,14 @@ func buildAnnotatedTranscript(
 		text := seg.Text
 		if ann != nil && ann.CorrectedText != nil && *ann.CorrectedText != "" {
 			text = *ann.CorrectedText
+		}
+
+		// Table talk: include but mark clearly so summariser deprioritizes it.
+		if isTableTalk {
+			flushMerge()
+			ts := formatSeconds(seg.StartTime)
+			fmt.Fprintf(&b, "[%s] [TABLE TALK] %s: %s\n", ts, name, text)
+			continue
 		}
 
 		// Handle segment merging.
