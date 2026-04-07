@@ -46,8 +46,9 @@ type Bot struct {
 	registeredCmds []*discordgo.ApplicationCommand
 
 	// sessionID is the DB ID for the currently active recording session.
-	sessionID  int64
-	liveWorker *voice.LiveWorker
+	sessionID              int64
+	liveWorker             *voice.LiveWorker
+	incrementalTranscriber *voice.IncrementalTranscriber
 
 	// Telegram integration (nil if not configured).
 	telegramClient   *telegram.Client
@@ -455,14 +456,16 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 		if err := b.store.EndSession(ctx, sessionID); err != nil {
 			log.Printf("EndSession error (auto-stop): %v", err)
 		}
-		go b.runPipeline(sessionID, result.UserFiles, result.TelegramMsgs)
+		go b.runPipeline(sessionID, result)
 	}
 }
 
 // stopResult bundles the results of stopping a recording session.
 type stopResult struct {
-	UserFiles    map[string]string
-	TelegramMsgs []telegram.Message
+	UserFiles        map[string]string
+	TelegramMsgs     []telegram.Message
+	PreTranscribed   map[string][]transcribe.Segment // segments already transcribed during the session
+	ProcessedOffsets map[string]int64                // byte offsets already processed per user
 }
 
 // stopRecording stops the recorder, Telegram listener, and disconnects from
@@ -482,6 +485,13 @@ func (b *Bot) stopRecording() stopResult {
 		result.UserFiles = b.recorder.UserFiles()
 		b.recorder = nil
 		log.Println("Recorder stopped")
+	}
+	if b.incrementalTranscriber != nil {
+		log.Println("Stopping incremental transcriber...")
+		b.incrementalTranscriber.Stop()
+		result.PreTranscribed, result.ProcessedOffsets = b.incrementalTranscriber.CollectedSegments()
+		log.Printf("Incremental transcriber: %d users pre-transcribed", len(result.PreTranscribed))
+		b.incrementalTranscriber = nil
 	}
 	if b.telegramListener != nil {
 		log.Println("Stopping Telegram listener...")

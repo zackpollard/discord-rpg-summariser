@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 	"unicode"
 
 	"discord-rpg-summariser/internal/audio"
@@ -24,7 +25,9 @@ import (
 // each user's audio, merges segments chronologically (including any Telegram
 // messages), summarises the transcript, persists everything to the database,
 // and posts a notification.
-func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegramMsgs []telegram.Message) {
+func (b *Bot) runPipeline(sessionID int64, result stopResult) {
+	userFiles := result.UserFiles
+	telegramMsgs := result.TelegramMsgs
 	ctx := summarise.WithSessionID(context.Background(), sessionID)
 
 	// Set up progress tracking.
@@ -106,11 +109,25 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	doneUsers := 0
 	for userID, wavPath := range userFiles {
 		setIntraProgress(doneUsers)
-		if mic, ok := sharedMicMap[userID]; ok {
+
+		// Check if we have pre-transcribed segments from incremental transcription.
+		if preSegs, ok := result.PreTranscribed[userID]; ok && len(preSegs) > 0 {
+			log.Printf("pipeline: using %d pre-transcribed segments for %s, processing remainder", len(preSegs), userID)
+			userSegments[userID] = preSegs
+
+			// Transcribe only the remaining unprocessed portion of the file.
+			if processedBytes, ok := result.ProcessedOffsets[userID]; ok && processedBytes > 0 {
+				remainSegs := b.transcribeRemainder(ctx, transcriber, wavPath, processedBytes)
+				if len(remainSegs) > 0 {
+					userSegments[userID] = append(userSegments[userID], remainSegs...)
+					log.Printf("pipeline: added %d remainder segments for %s", len(remainSegs), userID)
+				}
+			}
+		} else if mic, ok := sharedMicMap[userID]; ok {
 			// Shared mic: diarize then attribute segments.
 			b.transcribeSharedMic(ctx, transcriber, wavPath, mic, userSegments)
 		} else {
-			// Normal single-user transcription.
+			// Normal single-user transcription (no pre-transcribed data).
 			segments, err := transcriber.TranscribeFile(ctx, wavPath)
 			if err != nil {
 				log.Printf("pipeline: transcribe user %s: %v", userID, err)
@@ -252,7 +269,7 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
 	b.progress.SetStage("summarising", "Generating summary")
 
-	result, err := b.summariser.Summarise(ctx, transcript, "", dmName)
+	sumResult, err := b.summariser.Summarise(ctx, transcript, "", dmName)
 	if err != nil {
 		log.Printf("pipeline: summarise: %v", err)
 		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
@@ -261,35 +278,67 @@ func (b *Bot) runPipeline(sessionID int64, userFiles map[string]string, telegram
 	}
 
 	// Persist summary.
-	if err := b.store.UpdateSessionSummary(ctx, sessionID, result.Summary, result.KeyEvents); err != nil {
+	if err := b.store.UpdateSessionSummary(ctx, sessionID, sumResult.Summary, sumResult.KeyEvents); err != nil {
 		log.Printf("pipeline: UpdateSessionSummary: %v", err)
 		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 		return
 	}
 
-	b.sendNotification(sessionID, result.Summary)
+	b.sendNotification(sessionID, sumResult.Summary)
 
 	// Extract title and memorable quotes (non-fatal on error).
 	b.progress.SetStage("extracting title", "Generating session title and quotes")
-	b.extractTitleAndQuotes(ctx, session, sessionID, transcript, result.Summary, dmName)
+	b.extractTitleAndQuotes(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 
 	// Extract entities for the knowledge base (non-fatal on error).
 	b.progress.SetStage("extracting entities", "Extracting entities")
-	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
+	b.extractEntities(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 
 	// Extract quests (non-fatal on error).
 	b.progress.SetStage("extracting quests", "Extracting quests")
-	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
+	b.extractQuests(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 
 	// Extract combat encounters (non-fatal on error).
 	b.progress.SetStage("extracting combat", "Extracting combat encounters")
-	b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
+	b.extractCombat(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 
 	// Generate vector embeddings for RAG (non-fatal on error).
 	b.progress.SetStage("generating embeddings", "Generating embeddings")
-	b.generateEmbeddings(ctx, session, sessionID, merged, result.Summary, dmName)
+	b.generateEmbeddings(ctx, session, sessionID, merged, sumResult.Summary, dmName)
 
 	b.progress.Complete()
+}
+
+// transcribeRemainder transcribes only the unprocessed portion of a WAV file,
+// starting from the given byte offset.
+func (b *Bot) transcribeRemainder(ctx context.Context, transcriber transcribe.Transcriber, wavPath string, processedBytes int64) []transcribe.Segment {
+	startTimeSec := float64(processedBytes) / (48000 * 2)
+	var segments []transcribe.Segment
+
+	err := audio.StreamResample(wavPath, func(samples []float32, offsetSeconds float64) error {
+		// Skip chunks before our processed offset.
+		if offsetSeconds < startTimeSec-1.0 {
+			return nil
+		}
+
+		segs, err := transcriber.TranscribeChunk(ctx, samples,
+			time.Duration(offsetSeconds*float64(time.Second)), "")
+		if err != nil {
+			return err
+		}
+
+		for _, seg := range segs {
+			if seg.StartTime >= startTimeSec {
+				segments = append(segments, seg)
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("pipeline: transcribe remainder error: %v", err)
+	}
+	return segments
 }
 
 // gatherCampaignVocabulary collects campaign-specific proper nouns for

@@ -212,6 +212,11 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 
 	go liveWorker.Run(ctx)
 
+	// Start incremental transcription — processes completed audio chunks
+	// during the session so only the final chunk needs processing when it ends.
+	incTranscriber := voice.NewIncrementalTranscriber(transcriber, audioDir, sessionID)
+	incTranscriber.Start(ctx)
+
 	rec.Start(vc, func(userID string) string {
 		member, err := s.GuildMember(guildID, userID)
 		if err != nil {
@@ -235,6 +240,7 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	b.recorder = rec
 	b.sessionID = sessionID
 	b.liveWorker = liveWorker
+	b.incrementalTranscriber = incTranscriber
 	if b.telegramClient != nil && b.config.Telegram.ChatID != 0 {
 		b.telegramListener = b.telegramClient.StartListening(ctx, b.config.Telegram.ChatID)
 	}
@@ -269,7 +275,7 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 	respond(s, i, fmt.Sprintf("Recording stopped (session #%d). Processing transcript and summary...", sessionID))
 
 	// Kick off async pipeline.
-	go b.runPipeline(sessionID, result.UserFiles, result.TelegramMsgs)
+	go b.runPipeline(sessionID, result)
 }
 
 func (b *Bot) handleSessionStatus(s *discordgo.Session, i *discordgo.InteractionCreate) {
