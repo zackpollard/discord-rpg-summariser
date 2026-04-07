@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.12](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.11...v0.1.12) (2026-04-07)
+
+
+### Features
+
+* add /campaign play-recap to play TTS recap in voice channel ([3c62f79](https://github.com/zackpollard/discord-rpg-summariser/commit/3c62f7978b464fa29f5f08580b126c6354d0192f))
+* add custom voice profiles for TTS recap ([cb68c68](https://github.com/zackpollard/discord-rpg-summariser/commit/cb68c682aa52a030940d70f68f009be0e7dc9414))
+* add recap styles, previously-on, character summaries, combat analysis, clip name suggestions ([65403ac](https://github.com/zackpollard/discord-rpg-summariser/commit/65403acf56c3271a3c44b2ccd9e2e1f4625a3277))
+* add session title generation and memorable quote extraction ([90243f1](https://github.com/zackpollard/discord-rpg-summariser/commit/90243f11efa23db4bd7987d6925fdd74cc89f19f))
+* add soundboard with clip creation from transcripts ([4a38d69](https://github.com/zackpollard/discord-rpg-summariser/commit/4a38d6914a4ee8a0eab159a39599124195405c6e))
+* add transcript annotation pipeline stage ([586392b](https://github.com/zackpollard/discord-rpg-summariser/commit/586392b4ff1436f089932de26c47bdbf189b4ff5))
+* soundboard, waveform editor, DM label fix, LLM parsing fix ([06dfeab](https://github.com/zackpollard/discord-rpg-summariser/commit/06dfeab6cb7a6ca6d21da24c8fcf49f7a9cf5e45))
+
+
+### Bug Fixes
+
+* re-derive DAVE keys when new users join voice channel ([48c2a4e](https://github.com/zackpollard/discord-rpg-summariser/commit/48c2a4eba9c3e8a6155612ead68cf2ec42388c47))
+
+
+### Code Refactoring
+
+* separate recap audio generation from playback ([2ccdf32](https://github.com/zackpollard/discord-rpg-summariser/commit/2ccdf32c4d1b42abef484f1c8f7a00e149b8b6ee))
+
 ## [0.1.11](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.10...v0.1.11) (2026-04-06)
 
 
