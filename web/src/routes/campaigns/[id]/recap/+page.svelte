@@ -31,6 +31,7 @@
 	}
 
 	// TTS voice picker state.
+	let ttsSource = $state<'recap' | 'previously-on'>('recap');
 	let voices = $state<RecapVoice[]>([]);
 	let selectedVoiceIdx = $state<number>(-1);
 	let ttsAudioSrc = $state<string>('');
@@ -94,7 +95,7 @@
 		progressSource.onerror = () => progressSource.close();
 
 		try {
-			const url = recapTTSURL(campaignId, selectedVoice) + `&_t=${Date.now()}`;
+			const url = recapTTSURL(campaignId, selectedVoice) + `&source=${ttsSource}&_t=${Date.now()}`;
 			const res = await fetch(url);
 			if (res.ok) {
 				const blob = await res.blob();
@@ -232,109 +233,19 @@
 			</button>
 		</div>
 	{:else}
-		<div class="recap-header">
-			<div class="recap-meta">
-				{#if recap.recap_generated_at}
-					<span class="recap-date">Last generated: {formatDate(recap.recap_generated_at)}</span>
-				{/if}
-			</div>
-			<div class="recap-actions">
-				<a href={campaignPDFURL(campaignId)} class="pdf-btn" download>Download PDF</a>
-				<label class="last-n-label">
-					Last N sessions:
-					<input
-						class="last-n-input"
-						type="number"
-						min="1"
-						placeholder="All"
-						oninput={(e) => { const v = parseInt((e.target as HTMLInputElement).value); lastN = Number.isNaN(v) ? undefined : v; }}
-					/>
-				</label>
-				<label class="last-n-label">
-					Style:
-					<select class="style-select" bind:value={recapStyle}>
-						<option value="default">Default</option>
-						<option value="dramatic">Dramatic</option>
-						<option value="casual">Casual</option>
-						<option value="in-character">In-Character</option>
-					</select>
-				</label>
-				<button class="regenerate-btn" onclick={handleRegenerate} disabled={generating}>
-					{#if generating}
-						<span class="spinner"></span>
-						Regenerating...
-					{:else}
-						Regenerate
-					{/if}
-				</button>
-			</div>
+		<div class="recap-topbar">
+			{#if recap.recap_generated_at}
+				<span class="recap-date">Last generated: {formatDate(recap.recap_generated_at)}</span>
+			{/if}
+			<a href={campaignPDFURL(campaignId)} class="pdf-btn" download>Download PDF</a>
 		</div>
 
-		<div class="tts-section">
-			<div class="tts-controls">
-				<label class="tts-label">
-					Listen with voice:
-					<select class="tts-select" onchange={handleVoiceChange} value={selectedVoiceIdx}>
-						<option value={-1}>-- Select a voice --</option>
-						{#each voices as voice, idx}
-							<option value={idx}>{voice.display_name}{voice.is_custom ? ' (custom)' : ''}</option>
-						{/each}
-					</select>
-				</label>
-				{#if selectedVoice}
-					<button class="regenerate-btn" onclick={generateTTS} disabled={ttsGenerating}>
-						{#if ttsGenerating}
-							<span class="spinner"></span>
-							Generating...
-						{:else}
-							Generate
-						{/if}
-					</button>
-					{#if selectedVoice.is_custom && selectedVoice.profile_id}
-						<button class="regenerate-btn" style="color: #f87171;" onclick={() => handleDeleteProfile(selectedVoice!.profile_id!)}>Delete</button>
-					{/if}
-				{/if}
-				<button class="regenerate-btn" onclick={() => showUpload = !showUpload}>
-					{showUpload ? 'Cancel' : 'Upload Voice'}
-				</button>
-			</div>
-			{#if showUpload}
-				<div class="upload-form">
-					<input class="upload-input" type="text" placeholder="Name (e.g. Matt Mercer)" bind:value={uploadName} />
-					<input class="upload-input" type="text" placeholder="Transcript of audio (optional, improves quality)" bind:value={uploadTranscript} />
-					<input type="file" accept="audio/*" onchange={(e) => { uploadFile = (e.target as HTMLInputElement).files?.[0] ?? null; }} />
-					<button class="regenerate-btn" onclick={handleUpload} disabled={uploading || !uploadName || !uploadFile}>
-						{uploading ? 'Uploading...' : 'Upload'}
-					</button>
+		<section class="section-card">
+			<div class="section-header">
+				<div>
+					<h2 class="section-title">Previously On...</h2>
+					<p class="section-desc">A dramatic narration of the last session, designed to be read aloud at the start of the next game.</p>
 				</div>
-			{/if}
-				{#if ttsError}
-					<div class="error-box" style="margin-top: 0.75rem;">{ttsError}</div>
-				{/if}
-				{#if ttsGenerating}
-					<div class="tts-progress">
-						<div class="tts-progress-header">
-							<span>Generating audio...</span>
-							<span class="tts-progress-pct">{Math.round(ttsProgress * 100)}%</span>
-						</div>
-						<div class="tts-progress-track">
-							<div class="tts-progress-fill" style="width: {ttsProgress * 100}%"></div>
-						</div>
-					</div>
-				{/if}
-				{#if refAudioSrc}
-					<p class="tts-label" style="margin-top: 0.75rem;">Reference clip:</p>
-					<AudioPlayer src={refAudioSrc} />
-				{/if}
-				{#if ttsAudioSrc}
-					<p class="tts-label" style="margin-top: 0.5rem;">Generated:</p>
-					<AudioPlayer src={ttsAudioSrc} />
-				{/if}
-			</div>
-
-		<div class="previously-on-section">
-			<div class="previously-on-header">
-				<h2 class="previously-on-title">Previously On...</h2>
 				<button class="regenerate-btn" onclick={handleGeneratePreviouslyOn} disabled={prevOnLoading}>
 					{#if prevOnLoading}
 						<span class="spinner"></span>
@@ -355,18 +266,130 @@
 						{/if}
 					{/each}
 				</div>
-			{:else if !prevOnLoading}
-				<p class="muted" style="font-size: 0.85rem;">Generate a dramatic "Previously on..." narration from the last session, designed to be read aloud.</p>
 			{/if}
-		</div>
+		</section>
 
-		<div class="recap-body">
-			{#each recap.recap.split('\n\n') as paragraph}
-				{#if paragraph.trim()}
-					<p>{paragraph.trim()}</p>
+		<section class="section-card">
+			<div class="section-header">
+				<div>
+					<h2 class="section-title">Campaign Recap</h2>
+					<p class="section-desc">A narrative summary of the entire campaign so far.</p>
+				</div>
+				<div class="recap-actions-inline">
+					<label class="last-n-label">
+						Last N:
+						<input
+							class="last-n-input"
+							type="number"
+							min="1"
+							placeholder="All"
+							oninput={(e) => { const v = parseInt((e.target as HTMLInputElement).value); lastN = Number.isNaN(v) ? undefined : v; }}
+						/>
+					</label>
+					<label class="last-n-label">
+						Style:
+						<select class="style-select" bind:value={recapStyle}>
+							<option value="default">Default</option>
+							<option value="dramatic">Dramatic</option>
+							<option value="casual">Casual</option>
+							<option value="in-character">In-Character</option>
+						</select>
+					</label>
+					<button class="regenerate-btn" onclick={handleRegenerate} disabled={generating}>
+						{#if generating}
+							<span class="spinner"></span>
+							Regenerating...
+						{:else}
+							Regenerate
+						{/if}
+					</button>
+				</div>
+			</div>
+			<div class="recap-body">
+				{#each recap.recap.split('\n\n') as paragraph}
+					{#if paragraph.trim()}
+						<p>{paragraph.trim()}</p>
+					{/if}
+				{/each}
+			</div>
+		</section>
+
+		<section class="section-card">
+			<div class="section-header">
+				<div>
+					<h2 class="section-title">Voice Narration</h2>
+					<p class="section-desc">Generate a voice-cloned audio reading of the campaign recap{previouslyOn ? ' or "Previously On..." narration' : ''}.</p>
+				</div>
+			</div>
+			<div class="tts-controls">
+				<label class="tts-label">
+					Source:
+					<select class="tts-select" bind:value={ttsSource}>
+						<option value="recap">Campaign Recap</option>
+						{#if previouslyOn}
+							<option value="previously-on">Previously On...</option>
+						{/if}
+					</select>
+				</label>
+				<label class="tts-label">
+					Voice:
+					<select class="tts-select" onchange={handleVoiceChange} value={selectedVoiceIdx}>
+						<option value={-1}>-- Select a voice --</option>
+						{#each voices as voice, idx}
+							<option value={idx}>{voice.display_name}{voice.is_custom ? ' (custom)' : ''}</option>
+						{/each}
+					</select>
+				</label>
+				{#if selectedVoice}
+					<button class="regenerate-btn" onclick={generateTTS} disabled={ttsGenerating}>
+						{#if ttsGenerating}
+							<span class="spinner"></span>
+							Generating...
+						{:else}
+							Generate Audio
+						{/if}
+					</button>
+					{#if selectedVoice.is_custom && selectedVoice.profile_id}
+						<button class="regenerate-btn" style="color: #f87171;" onclick={() => handleDeleteProfile(selectedVoice!.profile_id!)}>Delete</button>
+					{/if}
 				{/if}
-			{/each}
-		</div>
+				<button class="regenerate-btn" onclick={() => showUpload = !showUpload}>
+					{showUpload ? 'Cancel' : 'Upload Voice'}
+				</button>
+			</div>
+			{#if showUpload}
+				<div class="upload-form">
+					<input class="upload-input" type="text" placeholder="Name (e.g. Matt Mercer)" bind:value={uploadName} />
+					<input class="upload-input" type="text" placeholder="Transcript of audio (optional, improves quality)" bind:value={uploadTranscript} />
+					<input type="file" accept="audio/*" onchange={(e) => { uploadFile = (e.target as HTMLInputElement).files?.[0] ?? null; }} />
+					<button class="regenerate-btn" onclick={handleUpload} disabled={uploading || !uploadName || !uploadFile}>
+						{uploading ? 'Uploading...' : 'Upload'}
+					</button>
+				</div>
+			{/if}
+			{#if ttsError}
+				<div class="error-box" style="margin-top: 0.75rem;">{ttsError}</div>
+			{/if}
+			{#if ttsGenerating}
+				<div class="tts-progress">
+					<div class="tts-progress-header">
+						<span>Generating audio...</span>
+						<span class="tts-progress-pct">{Math.round(ttsProgress * 100)}%</span>
+					</div>
+					<div class="tts-progress-track">
+						<div class="tts-progress-fill" style="width: {ttsProgress * 100}%"></div>
+					</div>
+				</div>
+			{/if}
+			{#if refAudioSrc}
+				<p class="tts-label" style="margin-top: 0.75rem;">Reference clip:</p>
+				<AudioPlayer src={refAudioSrc} />
+			{/if}
+			{#if ttsAudioSrc}
+				<p class="tts-label" style="margin-top: 0.5rem;">Generated:</p>
+				<AudioPlayer src={ttsAudioSrc} />
+			{/if}
+		</section>
 	{/if}
 </div>
 
@@ -375,22 +398,47 @@
 		max-width: 800px;
 	}
 
-	.recap-header {
+	.recap-topbar {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		margin-bottom: 1.5rem;
+		margin-bottom: 1.25rem;
 	}
-
 	.recap-date {
 		color: var(--text-muted);
 		font-size: 0.8rem;
 	}
 
-	.recap-actions {
+	.section-card {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 1.25rem 1.5rem;
+		margin-bottom: 1.25rem;
+	}
+	.section-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: flex-start;
+		gap: 1rem;
+		margin-bottom: 1rem;
+	}
+	.section-title {
+		color: var(--accent-gold);
+		font-size: 1.1rem;
+		font-weight: 600;
+		margin: 0;
+	}
+	.section-desc {
+		color: var(--text-muted);
+		font-size: 0.8rem;
+		margin: 0.25rem 0 0;
+	}
+	.recap-actions-inline {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
+		flex-shrink: 0;
 	}
 
 	.last-n-row {
@@ -548,26 +596,6 @@
 		transition: width 0.3s ease;
 	}
 
-	.previously-on-section {
-		background: var(--bg-surface);
-		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		padding: 1.25rem 1.5rem;
-		margin-bottom: 1.25rem;
-	}
-	.previously-on-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.75rem;
-	}
-	.previously-on-title {
-		color: var(--accent-gold);
-		font-size: 1.1rem;
-		font-weight: 600;
-		margin: 0;
-		font-style: italic;
-	}
 	.previously-on-body p {
 		color: var(--text-primary);
 		font-size: 1rem;
@@ -579,12 +607,6 @@
 		margin-bottom: 0;
 	}
 
-	.recap-body {
-		background: var(--bg-surface);
-		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		padding: 2rem;
-	}
 	.recap-body p {
 		color: var(--text-primary);
 		font-size: 1.05rem;

@@ -134,14 +134,40 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	source := r.URL.Query().Get("source") // "recap" (default) or "previously-on"
+
 	campaign, err := s.store.GetCampaign(r.Context(), campaignID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "campaign not found")
 		return
 	}
-	if campaign.Recap == "" {
-		writeError(w, http.StatusNotFound, "no recap generated yet")
-		return
+
+	// Determine the text to synthesize.
+	var ttsText string
+	if source == "previously-on" {
+		// Generate previously-on text for TTS.
+		if s.summariser == nil {
+			writeError(w, http.StatusServiceUnavailable, "summariser not available")
+			return
+		}
+		sessions, err := s.store.GetLatestCompleteSessions(r.Context(), campaignID, 1)
+		if err != nil || len(sessions) == 0 || sessions[0].Summary == nil {
+			writeError(w, http.StatusNotFound, "no sessions with summaries")
+			return
+		}
+		result, err := s.summariser.GeneratePreviouslyOn(r.Context(), *sessions[0].Summary, campaign.Recap)
+		if err != nil {
+			log.Printf("recap tts: generate previously-on: %v", err)
+			writeError(w, http.StatusInternalServerError, "failed to generate previously-on text")
+			return
+		}
+		ttsText = result.Text
+	} else {
+		if campaign.Recap == "" {
+			writeError(w, http.StatusNotFound, "no recap generated yet")
+			return
+		}
+		ttsText = campaign.Recap
 	}
 
 	// Extract reference audio — either from a custom profile or a campaign member.
@@ -169,7 +195,7 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	samples, sampleRate, err := s.ttsSvc.synth.Synthesize(
-		campaign.Recap, ref.Samples, ref.SampleRate, ref.Text,
+		ttsText, ref.Samples, ref.SampleRate, ref.Text,
 	)
 	if err != nil {
 		log.Printf("recap tts: synthesize: %v", err)

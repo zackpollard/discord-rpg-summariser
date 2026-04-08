@@ -78,7 +78,7 @@ RUN /opt/tts-venv/bin/pip install --no-cache-dir \
     -r /opt/tts-venv/ZipVoice/requirements.txt sentencepiece
 
 # Stage 4: Runtime
-FROM node:22-slim
+FROM node:22-slim AS runtime
 
 # Install runtime deps
 RUN apt-get update && apt-get install -y --no-install-recommends \

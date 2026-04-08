@@ -1,6 +1,23 @@
-# Stage 1: Build whisper.cpp and download Go deps
-FROM golang:1.23-bookworm AS builder
+# Dev image: reuses the production multi-stage build, then extends the
+# runtime with Go toolchain + air for hot reload.
+#
+# Build:  docker compose -f docker-compose.dev.yml build
+# The compose file sets the target to "dev".
 
+# ---------------------------------------------------------------------------
+# Stages 1-3 are identical to the production Dockerfile.
+# ---------------------------------------------------------------------------
+
+# Stage 1: Build Svelte frontend
+FROM node:22-slim AS frontend
+WORKDIR /app/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+# Stage 2: Build whisper.cpp and Go binary
+FROM golang:1.23-bookworm AS backend
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake build-essential git pkg-config libopus-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -21,57 +38,119 @@ COPY go.mod go.sum ./
 COPY _deps/discordgo-fork/ _deps/discordgo-fork/
 RUN go mod download
 
-# Collect sherpa-onnx shared libraries
+# Collect sherpa-onnx shared libraries for the current architecture
 RUN SHERPA_MOD=/go/pkg/mod/github.com/k2-fsa/sherpa-onnx-go-linux@v1.12.30/lib \
     && ARCH=$(uname -m) \
     && case "$ARCH" in \
          x86_64)  SHERPA_ARCH=x86_64-unknown-linux-gnu ;; \
          aarch64) SHERPA_ARCH=aarch64-unknown-linux-gnu ;; \
+         armv7l)  SHERPA_ARCH=arm-unknown-linux-gnueabihf ;; \
          *)       echo "Unsupported arch: $ARCH" && exit 1 ;; \
        esac \
     && mkdir -p /sherpa-libs \
     && cp "$SHERPA_MOD/$SHERPA_ARCH"/*.so /sherpa-libs/
 
-# Install air for hot reload
-RUN go install github.com/air-verse/air@v1.61.7
+# Build the Go binary (needed to validate the build; not used at runtime in dev)
+COPY cmd/ cmd/
+COPY internal/ internal/
+COPY migrations/ migrations/
 
-# Stage 2: Dev runtime (keeps Go toolchain for air rebuilds)
-FROM golang:1.23-bookworm
+ENV CGO_ENABLED=1
+ENV CGO_LDFLAGS="-L/app/_deps/whisper.cpp/build/src -L/app/_deps/whisper.cpp/build/ggml/src -lwhisper -lggml -lggml-base -lggml-cpu -lm -lstdc++ -fopenmp"
+ENV CGO_CFLAGS="-I/app/_deps/whisper.cpp/include -I/app/_deps/whisper.cpp/ggml/include"
+
+ARG VERSION=dev
+RUN go build -tags nolibopusfile -ldflags "-X main.version=${VERSION}" -o /bot ./cmd/bot/
+
+# Stage 3: Python TTS venv
+FROM python:3.12-slim-bookworm AS python-tts
+
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/tts-venv
+
+RUN /opt/tts-venv/bin/pip install --no-cache-dir \
+    torch==2.6.0+cpu torchaudio==2.6.0+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
+
+RUN git clone --depth 1 https://github.com/k2-fsa/ZipVoice.git /opt/tts-venv/ZipVoice
+
+RUN /opt/tts-venv/bin/pip install --no-cache-dir piper_phonemize \
+    -f https://k2-fsa.github.io/icefall/piper_phonemize.html
+
+RUN /opt/tts-venv/bin/pip install --no-cache-dir \
+    -r /opt/tts-venv/ZipVoice/requirements.txt sentencepiece
+
+# ---------------------------------------------------------------------------
+# Stage 4: Production runtime (same as production Dockerfile)
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libopus-dev libgomp1 libsndfile1 ffmpeg pkg-config \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates libopus0 libgomp1 \
+    libsndfile1 ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force
 
 WORKDIR /app
 
-# Copy whisper shared libraries and headers
-COPY --from=builder /app/_deps/whisper.cpp/build/src/libwhisper.so* /usr/lib/
-COPY --from=builder /app/_deps/whisper.cpp/build/ggml/src/libggml*.so* /usr/lib/
-COPY --from=builder /app/_deps/whisper.cpp/include/ /usr/local/include/whisper/
-COPY --from=builder /app/_deps/whisper.cpp/ggml/include/ /usr/local/include/ggml/
-
-# Copy sherpa-onnx shared libraries
-COPY --from=builder /sherpa-libs/*.so /usr/lib/
+COPY --from=backend /app/_deps/whisper.cpp/build/src/libwhisper.so* /usr/lib/
+COPY --from=backend /app/_deps/whisper.cpp/build/ggml/src/libggml*.so* /usr/lib/
+COPY --from=backend /sherpa-libs/*.so /usr/lib/
 RUN ldconfig
 
-# Copy Go module cache and air binary
-COPY --from=builder /go/pkg/mod /go/pkg/mod
-COPY --from=builder /go/bin/air /usr/local/bin/air
+COPY --from=python-tts /opt/tts-venv /app/.venv
+COPY --from=python-tts /usr/local/lib/libpython3.12* /usr/local/lib/
+COPY --from=python-tts /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=python-tts /usr/local/bin/python3.12 /usr/local/bin/python3.12
+RUN ldconfig \
+    && rm -f /app/.venv/bin/python /app/.venv/bin/python3 \
+    && ln -s /usr/local/bin/python3.12 /app/.venv/bin/python \
+    && ln -s /usr/local/bin/python3.12 /app/.venv/bin/python3
 
-# Copy go.mod/go.sum and local deps (needed for builds)
-COPY go.mod go.sum ./
-COPY _deps/discordgo-fork/ _deps/discordgo-fork/
+COPY --from=backend /bot .
+COPY --from=frontend /app/web/build web/build
+COPY migrations/ migrations/
+COPY scripts/ scripts/
 
-# CGO flags for whisper.cpp
+EXPOSE 8080
+
+# ---------------------------------------------------------------------------
+# Stage 5: Dev — extend runtime with Go toolchain + air for hot reload.
+# Source code and ~/.claude are mounted as volumes.
+# ---------------------------------------------------------------------------
+FROM runtime AS dev
+
+# Install Go toolchain for air rebuilds.
+COPY --from=backend /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:/go/bin:${PATH}"
+
+# Install build deps for CGO.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config libopus-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy whisper headers for CGO compilation.
+COPY --from=backend /app/_deps/whisper.cpp/include/ /usr/local/include/whisper/
+COPY --from=backend /app/_deps/whisper.cpp/ggml/include/ /usr/local/include/ggml/
+
+# Copy Go module cache and install air.
+COPY --from=backend /go/pkg/mod /go/pkg/mod
+ENV GOPATH=/go
+RUN go install github.com/air-verse/air@v1.61.7
+
+# CGO flags for whisper.cpp.
 ENV CGO_ENABLED=1
 ENV CGO_CFLAGS="-I/usr/local/include/whisper -I/usr/local/include/ggml"
 ENV CGO_LDFLAGS="-lwhisper -lggml -lggml-base -lggml-cpu -lm -lstdc++ -fopenmp"
 
-# Source code is mounted as volumes — not copied
-# Create data directories
-RUN mkdir -p /data/audio /data/models /data/claude tmp \
-    && ln -s /data/claude /root/.claude
+# Copy go.mod/go.sum and local deps (needed for air builds).
+COPY go.mod go.sum ./
+COPY _deps/discordgo-fork/ _deps/discordgo-fork/
 
-EXPOSE 8080
+RUN mkdir -p /data/audio /data/models tmp
 
+ENTRYPOINT []
 CMD ["air", "-c", ".air.docker.toml"]
