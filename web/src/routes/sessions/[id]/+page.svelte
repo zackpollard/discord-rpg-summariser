@@ -463,6 +463,7 @@
 				<option value="entities">Extract Entities</option>
 				<option value="quests">Extract Quests</option>
 				<option value="combat">Extract Combat</option>
+				<option value="creatures">Extract Creatures</option>
 				<option value="embeddings">Generate Embeddings</option>
 			</select>
 			<button

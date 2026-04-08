@@ -125,6 +125,16 @@ func (o *Ollama) ExtractCombat(ctx context.Context, transcript, summary, dmName 
 	return &result, nil
 }
 
+// ExtractCreatures sends the creature extraction prompt to Ollama and parses the JSON response.
+func (o *Ollama) ExtractCreatures(ctx context.Context, transcript, summary string, encounters []CombatExtractedEncounter, playerCharacters []string) (*CreatureExtractionResult, error) {
+	prompt := BuildCreatureExtractionPrompt(transcript, summary, encounters, playerCharacters)
+	var result CreatureExtractionResult
+	if err := o.runPrompt(ctx, prompt, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // GenerateRecap sends the recap prompt to Ollama and parses the JSON response.
 func (o *Ollama) GenerateRecap(ctx context.Context, sessionSummaries []string, dmName string, style ...string) (*RecapResult, error) {
 	opts := RecapPromptOptions{}

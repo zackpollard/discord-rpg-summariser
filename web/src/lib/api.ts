@@ -821,3 +821,59 @@ export async function suggestClipNames(excerpt: string): Promise<ClipNameSuggest
 export function campaignPDFURL(campaignId: number): string {
 	return `/api/campaigns/${campaignId}/pdf`;
 }
+
+// Bestiary types and functions
+
+export interface CreatureStats {
+	creature_type: string;
+	challenge_rating: string;
+	armor_class: number | null;
+	hit_points: string;
+	abilities: string;
+	loot: string;
+}
+
+export interface BestiaryEntry {
+	id: number;
+	campaign_id: number;
+	name: string;
+	description: string;
+	status: string;
+	created_at: string;
+	creature_stats: CreatureStats;
+}
+
+export interface CreatureCombatStats {
+	total_encounters: number;
+	total_damage_dealt: number;
+	total_damage_taken: number;
+	defeated_by: string[];
+}
+
+export interface CreatureEncounterHistory {
+	id: number;
+	session_id: number;
+	name: string;
+	start_time: number;
+	end_time: number;
+	summary: string;
+	created_at: string;
+}
+
+export interface CreatureDetail extends EntityDetail {
+	creature_stats: CreatureStats | null;
+	combat_stats: CreatureCombatStats | null;
+	encounter_history: CreatureEncounterHistory[];
+}
+
+export async function fetchBestiary(campaignId: number, params?: { creature_type?: string; search?: string }): Promise<BestiaryEntry[]> {
+	const query = new URLSearchParams();
+	if (params?.creature_type) query.set('creature_type', params.creature_type);
+	if (params?.search) query.set('search', params.search);
+	const qs = query.toString();
+	return request<BestiaryEntry[]>(`/api/campaigns/${campaignId}/bestiary${qs ? '?' + qs : ''}`);
+}
+
+export async function fetchCreature(id: number): Promise<CreatureDetail> {
+	return request<CreatureDetail>(`/api/creatures/${id}`);
+}

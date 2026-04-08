@@ -57,6 +57,9 @@ func (s *Server) setupRoutes() {
 	s.handle("POST /api/entities/{id}/merge", s.handleMergeEntity)
 	s.handle("GET /api/quests/{id}", s.handleGetQuest)
 
+	s.handle("GET /api/campaigns/{id}/bestiary", s.handleListBestiary)
+	s.handle("GET /api/creatures/{id}", s.handleGetCreature)
+
 	s.handle("GET /api/combat/{encounterId}/analysis", s.handleGetCombatAnalysis)
 	s.handle("POST /api/clips/suggest-name", s.handleSuggestClipNames)
 

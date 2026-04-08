@@ -302,6 +302,10 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	b.progress.SetStage("extracting combat", "Extracting combat encounters")
 	b.extractCombat(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 
+	// Extract creatures from combat encounters (non-fatal on error).
+	b.progress.SetStage("extracting creatures", "Identifying creatures for bestiary")
+	b.extractCreatures(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+
 	// Generate vector embeddings for RAG (non-fatal on error).
 	b.progress.SetStage("generating embeddings", "Generating embeddings")
 	b.generateEmbeddings(ctx, session, sessionID, merged, sumResult.Summary, dmName)
@@ -899,6 +903,112 @@ func (b *Bot) extractCombat(ctx context.Context, session *storage.Session, sessi
 	}
 
 	log.Printf("pipeline: extracted %d combat encounters", len(extraction.Encounters))
+}
+
+// ---------------------------------------------------------------------------
+// Creature extraction (bestiary)
+// ---------------------------------------------------------------------------
+
+func (b *Bot) extractCreatures(ctx context.Context, session *storage.Session, sessionID int64, transcript, summary, dmName string) {
+	extractor, ok := b.summariser.(summarise.CreatureExtractor)
+	if !ok {
+		return
+	}
+
+	// Get combat encounters for this session — if none, skip.
+	encounters, err := b.store.GetCombatEncounters(ctx, sessionID)
+	if err != nil || len(encounters) == 0 {
+		return
+	}
+
+	// Collect player character names.
+	charMappings, _ := b.store.GetCharacterMappings(ctx, session.CampaignID)
+	var playerCharacters []string
+	for _, m := range charMappings {
+		playerCharacters = append(playerCharacters, m.CharacterName)
+	}
+
+	// Build combat encounter data for the LLM prompt.
+	var combatData []summarise.CombatExtractedEncounter
+	for _, enc := range encounters {
+		actions, _ := b.store.GetCombatActions(ctx, enc.ID)
+		var extractedActions []summarise.CombatExtractedAction
+		for _, a := range actions {
+			extractedActions = append(extractedActions, summarise.CombatExtractedAction{
+				Actor:      a.Actor,
+				ActionType: a.ActionType,
+				Target:     a.Target,
+				Detail:     a.Detail,
+				Damage:     a.Damage,
+				Round:      a.Round,
+				Timestamp:  a.Timestamp,
+			})
+		}
+		combatData = append(combatData, summarise.CombatExtractedEncounter{
+			Name:      enc.Name,
+			StartTime: enc.StartTime,
+			EndTime:   enc.EndTime,
+			Summary:   enc.Summary,
+			Actions:   extractedActions,
+		})
+	}
+
+	extraction, err := extractor.ExtractCreatures(ctx, transcript, summary, combatData, playerCharacters)
+	if err != nil {
+		log.Printf("pipeline: creature extraction: %v", err)
+		return
+	}
+
+	nameToEntityID := make(map[string]int64)
+
+	for _, c := range extraction.Creatures {
+		status := c.Status
+		if status == "" {
+			status = "unknown"
+		}
+
+		entityID, err := b.store.UpsertEntity(ctx, session.CampaignID, c.Name, "creature", c.Description)
+		if err != nil {
+			log.Printf("pipeline: upsert creature entity %q: %v", c.Name, err)
+			continue
+		}
+
+		if status != "unknown" {
+			b.store.UpdateEntityStatus(ctx, entityID, status, "")
+		}
+
+		err = b.store.UpsertCreatureStats(ctx, entityID, storage.CreatureStats{
+			CreatureType:    c.CreatureType,
+			ChallengeRating: c.ChallengeRating,
+			ArmorClass:      c.ArmorClass,
+			HitPoints:       c.HitPoints,
+			Abilities:       c.Abilities,
+			Loot:            c.Loot,
+		})
+		if err != nil {
+			log.Printf("pipeline: upsert creature stats %q: %v", c.Name, err)
+		}
+
+		b.store.AddEntityNote(ctx, entityID, sessionID, fmt.Sprintf("Encountered in combat — %s", status))
+		nameToEntityID[c.Name] = entityID
+	}
+
+	// Also map PC names to entity IDs for combat action linking.
+	for _, m := range charMappings {
+		pcEntity, err := b.store.GetEntityByName(ctx, session.CampaignID, m.CharacterName, "pc")
+		if err == nil && pcEntity != nil {
+			nameToEntityID[m.CharacterName] = pcEntity.ID
+		}
+	}
+
+	// Link combat actions to entity IDs.
+	if len(nameToEntityID) > 0 {
+		if err := b.store.LinkCombatActorsToEntities(ctx, session.CampaignID, nameToEntityID); err != nil {
+			log.Printf("pipeline: link combat actors: %v", err)
+		}
+	}
+
+	log.Printf("pipeline: extracted %d creatures for bestiary", len(extraction.Creatures))
 }
 
 // ---------------------------------------------------------------------------

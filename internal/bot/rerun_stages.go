@@ -11,7 +11,7 @@ import (
 )
 
 // RerunStages re-runs specific pipeline stages for an existing session.
-// Valid stage names: annotate, summarise, title_quotes, entities, quests, combat, embeddings
+// Valid stage names: annotate, summarise, title_quotes, entities, quests, combat, creatures, embeddings
 func (b *Bot) RerunStages(ctx context.Context, sessionID int64, stages []string) error {
 	ctx = summarise.WithSessionID(ctx, sessionID)
 
@@ -173,6 +173,12 @@ func (b *Bot) RerunStages(ctx context.Context, sessionID int64, stages []string)
 		b.store.DeleteCombatForSession(ctx, sessionID)
 		b.extractCombat(ctx, session, sessionID, transcript, summary, dmName)
 		updateProgress("combat")
+	}
+
+	if stageSet["creatures"] {
+		b.progress.SetStage("extracting creatures", "Identifying creatures for bestiary")
+		b.extractCreatures(ctx, session, sessionID, transcript, summary, dmName)
+		updateProgress("creatures")
 	}
 
 	if stageSet["embeddings"] {

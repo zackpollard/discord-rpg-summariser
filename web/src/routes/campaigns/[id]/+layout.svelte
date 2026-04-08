@@ -33,6 +33,7 @@
 		<a href="/campaigns/{campaignId}/characters" class="nav-tab" class:active={$page.url.pathname.includes('/characters')}>Characters</a>
 		<a href="/campaigns/{campaignId}/lore" class="nav-tab" class:active={$page.url.pathname.includes('/lore')}>Lore</a>
 		<a href="/campaigns/{campaignId}/quests" class="nav-tab" class:active={$page.url.pathname.includes('/quests')}>Quests</a>
+		<a href="/campaigns/{campaignId}/bestiary" class="nav-tab" class:active={$page.url.pathname.includes('/bestiary')}>Bestiary</a>
 		<a href="/campaigns/{campaignId}/timeline" class="nav-tab" class:active={$page.url.pathname === `/campaigns/${campaignId}/timeline`}>Timeline</a>
 		<a href="/campaigns/{campaignId}/entity-timeline" class="nav-tab" class:active={$page.url.pathname.includes('/entity-timeline')}>Entity Timeline</a>
 		<a href="/campaigns/{campaignId}/recap" class="nav-tab" class:active={$page.url.pathname.includes('/recap')}>Recap</a>

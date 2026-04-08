@@ -279,6 +279,17 @@ func (c *ClaudeCLI) ExtractCombat(ctx context.Context, transcript, summary, dmNa
 	return &result, nil
 }
 
+// ExtractCreatures runs the claude CLI with the creature extraction prompt and
+// parses the JSON response into a CreatureExtractionResult.
+func (c *ClaudeCLI) ExtractCreatures(ctx context.Context, transcript, summary string, encounters []CombatExtractedEncounter, playerCharacters []string) (*CreatureExtractionResult, error) {
+	prompt := BuildCreatureExtractionPrompt(transcript, summary, encounters, playerCharacters)
+	var result CreatureExtractionResult
+	if err := c.runPrompt(ctx, "extract_creatures", prompt, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // ExtractTitleAndQuotes runs the claude CLI to generate a session title and
 // extract memorable quotes from the transcript.
 func (c *ClaudeCLI) ExtractTitleAndQuotes(ctx context.Context, transcript, summary, dmName string) (*TitleAndQuotesResult, error) {
