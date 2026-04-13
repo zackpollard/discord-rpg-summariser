@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.17](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.16...v0.1.17) (2026-04-07)
+
+
+### Features
+
+* incremental transcription during live sessions ([12dc6e6](https://github.com/zackpollard/discord-rpg-summariser/commit/12dc6e603b57d678fc73fd76fc65ecab52cf8466))
+* show session titles in sessions list and dashboard ([691404f](https://github.com/zackpollard/discord-rpg-summariser/commit/691404f135e68def758b3e7ba07e17a55938631a))
+
 ## [0.1.16](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.15...v0.1.16) (2026-04-07)
 
 
