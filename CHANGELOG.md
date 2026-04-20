@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.1.18](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.17...v0.1.18) (2026-04-20)
+
+
+### Features
+
+* add bestiary feature for tracking creatures across sessions ([b5d6e01](https://github.com/zackpollard/discord-rpg-summariser/commit/b5d6e018cb059aaac7aaf93c6a8ccd4301330034))
+* add docker-based dev environment ([2f4ad86](https://github.com/zackpollard/discord-rpg-summariser/commit/2f4ad86f7a825fd32c7722929251c44a7329475d))
+* cache TTS audio and share between web and Discord ([448fa18](https://github.com/zackpollard/discord-rpg-summariser/commit/448fa183f157647f5ad2bf83cbde636290763c1e))
+* emit accurate step-level TTS progress ([41c63ed](https://github.com/zackpollard/discord-rpg-summariser/commit/41c63edea2941d8ac6db5c034dd53be58c8d057e))
+* normalize and auto-transcribe voice profile uploads ([e92c503](https://github.com/zackpollard/discord-rpg-summariser/commit/e92c5032b983c810cba9cf33cfd8770693be9336))
+* route campaign voice autocomplete to recap handler ([8beca1b](https://github.com/zackpollard/discord-rpg-summariser/commit/8beca1b84751f337f63791df5ce0b2a3ed1f9701))
+* show live transcript with character names during recording ([a2cc828](https://github.com/zackpollard/discord-rpg-summariser/commit/a2cc828becdc0bff3f1af912fb2f8dad2c291019))
+
+
+### Bug Fixes
+
+* **dev:** bind-mount data dir and only mount claude credentials ([199097b](https://github.com/zackpollard/discord-rpg-summariser/commit/199097b0c4411aa6ee750ed4a47a1790b5d28062))
+* nav bar overflow and entity timeline all-view overlap ([53a100d](https://github.com/zackpollard/discord-rpg-summariser/commit/53a100de75138f273256ef7d78c281babd52c763))
+* prevent use-after-free segfault on session stop ([5c7c676](https://github.com/zackpollard/discord-rpg-summariser/commit/5c7c676a8ebbaf86add479a82b2fcfd7b4e4d36a))
+* resolve bpe.vocab generation in Docker container ([b761484](https://github.com/zackpollard/discord-rpg-summariser/commit/b76148448beb203525ec2e974b87fe97a7e50495))
+
+
+### Code Refactoring
+
+* run pipeline extraction stages in parallel ([5e57265](https://github.com/zackpollard/discord-rpg-summariser/commit/5e572656a4e1b26afd1eacb586232c1028d94b6d))
+* separate recap page into distinct sections ([df9828e](https://github.com/zackpollard/discord-rpg-summariser/commit/df9828e69c29eb877f73fb0c7568c2a044c0a921))
+
 ## [0.1.17](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.16...v0.1.17) (2026-04-07)
 
 
