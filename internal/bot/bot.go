@@ -486,10 +486,23 @@ func (b *Bot) stopRecording() stopResult {
 		b.recorder = nil
 		log.Println("Recorder stopped")
 	}
-	if b.incrementalTranscriber != nil {
+	// Wait for the live worker to finish processing any in-flight chunks
+	// before we release the transcriber — it shares the same ONNX model.
+	lw := b.liveWorker
+	if lw != nil {
+		log.Println("Waiting for live worker to drain...")
+		b.mu.Unlock()
+		lw.Wait()
+		b.mu.Lock()
+		log.Println("Live worker drained")
+	}
+	it := b.incrementalTranscriber
+	if it != nil {
 		log.Println("Stopping incremental transcriber...")
-		b.incrementalTranscriber.Stop()
-		result.PreTranscribed, result.ProcessedOffsets = b.incrementalTranscriber.CollectedSegments()
+		b.mu.Unlock()
+		it.Stop()
+		b.mu.Lock()
+		result.PreTranscribed, result.ProcessedOffsets = it.CollectedSegments()
 		log.Printf("Incremental transcriber: %d users pre-transcribed", len(result.PreTranscribed))
 		b.incrementalTranscriber = nil
 	}

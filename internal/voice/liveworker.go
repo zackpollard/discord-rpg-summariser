@@ -53,6 +53,8 @@ type LiveWorker struct {
 	// Per-user state for overlap deduplication
 	lastConfirmedEnd map[string]float64 // user -> end time of last confirmed segment
 	lastPrompt       map[string]string  // user -> last text for whisper context
+
+	done chan struct{} // closed when Run returns
 }
 
 func NewLiveWorker(t transcribe.Transcriber, chunks <-chan ChunkReady) *LiveWorker {
@@ -63,6 +65,7 @@ func NewLiveWorker(t transcribe.Transcriber, chunks <-chan ChunkReady) *LiveWork
 		subscribers:      make(map[chan TranscriptEvent]struct{}),
 		lastConfirmedEnd: make(map[string]float64),
 		lastPrompt:       make(map[string]string),
+		done:             make(chan struct{}),
 	}
 }
 
@@ -78,9 +81,15 @@ func (w *LiveWorker) SetSpeakerIdentifier(id SpeakerIdentifier) {
 
 // Run processes chunks until the channel is closed.
 func (w *LiveWorker) Run(ctx context.Context) {
+	defer close(w.done)
 	for chunk := range w.chunks {
 		w.processChunk(ctx, chunk)
 	}
+}
+
+// Wait blocks until Run has returned (all in-flight chunks are processed).
+func (w *LiveWorker) Wait() {
+	<-w.done
 }
 
 func (w *LiveWorker) processChunk(ctx context.Context, chunk ChunkReady) {

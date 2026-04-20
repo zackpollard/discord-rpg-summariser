@@ -26,6 +26,7 @@ type IncrementalTranscriber struct {
 	segments       map[string][]transcribe.Segment // userID -> accumulated segments
 	running        bool
 	done           chan struct{}
+	stopped        chan struct{} // closed when the background goroutine exits
 	checkInterval  time.Duration
 }
 
@@ -39,6 +40,7 @@ func NewIncrementalTranscriber(t transcribe.Transcriber, outputDir string, sessi
 		processedBytes: make(map[string]int64),
 		segments:       make(map[string][]transcribe.Segment),
 		done:           make(chan struct{}),
+		stopped:        make(chan struct{}),
 		checkInterval:  30 * time.Second, // check for new chunks every 30s
 	}
 }
@@ -57,12 +59,16 @@ func (it *IncrementalTranscriber) Start(ctx context.Context) {
 	it.mu.Unlock()
 
 	go func() {
+		defer close(it.stopped)
 		ticker := time.NewTicker(it.checkInterval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-it.done:
+				// Final pass: transcribe any audio that arrived since
+				// the last tick so the pipeline has less remainder work.
+				it.processAll(ctx)
 				return
 			case <-ctx.Done():
 				return
@@ -73,12 +79,14 @@ func (it *IncrementalTranscriber) Start(ctx context.Context) {
 	}()
 }
 
-// Stop signals the background loop to exit.
+// Stop signals the background loop to exit and waits for it to finish
+// any in-flight transcription before returning.
 func (it *IncrementalTranscriber) Stop() {
 	it.mu.Lock()
 	it.running = false
 	it.mu.Unlock()
 	close(it.done)
+	<-it.stopped
 }
 
 // CollectedSegments returns all segments transcribed so far for each user,
