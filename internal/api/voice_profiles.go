@@ -1,15 +1,26 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
+
+	"discord-rpg-summariser/internal/transcribe"
 )
+
+// TranscriberProvider provides access to a shared transcriber instance.
+type TranscriberProvider interface {
+	AcquireTranscriber() (transcribe.Transcriber, error)
+	ReleaseTranscriber()
+}
 
 func (s *Server) handleUploadVoiceProfile(w http.ResponseWriter, r *http.Request) {
 	campaignID, ok := parsePathID(w, r, "id")
@@ -60,6 +71,59 @@ func (s *Server) handleUploadVoiceProfile(w http.ResponseWriter, r *http.Request
 		log.Printf("write voice profile file: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to save audio")
 		return
+	}
+	dst.Close()
+
+	// Normalize to 48kHz mono 16-bit WAV (no trim yet — we'll find a
+	// natural boundary after transcription).
+	normalizedPath := audioPath + ".norm.wav"
+	if err := normalizeAudio(audioPath, normalizedPath, 0); err != nil {
+		log.Printf("voice profile normalize: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to process audio — ensure the file is a valid audio format")
+		os.Remove(audioPath)
+		return
+	}
+	os.Remove(audioPath)
+	wavPath := strings.TrimSuffix(audioPath, filepath.Ext(audioPath)) + ".wav"
+	if err := os.Rename(normalizedPath, wavPath); err != nil {
+		log.Printf("voice profile rename: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to save audio")
+		return
+	}
+	audioPath = wavPath
+
+	// Transcribe and find a natural trim point at a sentence boundary.
+	if s.transcriberP != nil {
+		segments, trimSec, err := s.transcribeAndTrim(r.Context(), audioPath, 10.0)
+		if err != nil {
+			log.Printf("voice profile transcribe/trim: %v", err)
+		} else {
+			// Build transcript from segments up to the trim point.
+			var parts []string
+			for _, seg := range segments {
+				if seg.EndTime > trimSec {
+					break
+				}
+				text := strings.TrimSpace(seg.Text)
+				if text != "" {
+					parts = append(parts, text)
+				}
+			}
+			if len(parts) > 0 && transcript == "" {
+				transcript = strings.Join(parts, " ")
+				log.Printf("voice profile auto-transcribed: %q", transcript)
+			}
+
+			// Re-trim the WAV to the natural boundary.
+			if trimSec > 0 && trimSec < 30 {
+				trimmedPath := audioPath + ".trim.wav"
+				if err := normalizeAudio(audioPath, trimmedPath, trimSec); err == nil {
+					os.Remove(audioPath)
+					os.Rename(trimmedPath, audioPath)
+					log.Printf("voice profile trimmed to %.1fs (sentence boundary)", trimSec)
+				}
+			}
+		}
 	}
 
 	id, err := s.store.InsertVoiceProfile(r.Context(), campaignID, name, audioPath, transcript)
@@ -145,6 +209,54 @@ func (s *Server) handleGetVoiceProfileAudio(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "audio/wav")
 	http.ServeFile(w, r, profile.AudioPath)
+}
+
+// normalizeAudio converts any audio file to 48kHz mono 16-bit WAV using ffmpeg.
+// If trimSec > 0, the output is trimmed to that duration.
+func normalizeAudio(inputPath, outputPath string, trimSec float64) error {
+	args := []string{"-y", "-i", inputPath}
+	if trimSec > 0 {
+		args = append(args, "-t", fmt.Sprintf("%.2f", trimSec))
+	}
+	args = append(args,
+		"-ar", "48000",
+		"-ac", "1",
+		"-sample_fmt", "s16",
+		"-f", "wav",
+		outputPath,
+	)
+	cmd := exec.Command("ffmpeg", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ffmpeg: %w: %s", err, string(out))
+	}
+	return nil
+}
+
+// transcribeAndTrim transcribes a WAV file and finds a natural sentence
+// boundary near maxDuration seconds. Returns the segments and the trim point.
+func (s *Server) transcribeAndTrim(ctx context.Context, wavPath string, maxDuration float64) ([]transcribe.Segment, float64, error) {
+	t, err := s.transcriberP.AcquireTranscriber()
+	if err != nil {
+		return nil, 0, fmt.Errorf("acquire transcriber: %w", err)
+	}
+	defer s.transcriberP.ReleaseTranscriber()
+
+	segments, err := t.TranscribeFile(ctx, wavPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("transcribe: %w", err)
+	}
+
+	// Find the last segment that ends at or before maxDuration.
+	// This gives us a natural sentence/phrase boundary.
+	trimAt := maxDuration
+	for _, seg := range segments {
+		if seg.EndTime <= maxDuration {
+			trimAt = seg.EndTime
+		}
+	}
+
+	return segments, trimAt, nil
 }
 
 func sanitizeProfileFilename(name string) string {

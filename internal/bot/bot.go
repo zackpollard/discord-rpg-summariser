@@ -71,6 +71,17 @@ type Bot struct {
 	}
 }
 
+// AcquireTranscriber is the exported version of acquireTranscriber for use
+// by the API server's TranscriberProvider interface.
+func (b *Bot) AcquireTranscriber() (transcribe.Transcriber, error) {
+	return b.acquireTranscriber()
+}
+
+// ReleaseTranscriber is the exported version of releaseTranscriber.
+func (b *Bot) ReleaseTranscriber() {
+	b.releaseTranscriber()
+}
+
 // acquireTranscriber loads the transcription model if not already loaded and
 // increments the reference count. Callers must call releaseTranscriber when done.
 func (b *Bot) acquireTranscriber() (transcribe.Transcriber, error) {

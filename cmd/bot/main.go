@@ -116,6 +116,7 @@ func main() {
 	if cfg.Telegram.BotToken != "" {
 		discordBot.SetTelegramClient(telegram.NewClient(cfg.Telegram.BotToken))
 	}
+	srv.SetTranscriberProvider(discordBot)
 
 	// Set up in-process ONNX embedding model.
 	var embedder embed.Embedder

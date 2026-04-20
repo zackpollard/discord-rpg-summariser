@@ -34,6 +34,7 @@ type Server struct {
 	embedder      embed.Embedder
 	ttsSvc        *ttsService
 	soundboardP   SoundboardPlayer
+	transcriberP  TranscriberProvider
 	summariser    *summarise.ClaudeCLI
 	mux           *http.ServeMux
 	httpServer    *http.Server
@@ -132,6 +133,10 @@ func (s *Server) SetEmbedder(e embed.Embedder) {
 // SetSoundboardPlayer sets the soundboard player for voice channel playback.
 func (s *Server) SetSoundboardPlayer(sp SoundboardPlayer) {
 	s.soundboardP = sp
+}
+
+func (s *Server) SetTranscriberProvider(tp TranscriberProvider) {
+	s.transcriberP = tp
 }
 
 // SetSummariser sets the summariser for LLM-powered features.
