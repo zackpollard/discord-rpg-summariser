@@ -66,7 +66,8 @@ type Bot struct {
 
 	// TTS synthesizer for voice-cloned recap playback (nil if not configured).
 	ttsSynth interface {
-		Synthesize(text string, refAudio []float32, refSampleRate int, refText string) ([]float32, int, error)
+		Synthesize(ctx context.Context, text string, refAudio []float32, refSampleRate int, refText string) ([]float32, int, error)
+		SetProgressCallback(fn func(float64))
 	}
 }
 
@@ -315,7 +316,8 @@ func (b *Bot) SetTelegramClient(c *telegram.Client) {
 
 // SetTTSSynthesizer sets the TTS synthesizer for voice-cloned recap playback.
 func (b *Bot) SetTTSSynthesizer(synth interface {
-	Synthesize(text string, refAudio []float32, refSampleRate int, refText string) ([]float32, int, error)
+	Synthesize(ctx context.Context, text string, refAudio []float32, refSampleRate int, refText string) ([]float32, int, error)
+	SetProgressCallback(fn func(float64))
 }) {
 	b.ttsSynth = synth
 }

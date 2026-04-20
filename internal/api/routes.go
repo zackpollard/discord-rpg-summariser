@@ -36,6 +36,7 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/campaigns/{id}/pdf", s.handleGetCampaignPDF)
 	s.handle("GET /api/campaigns/{id}/recap/voices", s.handleListRecapVoices)
 	s.handle("GET /api/campaigns/{id}/recap/tts", s.handleGetRecapTTS)
+	s.handle("GET /api/campaigns/{id}/recap/tts/cached", s.handleListCachedTTS)
 	s.handle("GET /api/campaigns/{id}/recap/ref", s.handleGetRefAudio)
 
 	s.handle("GET /api/campaigns/{id}/previously-on", s.handleGetPreviouslyOn)
@@ -86,6 +87,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/live-transcript", s.handleLiveTranscript)
 	s.mux.HandleFunc("GET /api/sessions/{id}/progress", s.handlePipelineProgress)
 	s.mux.HandleFunc("GET /api/tts/progress", s.handleTTSProgress)
+	s.mux.HandleFunc("POST /api/tts/cancel", s.handleCancelTTS)
 }
 
 // handle registers a route, wrapping the handler with auth middleware when

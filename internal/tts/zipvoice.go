@@ -2,6 +2,7 @@ package tts
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -46,7 +47,7 @@ func NewSynthesizer(projectDir string, threads int, engine string) (*Synthesizer
 	return &Synthesizer{
 		projectDir: projectDir,
 		threads:    threads,
-		steps:      32,
+		steps:      16,
 		engine:     engine,
 	}, nil
 }
@@ -80,7 +81,8 @@ func (s *Synthesizer) SampleRate() int {
 
 // Synthesize generates speech from text using voice cloning. It writes a
 // reference WAV to a temp file, calls the Python script, and reads the result.
-func (s *Synthesizer) Synthesize(text string, refAudio []float32, refSampleRate int, refText string) ([]float32, int, error) {
+// The context can be used to cancel the generation (kills the subprocess).
+func (s *Synthesizer) Synthesize(ctx context.Context, text string, refAudio []float32, refSampleRate int, refText string) ([]float32, int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -104,7 +106,7 @@ func (s *Synthesizer) Synthesize(text string, refAudio []float32, refSampleRate 
 	scriptPath := filepath.Join(s.projectDir, "scripts", "tts_generate.py")
 	venvPython := filepath.Join(s.projectDir, ".venv", "bin", "python")
 
-	cmd := exec.Command(venvPython, scriptPath,
+	cmd := exec.CommandContext(ctx, venvPython, scriptPath,
 		"--engine", s.engine,
 		"--ref-wav", refWavPath,
 		"--ref-text", refText,

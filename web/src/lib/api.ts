@@ -462,6 +462,19 @@ export interface LoreSearchResult {
 export interface CampaignRecap {
 	recap: string;
 	recap_generated_at: string | null;
+	previously_on: string;
+	previously_on_generated_at: string | null;
+}
+
+export interface TTSCacheEntry {
+	source: string;
+	voice_key: string;
+	generated_at: string;
+}
+
+export async function fetchCachedTTS(campaignId: number): Promise<TTSCacheEntry[]> {
+	const res = await request<{ entries: TTSCacheEntry[] }>(`/api/campaigns/${campaignId}/recap/tts/cached`);
+	return res.entries;
 }
 
 export async function fetchQuests(campaignId: number, status?: string): Promise<Quest[]> {
@@ -766,8 +779,9 @@ export interface PreviouslyOnResult {
 	text: string;
 }
 
-export async function fetchPreviouslyOn(campaignId: number): Promise<PreviouslyOnResult> {
-	return request<PreviouslyOnResult>(`/api/campaigns/${campaignId}/previously-on`);
+export async function fetchPreviouslyOn(campaignId: number, force = false): Promise<PreviouslyOnResult> {
+	const qs = force ? '?force=true' : '';
+	return request<PreviouslyOnResult>(`/api/campaigns/${campaignId}/previously-on${qs}`);
 }
 
 // Character summary types and functions

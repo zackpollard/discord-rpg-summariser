@@ -3,10 +3,14 @@ package api
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +24,10 @@ type ttsService struct {
 	store *storage.Store
 
 	mu       sync.Mutex
-	progress float64 // 0.0-1.0 during generation, -1 = idle
+	progress float64            // 0.0-1.0 during generation, -1 = idle
+	source   string             // active generation source ("recap" or "previously-on")
+	voiceKey string             // active generation voice key ("user:123" or "profile:45")
+	cancel   context.CancelFunc // cancels the active generation
 }
 
 // NewTTSService creates a TTS service that synthesizes recaps.
@@ -62,10 +69,20 @@ func (t *ttsService) extractProfileRef(ctx context.Context, profileID int64) (*t
 	}, nil
 }
 
-func (t *ttsService) getProgress() float64 {
+type ttsProgressState struct {
+	Progress float64 `json:"progress"`
+	Source   string  `json:"source,omitempty"`
+	VoiceKey string  `json:"voice_key,omitempty"`
+}
+
+func (t *ttsService) getProgressState() ttsProgressState {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.progress
+	return ttsProgressState{
+		Progress: t.progress,
+		Source:   t.source,
+		VoiceKey: t.voiceKey,
+	}
 }
 
 func (s *Server) handleListRecapVoices(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +152,29 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	source := r.URL.Query().Get("source") // "recap" (default) or "previously-on"
+	if source == "" {
+		source = "recap"
+	}
+	regenerate := r.URL.Query().Get("regenerate") == "true"
+
+	// Build voice key for cache lookup.
+	var voiceKey string
+	if profileIDStr != "" {
+		voiceKey = "profile:" + profileIDStr
+	} else {
+		voiceKey = storage.VoiceKeyForUser(voiceUserID)
+	}
+
+	// Check cache unless regeneration is requested.
+	if !regenerate {
+		cached, err := s.store.GetTTSCache(r.Context(), campaignID, source, voiceKey)
+		if err == nil && cached != nil {
+			if _, statErr := os.Stat(cached.AudioPath); statErr == nil {
+				http.ServeFile(w, r, cached.AudioPath)
+				return
+			}
+		}
+	}
 
 	campaign, err := s.store.GetCampaign(r.Context(), campaignID)
 	if err != nil {
@@ -145,23 +185,11 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 	// Determine the text to synthesize.
 	var ttsText string
 	if source == "previously-on" {
-		// Generate previously-on text for TTS.
-		if s.summariser == nil {
-			writeError(w, http.StatusServiceUnavailable, "summariser not available")
+		ttsText = campaign.PreviouslyOn
+		if ttsText == "" {
+			writeError(w, http.StatusNotFound, "no previously-on text generated yet — generate it from the recap page first")
 			return
 		}
-		sessions, err := s.store.GetLatestCompleteSessions(r.Context(), campaignID, 1)
-		if err != nil || len(sessions) == 0 || sessions[0].Summary == nil {
-			writeError(w, http.StatusNotFound, "no sessions with summaries")
-			return
-		}
-		result, err := s.summariser.GeneratePreviouslyOn(r.Context(), *sessions[0].Summary, campaign.Recap)
-		if err != nil {
-			log.Printf("recap tts: generate previously-on: %v", err)
-			writeError(w, http.StatusInternalServerError, "failed to generate previously-on text")
-			return
-		}
-		ttsText = result.Text
 	} else {
 		if campaign.Recap == "" {
 			writeError(w, http.StatusNotFound, "no recap generated yet")
@@ -184,18 +212,26 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark as generating.
+	// Mark as generating with a cancellable context.
+	genCtx, genCancel := context.WithCancel(r.Context())
 	s.ttsSvc.mu.Lock()
 	s.ttsSvc.progress = 0
+	s.ttsSvc.source = source
+	s.ttsSvc.voiceKey = voiceKey
+	s.ttsSvc.cancel = genCancel
 	s.ttsSvc.mu.Unlock()
 	defer func() {
 		s.ttsSvc.mu.Lock()
 		s.ttsSvc.progress = -1
+		s.ttsSvc.source = ""
+		s.ttsSvc.voiceKey = ""
+		s.ttsSvc.cancel = nil
 		s.ttsSvc.mu.Unlock()
+		genCancel()
 	}()
 
 	samples, sampleRate, err := s.ttsSvc.synth.Synthesize(
-		ttsText, ref.Samples, ref.SampleRate, ref.Text,
+		genCtx, ttsText, ref.Samples, ref.SampleRate, ref.Text,
 	)
 	if err != nil {
 		log.Printf("recap tts: synthesize: %v", err)
@@ -203,9 +239,76 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save to cache.
+	cacheDir := filepath.Join("data", "tts-cache")
+	os.MkdirAll(cacheDir, 0o755)
+	wavPath := filepath.Join(cacheDir, fmt.Sprintf("%s-%d-%s.wav", source, campaignID, sanitizeVoiceKey(voiceKey)))
+
+	if err := tts.WriteWAV(wavPath, samples, sampleRate); err != nil {
+		log.Printf("recap tts: save cache: %v", err)
+	} else {
+		_ = s.store.UpsertTTSCache(r.Context(), storage.TTSAudioCache{
+			CampaignID: campaignID,
+			Source:     source,
+			VoiceKey:   voiceKey,
+			AudioPath:  wavPath,
+		})
+	}
+
 	w.Header().Set("Content-Type", "audio/wav")
-	w.Header().Set("Cache-Control", "no-store")
 	writeWAVResponse(w, samples, sampleRate)
+}
+
+func sanitizeVoiceKey(key string) string {
+	return strings.ReplaceAll(key, ":", "-")
+}
+
+func (s *Server) handleListCachedTTS(w http.ResponseWriter, r *http.Request) {
+	campaignID, ok := parsePathID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	entries, err := s.store.ListTTSCache(r.Context(), campaignID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list cached TTS")
+		return
+	}
+
+	type cacheEntry struct {
+		Source      string `json:"source"`
+		VoiceKey    string `json:"voice_key"`
+		GeneratedAt string `json:"generated_at"`
+	}
+	result := make([]cacheEntry, 0, len(entries))
+	for _, e := range entries {
+		result = append(result, cacheEntry{
+			Source:      e.Source,
+			VoiceKey:    e.VoiceKey,
+			GeneratedAt: e.GeneratedAt.Format(time.RFC3339),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"entries": result})
+}
+
+func (s *Server) handleCancelTTS(w http.ResponseWriter, r *http.Request) {
+	if s.ttsSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "TTS not configured")
+		return
+	}
+
+	s.ttsSvc.mu.Lock()
+	cancel := s.ttsSvc.cancel
+	s.ttsSvc.mu.Unlock()
+
+	if cancel == nil {
+		writeError(w, http.StatusNotFound, "no generation in progress")
+		return
+	}
+
+	cancel()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
 // handleTTSProgress is an SSE endpoint that streams TTS generation progress.
@@ -230,16 +333,19 @@ func (s *Server) handleTTSProgress(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
+	enc := json.NewEncoder(w)
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			p := s.ttsSvc.getProgress()
-			fmt.Fprintf(w, "data: {\"progress\": %.4f}\n\n", p)
+			state := s.ttsSvc.getProgressState()
+			fmt.Fprintf(w, "data: ")
+			enc.Encode(state)
+			fmt.Fprintf(w, "\n")
 			flusher.Flush()
 
-			if p < 0 || p >= 1.0 {
+			if state.Progress < 0 || state.Progress >= 1.0 {
 				return
 			}
 		}

@@ -2,7 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -10,9 +12,11 @@ import (
 )
 
 type recapResponse struct {
-	CampaignID       int64      `json:"campaign_id"`
-	Recap            string     `json:"recap"`
-	RecapGeneratedAt *time.Time `json:"recap_generated_at"`
+	CampaignID              int64      `json:"campaign_id"`
+	Recap                   string     `json:"recap"`
+	RecapGeneratedAt        *time.Time `json:"recap_generated_at"`
+	PreviouslyOn            string     `json:"previously_on"`
+	PreviouslyOnGeneratedAt *time.Time `json:"previously_on_generated_at,omitempty"`
 }
 
 func (s *Server) handleGetRecap(w http.ResponseWriter, r *http.Request) {
@@ -32,9 +36,11 @@ func (s *Server) handleGetRecap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, recapResponse{
-		CampaignID:       campaign.ID,
-		Recap:            campaign.Recap,
-		RecapGeneratedAt: campaign.RecapGeneratedAt,
+		CampaignID:              campaign.ID,
+		Recap:                   campaign.Recap,
+		RecapGeneratedAt:        campaign.RecapGeneratedAt,
+		PreviouslyOn:            campaign.PreviouslyOn,
+		PreviouslyOnGeneratedAt: campaign.PreviouslyOnGeneratedAt,
 	})
 }
 
@@ -128,6 +134,12 @@ func (s *Server) handleRegenerateRecap(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to save recap")
 			return
 		}
+		// Invalidate cached TTS audio for recap since the text changed.
+		if paths, err := s.store.DeleteTTSCacheForCampaignSource(r.Context(), campaignID, "recap"); err == nil {
+			for _, p := range paths {
+				os.Remove(p)
+			}
+		}
 	}
 
 	now := time.Now()
@@ -148,11 +160,6 @@ func (s *Server) handleGetPreviouslyOn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.summariser == nil {
-		writeError(w, http.StatusServiceUnavailable, "summariser not available")
-		return
-	}
-
 	campaign, err := s.store.GetCampaign(r.Context(), campaignID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -160,6 +167,19 @@ func (s *Server) handleGetPreviouslyOn(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to get campaign")
+		return
+	}
+
+	force := r.URL.Query().Get("force") == "true"
+
+	// Return cached version if available and not forcing regeneration.
+	if campaign.PreviouslyOn != "" && !force {
+		writeJSON(w, http.StatusOK, previouslyOnResponse{Text: campaign.PreviouslyOn})
+		return
+	}
+
+	if s.summariser == nil {
+		writeError(w, http.StatusServiceUnavailable, "summariser not available")
 		return
 	}
 
@@ -179,6 +199,17 @@ func (s *Server) handleGetPreviouslyOn(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate previously on")
 		return
+	}
+
+	// Persist the generated text.
+	if err := s.store.UpdateCampaignPreviouslyOn(r.Context(), campaignID, result.Text); err != nil {
+		log.Printf("previously-on: failed to persist: %v", err)
+	}
+	// Invalidate cached TTS audio since the text changed.
+	if paths, err := s.store.DeleteTTSCacheForCampaignSource(r.Context(), campaignID, "previously-on"); err == nil {
+		for _, p := range paths {
+			os.Remove(p)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, previouslyOnResponse{Text: result.Text})

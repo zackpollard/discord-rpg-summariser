@@ -138,14 +138,25 @@ var commands = []*discordgo.ApplicationCommand{
 			},
 			{
 				Name:        "generate-recap-audio",
-				Description: "Generate TTS audio of the campaign recap (must be done before play-recap)",
+				Description: "Generate TTS audio of the campaign recap or previously-on narration",
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Options: []*discordgo.ApplicationCommandOption{
 					{
-						Name:        "voice",
-						Description: "Whose voice to use (must have a recording)",
-						Type:        discordgo.ApplicationCommandOptionUser,
+						Name:         "voice",
+						Description:  "Voice to use (character name or uploaded profile)",
+						Type:         discordgo.ApplicationCommandOptionString,
+						Required:     false,
+						Autocomplete: true,
+					},
+					{
+						Name:        "source",
+						Description: "Text source to narrate",
+						Type:        discordgo.ApplicationCommandOptionString,
 						Required:    false,
+						Choices: []*discordgo.ApplicationCommandOptionChoice{
+							{Name: "Campaign Recap", Value: "recap"},
+							{Name: "Previously On...", Value: "previously-on"},
+						},
 					},
 				},
 			},
@@ -155,10 +166,21 @@ var commands = []*discordgo.ApplicationCommand{
 				Type:        discordgo.ApplicationCommandOptionSubCommand,
 				Options: []*discordgo.ApplicationCommandOption{
 					{
-						Name:        "voice",
-						Description: "Whose voice was used to generate the audio",
-						Type:        discordgo.ApplicationCommandOptionUser,
+						Name:         "voice",
+						Description:  "Voice used to generate the audio",
+						Type:         discordgo.ApplicationCommandOptionString,
+						Required:     false,
+						Autocomplete: true,
+					},
+					{
+						Name:        "source",
+						Description: "Which audio to play",
+						Type:        discordgo.ApplicationCommandOptionString,
 						Required:    false,
+						Choices: []*discordgo.ApplicationCommandOptionChoice{
+							{Name: "Campaign Recap", Value: "recap"},
+							{Name: "Previously On...", Value: "previously-on"},
+						},
 					},
 				},
 			},

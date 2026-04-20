@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
-	import { fetchRecap, regenerateRecap, fetchPreviouslyOn, campaignPDFURL, fetchRecapVoices, recapTTSURL, uploadVoiceProfile, deleteVoiceProfile, type CampaignRecap, type RecapVoice, type PreviouslyOnResult } from '$lib/api';
+	import { fetchRecap, regenerateRecap, fetchPreviouslyOn, campaignPDFURL, fetchRecapVoices, recapTTSURL, fetchCachedTTS, uploadVoiceProfile, deleteVoiceProfile, type CampaignRecap, type RecapVoice, type PreviouslyOnResult, type TTSCacheEntry } from '$lib/api';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 
 	const campaignId = $derived(Number($page.params.id));
@@ -22,7 +22,8 @@
 		prevOnLoading = true;
 		prevOnError = null;
 		try {
-			previouslyOn = await fetchPreviouslyOn(campaignId);
+			// Force regeneration since the user clicked the button.
+			previouslyOn = await fetchPreviouslyOn(campaignId, true);
 		} catch (e) {
 			prevOnError = e instanceof Error ? e.message : 'Failed to generate';
 		} finally {
@@ -40,6 +41,9 @@
 	let ttsError = $state<string | null>(null);
 	let activeEventSource = $state<EventSource | null>(null);
 
+	// TTS cache state.
+	let ttsCache = $state<TTSCacheEntry[]>([]);
+
 	// Voice profile upload state.
 	let showUpload = $state(false);
 	let uploadName = $state('');
@@ -48,6 +52,24 @@
 	let uploading = $state(false);
 
 	const selectedVoice = $derived(selectedVoiceIdx >= 0 ? voices[selectedVoiceIdx] : null);
+
+	// Build voice key matching the server format for cache lookup.
+	const currentVoiceKey = $derived.by(() => {
+		const v = selectedVoice;
+		if (!v) return '';
+		if (v.is_custom && v.profile_id) return `profile:${v.profile_id}`;
+		return `user:${v.user_id}`;
+	});
+
+	const cachedEntry = $derived(
+		ttsCache.find(e => e.source === ttsSource && e.voice_key === currentVoiceKey) ?? null
+	);
+
+	// Stable URL for cached audio (server serves the file directly).
+	const cachedAudioURL = $derived.by(() => {
+		if (!cachedEntry || !selectedVoice) return '';
+		return recapTTSURL(campaignId, selectedVoice) + `&source=${ttsSource}`;
+	});
 
 	// Compute refAudioSrc reactively based on selectedVoiceIdx (not Date.now()).
 	let refAudioSrc = $state('');
@@ -64,6 +86,7 @@
 
 	function handleVoiceChange(e: Event) {
 		selectedVoiceIdx = parseInt((e.target as HTMLSelectElement).value);
+		revokeTtsBlob();
 		ttsAudioSrc = '';
 	}
 
@@ -71,6 +94,16 @@
 		if (ttsAudioSrc && ttsAudioSrc.startsWith('blob:')) {
 			URL.revokeObjectURL(ttsAudioSrc);
 		}
+	}
+
+	async function cancelTTS() {
+		try {
+			await fetch('/api/tts/cancel', { method: 'POST' });
+		} catch {}
+		activeEventSource?.close();
+		activeEventSource = null;
+		ttsGenerating = false;
+		ttsProgress = 0;
 	}
 
 	async function generateTTS() {
@@ -95,12 +128,14 @@
 		progressSource.onerror = () => progressSource.close();
 
 		try {
-			const url = recapTTSURL(campaignId, selectedVoice) + `&source=${ttsSource}&_t=${Date.now()}`;
+			const url = recapTTSURL(campaignId, selectedVoice) + `&source=${ttsSource}&regenerate=true&_t=${Date.now()}`;
 			const res = await fetch(url);
 			if (res.ok) {
 				const blob = await res.blob();
 				revokeTtsBlob();
 				ttsAudioSrc = URL.createObjectURL(blob);
+				// Refresh cache list so the entry shows up.
+				ttsCache = await fetchCachedTTS(campaignId);
 			} else {
 				ttsError = `TTS generation failed (${res.status})`;
 			}
@@ -178,9 +213,59 @@
 		}
 	}
 
-	onMount(() => {
-		loadRecap();
-		fetchRecapVoices(campaignId).then(v => { voices = v; }).catch(() => {});
+	function resumeIfGenerating() {
+		// Check if a TTS generation is already in progress (e.g. started
+		// before navigating away). If so, show the progress bar and subscribe.
+		const es = new EventSource('/api/tts/progress');
+		es.onmessage = (e) => {
+			try {
+				const data = JSON.parse(e.data);
+				if (data.progress >= 0 && data.progress < 1.0) {
+					// Generation is active — set source/voice and subscribe.
+					if (data.source) ttsSource = data.source;
+					if (data.voice_key && voices.length > 0) {
+						const idx = voices.findIndex(v => {
+							if (v.is_custom && v.profile_id) return `profile:${v.profile_id}` === data.voice_key;
+							return `user:${v.user_id}` === data.voice_key;
+						});
+						if (idx >= 0) selectedVoiceIdx = idx;
+					}
+					ttsGenerating = true;
+					ttsProgress = data.progress;
+					activeEventSource = es;
+					es.onmessage = (e2) => {
+						try {
+							const d = JSON.parse(e2.data);
+							if (d.progress >= 0) ttsProgress = d.progress;
+							if (d.progress >= 1.0 || d.progress < 0) {
+								es.close();
+								activeEventSource = null;
+								ttsGenerating = false;
+								ttsProgress = 0;
+								fetchCachedTTS(campaignId).then(c => { ttsCache = c; }).catch(() => {});
+							}
+						} catch {}
+					};
+				} else {
+					es.close();
+				}
+			} catch {
+				es.close();
+			}
+		};
+		es.onerror = () => es.close();
+	}
+
+	onMount(async () => {
+		await loadRecap();
+		// Pre-populate previously-on from cached recap response.
+		if (recap?.previously_on) {
+			previouslyOn = { text: recap.previously_on };
+		}
+		// Load voices first so resumeIfGenerating can match the voice_key.
+		try { voices = await fetchRecapVoices(campaignId); } catch {}
+		fetchCachedTTS(campaignId).then(c => { ttsCache = c; }).catch(() => {});
+		resumeIfGenerating();
 	});
 
 	onDestroy(() => {
@@ -324,16 +409,14 @@
 			<div class="tts-controls">
 				<label class="tts-label">
 					Source:
-					<select class="tts-select" bind:value={ttsSource}>
+					<select class="tts-select" bind:value={ttsSource} disabled={ttsGenerating}>
 						<option value="recap">Campaign Recap</option>
-						{#if previouslyOn}
-							<option value="previously-on">Previously On...</option>
-						{/if}
+						<option value="previously-on">Previously On...</option>
 					</select>
 				</label>
 				<label class="tts-label">
 					Voice:
-					<select class="tts-select" onchange={handleVoiceChange} value={selectedVoiceIdx}>
+					<select class="tts-select" onchange={handleVoiceChange} value={selectedVoiceIdx} disabled={ttsGenerating}>
 						<option value={-1}>-- Select a voice --</option>
 						{#each voices as voice, idx}
 							<option value={idx}>{voice.display_name}{voice.is_custom ? ' (custom)' : ''}</option>
@@ -346,7 +429,7 @@
 							<span class="spinner"></span>
 							Generating...
 						{:else}
-							Generate Audio
+							{cachedEntry ? 'Regenerate Audio' : 'Generate Audio'}
 						{/if}
 					</button>
 					{#if selectedVoice.is_custom && selectedVoice.profile_id}
@@ -375,6 +458,7 @@
 					<div class="tts-progress-header">
 						<span>Generating audio...</span>
 						<span class="tts-progress-pct">{Math.round(ttsProgress * 100)}%</span>
+						<button class="cancel-btn" onclick={cancelTTS}>Cancel</button>
 					</div>
 					<div class="tts-progress-track">
 						<div class="tts-progress-fill" style="width: {ttsProgress * 100}%"></div>
@@ -386,8 +470,17 @@
 				<AudioPlayer src={refAudioSrc} />
 			{/if}
 			{#if ttsAudioSrc}
-				<p class="tts-label" style="margin-top: 0.5rem;">Generated:</p>
+				<div class="tts-audio-row">
+					<p class="tts-label">Generated:</p>
+					<a href={ttsAudioSrc} download="recap-audio.wav" class="download-btn">Download</a>
+				</div>
 				<AudioPlayer src={ttsAudioSrc} />
+			{:else if cachedAudioURL && cachedEntry}
+				<div class="tts-audio-row">
+					<p class="tts-label">Cached audio <span class="muted">(generated {formatDate(cachedEntry.generated_at)})</span>:</p>
+					<a href={cachedAudioURL} download="{ttsSource}-audio.wav" class="download-btn">Download</a>
+				</div>
+				<AudioPlayer src={cachedAudioURL} />
 			{/if}
 		</section>
 	{/if}
@@ -573,10 +666,49 @@
 	}
 	.tts-progress-header {
 		display: flex;
-		justify-content: space-between;
+		align-items: center;
+		gap: 0.5rem;
 		font-size: 0.8rem;
 		color: var(--text-muted);
 		margin-bottom: 0.35rem;
+	}
+	.tts-progress-header span:first-child {
+		flex: 1;
+	}
+	.cancel-btn {
+		background: none;
+		border: 1px solid var(--border);
+		color: #f87171;
+		padding: 0.15rem 0.5rem;
+		border-radius: var(--radius);
+		cursor: pointer;
+		font-size: 0.75rem;
+	}
+	.cancel-btn:hover {
+		background: rgba(248, 113, 113, 0.1);
+		border-color: #f87171;
+	}
+	.tts-audio-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.5rem;
+	}
+	.tts-audio-row .tts-label {
+		margin: 0;
+	}
+	.download-btn {
+		font-size: 0.75rem;
+		padding: 0.15rem 0.5rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		color: var(--text-secondary);
+		text-decoration: none;
+	}
+	.download-btn:hover {
+		border-color: var(--accent-gold-dim);
+		color: var(--accent-gold);
+		text-decoration: none;
 	}
 	.tts-progress-pct {
 		color: var(--accent-gold);
