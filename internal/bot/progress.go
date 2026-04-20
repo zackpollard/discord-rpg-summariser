@@ -124,6 +124,16 @@ func (p *PipelineProgress) SetDetail(detail string) {
 	p.broadcastProgress()
 }
 
+// SetStageLabel updates the stage name and detail without touching the
+// weight-based progress calculation. Useful for callers that manage their
+// own progress math (e.g. RerunStages).
+func (p *PipelineProgress) SetStageLabel(name, detail string) {
+	p.mu.Lock()
+	p.stage = name
+	p.detail = detail
+	p.mu.Unlock()
+}
+
 // SetSubProgress sets progress within the current stage (0.0-1.0).
 func (p *PipelineProgress) SetSubProgress(frac float64) {
 	p.mu.Lock()

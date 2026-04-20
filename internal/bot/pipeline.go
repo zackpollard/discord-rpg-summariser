@@ -109,14 +109,20 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	}
 
 	// Wire up intra-file progress if the transcriber supports it.
+	// Capture the progress pointer at callback setup so a concurrent
+	// pipeline that replaces b.progress can't cause us to nil-deref.
 	type progressSetter interface {
 		SetProgressCallback(func(float64))
 	}
+	progress := b.progress
 	setIntraProgress := func(doneUsers int) {
 		if ps, ok := transcriber.(progressSetter); ok {
 			ps.SetProgressCallback(func(filePct float64) {
+				if progress == nil {
+					return
+				}
 				p := (float64(doneUsers) + filePct) / float64(totalUsers)
-				b.progress.SetSubProgress(p)
+				progress.SetSubProgress(p)
 			})
 		}
 	}

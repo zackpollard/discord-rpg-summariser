@@ -115,7 +115,7 @@ func (b *Bot) RerunStages(ctx context.Context, sessionID int64, stages []string)
 
 	// Run requested stages.
 	if stageSet["annotate"] {
-		b.progress.SetStage("summarising", "Annotating transcript")
+		b.progress.SetStageLabel("summarising", "Annotating transcript")
 		newAnnotations := b.annotateTranscript(ctx, session, sessionID, merged, charNames, dmName)
 		if len(newAnnotations) > 0 {
 			annotationMap = newAnnotations
@@ -138,7 +138,7 @@ func (b *Bot) RerunStages(ctx context.Context, sessionID int64, stages []string)
 	}
 
 	if stageSet["summarise"] {
-		b.progress.SetStage("summarising", "Generating summary")
+		b.progress.SetStageLabel("summarising", "Generating summary")
 		result, err := b.summariser.Summarise(ctx, transcript, "", dmName)
 		if err != nil {
 			log.Printf("rerun: summarise failed: %v", err)
@@ -150,39 +150,39 @@ func (b *Bot) RerunStages(ctx context.Context, sessionID int64, stages []string)
 	}
 
 	if stageSet["title_quotes"] {
-		b.progress.SetStage("extracting title", "Generating title and quotes")
+		b.progress.SetStageLabel("extracting", "Generating title and quotes")
 		b.extractTitleAndQuotes(ctx, session, sessionID, transcript, summary, dmName)
 		updateProgress("title_quotes")
 	}
 
 	if stageSet["entities"] {
-		b.progress.SetStage("extracting entities", "Extracting entities")
+		b.progress.SetStageLabel("extracting", "Extracting entities")
 		b.store.DeleteEntityReferencesForSession(ctx, sessionID)
 		b.extractEntities(ctx, session, sessionID, transcript, summary, dmName)
 		updateProgress("entities")
 	}
 
 	if stageSet["quests"] {
-		b.progress.SetStage("extracting quests", "Extracting quests")
+		b.progress.SetStageLabel("extracting", "Extracting quests")
 		b.extractQuests(ctx, session, sessionID, transcript, summary, dmName)
 		updateProgress("quests")
 	}
 
 	if stageSet["combat"] {
-		b.progress.SetStage("extracting combat", "Extracting combat encounters")
+		b.progress.SetStageLabel("extracting", "Extracting combat encounters")
 		b.store.DeleteCombatForSession(ctx, sessionID)
 		b.extractCombat(ctx, session, sessionID, transcript, summary, dmName)
 		updateProgress("combat")
 	}
 
 	if stageSet["creatures"] {
-		b.progress.SetStage("extracting creatures", "Identifying creatures for bestiary")
+		b.progress.SetStageLabel("extracting", "Identifying creatures for bestiary")
 		b.extractCreatures(ctx, session, sessionID, transcript, summary, dmName)
 		updateProgress("creatures")
 	}
 
 	if stageSet["embeddings"] {
-		b.progress.SetStage("generating embeddings", "Generating embeddings")
+		b.progress.SetStageLabel("generating embeddings", "Generating embeddings")
 		b.store.DeleteEmbeddingsForSession(ctx, sessionID)
 		b.generateEmbeddings(ctx, session, sessionID, merged, summary, dmName)
 		updateProgress("embeddings")

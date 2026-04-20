@@ -126,16 +126,22 @@
 				if (evt.type === 'progress') {
 					// Detect LLM streaming text (contains [...] prefix from OnStream).
 					const detail = evt.detail || '';
-					if (detail.startsWith('[') || detail.startsWith('...')) {
+					const isLLMStream = detail.startsWith('[') || detail.startsWith('...');
+					if (isLLMStream) {
 						llmOutput = detail;
+						// Don't overwrite the progress bar with stale percentage
+						// from streaming log events — only update the detail text.
+						if (progressEvent) {
+							progressEvent = { ...progressEvent, detail };
+						}
 					} else {
 						// Regular stage update — reset LLM output when stage changes.
 						if (evt.stage !== lastStage) {
 							llmOutput = '';
 							lastStage = evt.stage;
 						}
+						progressEvent = evt;
 					}
-					progressEvent = evt;
 				} else if (evt.type === 'transcript' && evt.speaker && evt.text) {
 					liveSegments = [...liveSegments, {
 						speaker: evt.speaker,
