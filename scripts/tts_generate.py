@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 
@@ -49,15 +50,44 @@ def main():
 
 
 
+def patch_solver_progress(zipvoice_dir, num_steps):
+    """Inject per-step logging into the ZipVoice ODE solver."""
+    solver_path = os.path.join(zipvoice_dir, "zipvoice", "models", "modules", "solver.py")
+    if not os.path.exists(solver_path):
+        return
+
+    with open(solver_path, "r") as f:
+        content = f.read()
+
+    # Only patch once — check if already patched.
+    if "STEP_PROGRESS" in content:
+        return
+
+    # Add a print after each step in the solver loop.
+    patched = content.replace(
+        "x = x + v * (timesteps[step + 1] - timesteps[step])",
+        'x = x + v * (timesteps[step + 1] - timesteps[step])\n'
+        '            import sys; print(f"STEP_PROGRESS:{step + 1}/{num_step}", file=sys.stderr, flush=True)',
+    )
+
+    if patched != content:
+        with open(solver_path, "w") as f:
+            f.write(patched)
+
+
 def run_zipvoice(venv_python, project_dir, args):
     """Run ZipVoice via its Python module."""
     zipvoice_dir = os.path.join(project_dir, ".venv", "ZipVoice")
 
+    # Patch the ODE solver to emit per-step progress.
+    patch_solver_progress(zipvoice_dir, args.steps)
+
     env = os.environ.copy()
     env["PYTHONPATH"] = zipvoice_dir
+    env["PYTHONUNBUFFERED"] = "1"
 
     cmd = [
-        venv_python, "-m", "zipvoice.bin.infer_zipvoice",
+        venv_python, "-u", "-m", "zipvoice.bin.infer_zipvoice",
         "--model-name", "zipvoice",
         "--prompt-wav", args.ref_wav,
         "--prompt-text", args.ref_text,
@@ -81,6 +111,17 @@ def run_zipvoice(venv_python, project_dir, args):
         line = line.decode("utf-8", errors="replace").strip()
         if line:
             print(line, file=sys.stdout, flush=True)
+
+            # Parse step progress from patched ODE solver.
+            # ZipVoice processes the entire text in one generate_sentence call,
+            # so step/total directly maps to overall progress.
+            step_match = re.match(r'STEP_PROGRESS:(\d+)/(\d+)', line)
+            if step_match:
+                step_cur = int(step_match.group(1))
+                step_total = int(step_match.group(2))
+                progress = step_cur / step_total
+                scaled = 0.05 + progress * 0.90
+                print(f"PROGRESS:{min(scaled, 0.95):.2f}", file=sys.stderr, flush=True)
 
     proc.wait()
     if proc.returncode != 0:
