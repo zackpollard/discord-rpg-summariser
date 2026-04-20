@@ -218,6 +218,14 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	incTranscriber.Start(ctx)
 
 	rec.Start(vc, func(userID string) string {
+		// Use character name or "DM" label if available.
+		if campaign.DMUserID != nil && *campaign.DMUserID == userID {
+			return "DM"
+		}
+		if cn, _ := b.store.GetCharacterName(ctx, userID, campaign.ID); cn != "" {
+			return cn
+		}
+		// Fall back to Discord display name.
 		member, err := s.GuildMember(guildID, userID)
 		if err != nil {
 			return userID

@@ -83,6 +83,36 @@
 	let lastStage = $state<string>('');
 	let liveSegments = $state<{ speaker: string; text: string; start_time: number; end_time: number }[]>([]);
 	let unsubProgress: (() => void) | null = null;
+	let liveTranscriptSource: EventSource | null = null;
+
+	function subscribeToLiveTranscript() {
+		liveTranscriptSource?.close();
+		liveSegments = [];
+		const source = new EventSource('/api/live-transcript');
+		liveTranscriptSource = source;
+		source.onmessage = (e) => {
+			try {
+				const evt = JSON.parse(e.data);
+				if (evt.text) {
+					liveSegments = [...liveSegments, {
+						speaker: evt.display_name || evt.user_id,
+						text: evt.text,
+						start_time: evt.start_time ?? 0,
+						end_time: evt.end_time ?? 0
+					}];
+					// Auto-scroll to bottom of live transcript.
+					tick().then(() => {
+						const el = document.querySelector('.recording-panel .live-transcript-scroll');
+						if (el) el.scrollTop = el.scrollHeight;
+					});
+				}
+			} catch { }
+		};
+		source.onerror = () => {
+			source.close();
+			liveTranscriptSource = null;
+		};
+	}
 
 	function subscribeToProgress(sessionId: number) {
 		unsubProgress?.();
@@ -325,8 +355,11 @@
 				quotes = quot;
 				loading = false;
 
-				// Subscribe to progress if session is still being processed.
-				if (sess.status !== 'complete' && sess.status !== 'failed') {
+				// Subscribe to live transcript during recording, or pipeline
+				// progress during post-recording processing.
+				if (sess.status === 'recording') {
+					subscribeToLiveTranscript();
+				} else if (sess.status !== 'complete' && sess.status !== 'failed') {
 					subscribeToProgress(sess.id);
 				}
 
@@ -349,6 +382,7 @@
 
 	onDestroy(() => {
 		unsubProgress?.();
+		liveTranscriptSource?.close();
 		if (userScrollTimer) clearTimeout(userScrollTimer);
 	});
 </script>
@@ -425,6 +459,28 @@
 							{/each}
 						</div>
 					</div>
+				{/if}
+			</div>
+		{:else if session.status === 'recording'}
+			<div class="recording-panel">
+				<div class="recording-indicator">
+					<span class="recording-dot"></span>
+					Recording in progress
+				</div>
+				{#if liveSegments.length > 0}
+					<div class="live-transcript-preview">
+						<h3>Live Transcript ({liveSegments.length} segments)</h3>
+						<div class="live-transcript-scroll">
+							{#each liveSegments as seg}
+								<div class="live-seg">
+									<span class="live-seg-speaker">{seg.speaker}</span>
+									<span class="live-seg-text">{seg.text}</span>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{:else}
+					<p class="muted">Waiting for speech...</p>
 				{/if}
 			</div>
 		{:else if session.status !== 'complete' && session.status !== 'failed'}
@@ -850,6 +906,36 @@
 		color: var(--text-primary);
 	}
 
+	.recording-panel {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 1rem;
+		margin-bottom: 1rem;
+	}
+	.recording-indicator {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.9rem;
+		font-weight: 600;
+		color: #f87171;
+		margin-bottom: 0.75rem;
+	}
+	.recording-dot {
+		width: 10px;
+		height: 10px;
+		border-radius: 50%;
+		background: #ef4444;
+		animation: pulse-dot 1.5s ease-in-out infinite;
+	}
+	.recording-panel .live-transcript-scroll {
+		max-height: 500px;
+	}
+	@keyframes pulse-dot {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.3; }
+	}
 	.processing-notice {
 		background: rgba(161, 98, 7, 0.15);
 		border: 1px solid #92400e;

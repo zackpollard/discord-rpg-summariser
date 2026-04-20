@@ -93,6 +93,21 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 		sharedMicMap[m.DiscordUserID] = m
 	}
 
+	// Pre-resolve character names and DM label for live transcript display.
+	liveNames := make(map[string]string, len(userFiles))
+	liveCampaign, _ := b.store.GetCampaign(ctx, session.CampaignID)
+	for userID := range userFiles {
+		if liveCampaign != nil && liveCampaign.DMUserID != nil && *liveCampaign.DMUserID == userID {
+			liveNames[userID] = "DM"
+			continue
+		}
+		if cn, _ := b.store.GetCharacterName(ctx, userID, session.CampaignID); cn != "" {
+			liveNames[userID] = cn
+			continue
+		}
+		liveNames[userID] = b.ResolveUsername(userID)
+	}
+
 	// Wire up intra-file progress if the transcriber supports it.
 	type progressSetter interface {
 		SetProgressCallback(func(float64))
@@ -144,7 +159,10 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 
 		// Stream completed segments to subscribers.
 		for _, seg := range userSegments[userID] {
-			name := b.ResolveUsername(userID)
+			name := liveNames[userID]
+			if name == "" {
+				name = b.ResolveUsername(userID)
+			}
 			b.progress.BroadcastTranscript(name, seg.Text, seg.StartTime, seg.EndTime)
 		}
 
