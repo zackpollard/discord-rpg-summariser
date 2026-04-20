@@ -50,6 +50,8 @@
 	.campaign-layout {
 		display: flex;
 		flex-direction: column;
+		min-width: 0;
+		overflow: hidden;
 	}
 	.campaign-header {
 		margin-bottom: 1rem;
@@ -80,6 +82,7 @@
 		flex-wrap: nowrap;
 		-webkit-overflow-scrolling: touch;
 		scrollbar-width: none; /* Firefox */
+		max-width: 100%;
 	}
 	.campaign-nav::-webkit-scrollbar {
 		display: none; /* Chrome/Safari */

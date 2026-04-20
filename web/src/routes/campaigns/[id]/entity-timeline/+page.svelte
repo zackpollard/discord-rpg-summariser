@@ -212,7 +212,7 @@
 
 				<!-- Swimlane rows -->
 				{#each Object.entries(grouped) as [type, typeEntries], gi}
-					{@const offset = filtered.indexOf(typeEntries[0])}
+					{@const offset = Object.values(grouped).slice(0, gi).reduce((sum, g) => sum + g.length, 0)}
 					<!-- Type group header background -->
 					{#each typeEntries as entry, i}
 						{@const rowIndex = offset + i}
