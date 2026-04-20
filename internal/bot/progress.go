@@ -11,12 +11,10 @@ const (
 	weightTranscribing = 60
 	weightMixing       = 5
 	weightSummarising  = 15
-	weightEntities     = 7
-	weightQuests       = 5
-	weightCombat       = 5
-	weightEmbeddings   = 3
+	weightExtracting   = 15
+	weightEmbeddings   = 5
 	totalWeight        = weightTranscribing + weightMixing + weightSummarising +
-		weightEntities + weightQuests + weightCombat + weightEmbeddings
+		weightExtracting + weightEmbeddings
 )
 
 // stage defines a pipeline stage with its cumulative weight offset.
@@ -29,9 +27,7 @@ var stages = []stage{
 	{"transcribing", weightTranscribing},
 	{"mixing", weightMixing},
 	{"summarising", weightSummarising},
-	{"extracting entities", weightEntities},
-	{"extracting quests", weightQuests},
-	{"extracting combat", weightCombat},
+	{"extracting", weightExtracting},
 	{"generating embeddings", weightEmbeddings},
 }
 

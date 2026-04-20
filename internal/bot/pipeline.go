@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -286,27 +287,37 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 
 	b.sendNotification(sessionID, sumResult.Summary)
 
-	// Extract title and memorable quotes (non-fatal on error).
-	b.progress.SetStage("extracting title", "Generating session title and quotes")
-	b.extractTitleAndQuotes(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	// Run extraction stages in parallel — they are all independent and non-fatal.
+	b.progress.SetStage("extracting", "Extracting title, entities, quests, and combat")
 
-	// Extract entities for the knowledge base (non-fatal on error).
-	b.progress.SetStage("extracting entities", "Extracting entities")
-	b.extractEntities(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	var extractWg sync.WaitGroup
+	extractWg.Add(4)
 
-	// Extract quests (non-fatal on error).
-	b.progress.SetStage("extracting quests", "Extracting quests")
-	b.extractQuests(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	go func() {
+		defer extractWg.Done()
+		b.extractTitleAndQuotes(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	}()
 
-	// Extract combat encounters (non-fatal on error).
-	b.progress.SetStage("extracting combat", "Extracting combat encounters")
-	b.extractCombat(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	go func() {
+		defer extractWg.Done()
+		b.extractEntities(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	}()
 
-	// Extract creatures from combat encounters (non-fatal on error).
-	b.progress.SetStage("extracting creatures", "Identifying creatures for bestiary")
-	b.extractCreatures(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	go func() {
+		defer extractWg.Done()
+		b.extractQuests(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	}()
 
-	// Generate vector embeddings for RAG (non-fatal on error).
+	go func() {
+		defer extractWg.Done()
+		// Combat then creatures (creatures depend on combat encounters in DB).
+		b.extractCombat(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+		b.extractCreatures(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
+	}()
+
+	extractWg.Wait()
+
+	// Generate vector embeddings after extractions complete (embeds entities and quests).
 	b.progress.SetStage("generating embeddings", "Generating embeddings")
 	b.generateEmbeddings(ctx, session, sessionID, merged, sumResult.Summary, dmName)
 

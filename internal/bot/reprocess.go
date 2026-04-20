@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/storage"
@@ -144,31 +145,44 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 		return err
 	}
 
-	// Extract title and memorable quotes (non-fatal on error).
-	b.progress.SetStage("extracting title", "Generating session title and quotes")
-	b.extractTitleAndQuotes(ctx, session, sessionID, transcript, result.Summary, dmName)
-
-	// Clean up old entity references before re-extracting.
+	// Clean up old data before re-extracting.
 	if err := b.store.DeleteEntityReferencesForSession(ctx, sessionID); err != nil {
 		log.Printf("reprocess: DeleteEntityReferencesForSession: %v", err)
 	}
-
-	// Clean up old combat encounters before re-extracting.
 	if err := b.store.DeleteCombatForSession(ctx, sessionID); err != nil {
 		log.Printf("reprocess: DeleteCombatForSession: %v", err)
 	}
 
-	// Extract entities, quests, and combat (non-fatal).
-	b.progress.SetStage("extracting entities", "Extracting entities")
-	b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
+	// Run extraction stages in parallel.
+	b.progress.SetStage("extracting", "Extracting title, entities, quests, and combat")
 
-	b.progress.SetStage("extracting quests", "Extracting quests")
-	b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
+	var extractWg sync.WaitGroup
+	extractWg.Add(4)
 
-	b.progress.SetStage("extracting combat", "Extracting combat encounters")
-	b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
+	go func() {
+		defer extractWg.Done()
+		b.extractTitleAndQuotes(ctx, session, sessionID, transcript, result.Summary, dmName)
+	}()
 
-	// Regenerate embeddings: delete old ones first, then generate fresh.
+	go func() {
+		defer extractWg.Done()
+		b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
+	}()
+
+	go func() {
+		defer extractWg.Done()
+		b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
+	}()
+
+	go func() {
+		defer extractWg.Done()
+		b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
+		b.extractCreatures(ctx, session, sessionID, transcript, result.Summary, dmName)
+	}()
+
+	extractWg.Wait()
+
+	// Regenerate embeddings after extractions complete.
 	b.progress.SetStage("generating embeddings", "Generating embeddings")
 	if err := b.store.DeleteEmbeddingsForSession(ctx, sessionID); err != nil {
 		log.Printf("reprocess: DeleteEmbeddingsForSession: %v", err)
