@@ -21,8 +21,16 @@ import (
 func (b *Bot) handleInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type == discordgo.InteractionApplicationCommandAutocomplete {
 		data := i.ApplicationCommandData()
-		if data.Name == "soundboard" {
+		switch data.Name {
+		case "soundboard":
 			b.handleSoundboardAutocomplete(s, i)
+		case "campaign":
+			if len(data.Options) > 0 {
+				sub := data.Options[0].Name
+				if sub == "generate-recap-audio" || sub == "play-recap" {
+					b.handleRecapVoiceAutocomplete(s, i)
+				}
+			}
 		}
 		return
 	}
