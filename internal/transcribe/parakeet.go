@@ -347,11 +347,16 @@ func generateBpeVocab(modelBase string) error {
 		return fmt.Errorf("generate_bpe_vocab.py not found")
 	}
 
-	// Try the TTS venv first, then fall back to system python3.
-	venvPython := filepath.Join(modelDir, "..", ".venv", "bin", "python")
+	// Try known venv locations, then fall back to system python3.
 	pythonCmd := "python3"
-	if _, err := os.Stat(venvPython); err == nil {
-		pythonCmd = venvPython
+	for _, venv := range []string{
+		filepath.Join(modelDir, "..", ".venv", "bin", "python"),
+		"/app/.venv/bin/python",
+	} {
+		if _, err := os.Stat(venv); err == nil {
+			pythonCmd = venv
+			break
+		}
 	}
 
 	// Ensure sentencepiece is available.
