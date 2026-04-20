@@ -103,6 +103,13 @@ func (p *ParakeetTranscriber) SetVocabulary(words []string) {
 		return
 	}
 
+	// Escape hatch: disable hot words via env var. modified_beam_search with
+	// hot words can hang on some audio on CPU — falls back to greedy search.
+	if os.Getenv("PARAKEET_DISABLE_HOTWORDS") == "1" {
+		log.Printf("parakeet: hot words disabled via PARAKEET_DISABLE_HOTWORDS")
+		return
+	}
+
 	bpeVocabPath := filepath.Join(p.modelBase, "bpe.vocab")
 	if _, err := os.Stat(bpeVocabPath); os.IsNotExist(err) {
 		log.Printf("parakeet: bpe.vocab not found, attempting to generate...")
