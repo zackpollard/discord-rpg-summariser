@@ -33,11 +33,10 @@ services:
       - ./scripts:/app/scripts
       - ./config.yaml:/app/config.yaml:ro
       - ./.air.docker.toml:/app/.air.docker.toml:ro
-      - botdata:/data
-      - ~/.claude:/root/.claude
+      - ./data:/app/data
+      - ~/.claude/.credentials.json:/root/.claude/.credentials.json:ro
     environment:
       DATABASE_URL: postgres://rpg:rpg@postgres:5432/rpg_summariser?sslmode=disable
 
 volumes:
   pgdata:
-  botdata:
