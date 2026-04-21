@@ -188,13 +188,30 @@ func (p *ParakeetTranscriber) TranscribeFile(ctx context.Context, wavPath string
 
 	var allSegments []Segment
 
+	log.Printf("parakeet: transcribing %s (duration=%.1fs)", filepath.Base(wavPath), totalDuration)
+	fileStart := time.Now()
+	chunkCount := 0
+
 	err := audio.StreamResample(wavPath, func(samples []float32, offsetSeconds float64) error {
+		chunkCount++
+		chunkDur := float64(len(samples)) / 16000.0
+		chunkStart := time.Now()
+		log.Printf("parakeet: chunk %d start offset=%.1fs dur=%.1fs (%.1f%% of file)",
+			chunkCount, offsetSeconds, chunkDur, 100*offsetSeconds/max(totalDuration, 1))
+
 		segs, err := p.TranscribeChunk(ctx, samples,
 			time.Duration(offsetSeconds*float64(time.Second)), "")
 		if err != nil {
+			log.Printf("parakeet: chunk %d ERROR after %s: %v", chunkCount, time.Since(chunkStart).Round(time.Millisecond), err)
 			return err
 		}
 		allSegments = append(allSegments, segs...)
+
+		log.Printf("parakeet: chunk %d done in %s (%d segments, %.2fx realtime)",
+			chunkCount,
+			time.Since(chunkStart).Round(time.Millisecond),
+			len(segs),
+			chunkDur/time.Since(chunkStart).Seconds())
 
 		// Report intra-file progress.
 		if p.onProgress != nil && totalDuration > 0 {
@@ -205,6 +222,12 @@ func (p *ParakeetTranscriber) TranscribeFile(ctx context.Context, wavPath string
 		runtime.GC()
 		return nil
 	})
+
+	log.Printf("parakeet: %s done in %s (%d chunks, %d segments)",
+		filepath.Base(wavPath),
+		time.Since(fileStart).Round(time.Millisecond),
+		chunkCount,
+		len(allSegments))
 	if err != nil {
 		return nil, fmt.Errorf("stream resample: %w", err)
 	}

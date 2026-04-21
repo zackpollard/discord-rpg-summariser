@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/storage"
@@ -327,7 +328,11 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 
 	userSegments := make(map[string][]transcribe.Segment, len(userFiles))
 	doneUsers := 0
+	overallStart := time.Now()
+	log.Printf("reprocess: starting transcription of %d users for session %d", totalUsers, session.ID)
 	for userID, wavPath := range userFiles {
+		userStart := time.Now()
+		log.Printf("reprocess: transcribing user %s (%d of %d)", userID, doneUsers+1, totalUsers)
 		setIntraProgress(doneUsers)
 		if mic, ok := sharedMicMap[userID]; ok {
 			b.transcribeSharedMic(ctx, transcriber, wavPath, mic, userSegments)
@@ -342,9 +347,11 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 			userSegments[userID] = segs
 		}
 		doneUsers++
+		log.Printf("reprocess: user %s done in %s (%d of %d)", userID, time.Since(userStart).Round(time.Second), doneUsers, totalUsers)
 		b.progress.SetDetail(fmt.Sprintf("Re-transcribing audio (%d of %d users)", doneUsers, totalUsers))
 		b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 	}
+	log.Printf("reprocess: all %d users transcribed in %s", totalUsers, time.Since(overallStart).Round(time.Second))
 
 	if len(userSegments) == 0 {
 		return fmt.Errorf("all transcriptions failed")

@@ -129,7 +129,11 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 
 	userSegments := make(map[string][]transcribe.Segment, len(userFiles))
 	doneUsers := 0
+	pipelineTranscribeStart := time.Now()
+	log.Printf("pipeline: starting transcription of %d users for session %d", totalUsers, session.ID)
 	for userID, wavPath := range userFiles {
+		userStart := time.Now()
+		log.Printf("pipeline: transcribing user %s (%d of %d)", userID, doneUsers+1, totalUsers)
 		setIntraProgress(doneUsers)
 
 		// Check if we have pre-transcribed segments from incremental transcription.
@@ -160,6 +164,8 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 			userSegments[userID] = segments
 		}
 		doneUsers++
+		log.Printf("pipeline: user %s done in %s (%d of %d, %d segments)",
+			userID, time.Since(userStart).Round(time.Second), doneUsers, totalUsers, len(userSegments[userID]))
 		b.progress.SetDetail(fmt.Sprintf("Transcribing audio (%d of %d users)", doneUsers, totalUsers))
 		b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 
@@ -175,6 +181,7 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 		// Reclaim ONNX inference memory between users.
 		runtime.GC()
 	}
+	log.Printf("pipeline: all %d users transcribed in %s", totalUsers, time.Since(pipelineTranscribeStart).Round(time.Second))
 
 	if len(userSegments) == 0 {
 		log.Printf("pipeline: all transcriptions failed for session %d", sessionID)
