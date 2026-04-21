@@ -176,9 +176,16 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	pcm = pcm[:n]
 
 	if !us.hasFirstTS {
-		us.firstPacketAt = time.Now()
-		log.Printf("FIRST_PACKET user=%s ssrc=%d rtp_ts=%d wall=%s",
-			us.userID, packet.SSRC, packet.Timestamp, us.firstPacketAt.Format(time.RFC3339Nano))
+		// Only stamp firstPacketAt on the very first packet of this stream.
+		// hasFirstTS gets reset on reconnect (via InsertSilenceDuration) to
+		// avoid stale RTP-delta calculations on the new SSRC, but the
+		// session-join offset is defined by the ORIGINAL first packet, not
+		// subsequent reconnects.
+		if us.firstPacketAt.IsZero() {
+			us.firstPacketAt = time.Now()
+			log.Printf("FIRST_PACKET user=%s ssrc=%d rtp_ts=%d wall=%s",
+				us.userID, packet.SSRC, packet.Timestamp, us.firstPacketAt.Format(time.RFC3339Nano))
+		}
 	}
 	us.insertSilenceForGap(packet.Timestamp)
 	us.lastTS = packet.Timestamp

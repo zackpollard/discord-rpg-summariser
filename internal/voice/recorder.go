@@ -199,7 +199,7 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 	defer r.mu.Unlock()
 
 	if us, ok := r.streams[packet.SSRC]; ok {
-		hadFirstTS := us.hasFirstTS
+		hadFirstPacket := !us.FirstPacketAt().IsZero()
 		if err := us.HandlePacket(packet); err != nil {
 			uid := r.ssrcToUser[packet.SSRC]
 			log.Printf("Error handling packet for %s: %v", uid, err)
@@ -210,8 +210,8 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 			a.LastPacketAt = time.Now()
 		}
 		// Re-persist offsets with the tighter first-packet wall-clock time
-		// once we have decoded audio from this user.
-		if !hadFirstTS && us.hasFirstTS {
+		// the very first time we decode audio from this user (not on reconnect).
+		if !hadFirstPacket && !us.FirstPacketAt().IsZero() {
 			r.writeOffsetsLocked()
 		}
 		return
