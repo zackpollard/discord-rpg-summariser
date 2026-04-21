@@ -128,7 +128,28 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	pcm := make([]int16, maxPCMFrameSize)
 	n, err := us.decoder.Decode(opusData, pcm)
 	if err != nil {
-		return fmt.Errorf("decode opus (%d bytes): %w", len(opusData), err)
+		// Opus decode can fail even when DecryptFrame "succeeded" — during
+		// DAVE epoch transitions the old receiver key silently produces
+		// wrong plaintext against new ciphertext, so DecryptFrame returns
+		// no error but the result is garbage. Rederive and retry once.
+		if isDave && us.rederiveDAVE() {
+			if redecrypted, rerr := discordgo.DecryptFrame(us.daveState, daveFrame); rerr == nil {
+				if rn, rerr := us.decoder.Decode(redecrypted, pcm); rerr == nil {
+					n = rn
+					err = nil
+				}
+			}
+		}
+		if err != nil {
+			us.daveFailCount++
+			if us.daveFailCount <= 3 || us.daveFailCount%100 == 0 {
+				log.Printf("opus decode failed for %s (seq=%d, %d bytes, failures=%d): %v",
+					us.userID, packet.Sequence, len(opusData), us.daveFailCount, err)
+			}
+			us.decodePLC(packet.Timestamp)
+			return nil
+		}
+		us.daveFailCount = 0
 	}
 	pcm = pcm[:n]
 
