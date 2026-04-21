@@ -20,17 +20,24 @@ const (
 // UserStream manages a single user's audio recording: DAVE decryption,
 // opus decoding, and WAV writing.
 type UserStream struct {
-	userID        string
-	wav           *WAVWriter
-	decoder       *opus.Decoder
-	lastTS        uint32
-	hasFirstTS    bool
-	daveState     *discordgo.ReceiverState
-	daveActive    bool                       // true after the first successful DAVE decrypt
-	daveFailCount int                        // consecutive decryption failures
-	nonDaveCount  int                        // non-DAVE non-silence frames while DAVE was active
-	daveVC        *discordgo.VoiceConnection // for re-deriving keys
-	liveBuf       *LiveBuffer
+	userID         string
+	wav            *WAVWriter
+	decoder        *opus.Decoder
+	lastTS         uint32
+	hasFirstTS     bool
+	firstPacketAt  time.Time // wall clock of first decoded audio packet
+	daveState      *discordgo.ReceiverState
+	daveActive     bool                       // true after the first successful DAVE decrypt
+	daveFailCount  int                        // consecutive decryption failures
+	nonDaveCount   int                        // non-DAVE non-silence frames while DAVE was active
+	daveVC         *discordgo.VoiceConnection // for re-deriving keys
+	liveBuf        *LiveBuffer
+}
+
+// FirstPacketAt returns the wall-clock time of the first decoded audio
+// packet, or the zero time if no audio has been received yet.
+func (us *UserStream) FirstPacketAt() time.Time {
+	return us.firstPacketAt
 }
 
 // NewUserStream creates a WAV writer and opus decoder for the given user.
@@ -169,8 +176,9 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	pcm = pcm[:n]
 
 	if !us.hasFirstTS {
+		us.firstPacketAt = time.Now()
 		log.Printf("FIRST_PACKET user=%s ssrc=%d rtp_ts=%d wall=%s",
-			us.userID, packet.SSRC, packet.Timestamp, time.Now().Format(time.RFC3339Nano))
+			us.userID, packet.SSRC, packet.Timestamp, us.firstPacketAt.Format(time.RFC3339Nano))
 	}
 	us.insertSilenceForGap(packet.Timestamp)
 	us.lastTS = packet.Timestamp

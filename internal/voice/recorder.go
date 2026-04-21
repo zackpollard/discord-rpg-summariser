@@ -152,10 +152,20 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 
 // writeOffsetsLocked writes the current join offsets to offsets.json in the
 // output directory. Caller must hold r.mu.
+//
+// The offset is the time from session start to the user's first decoded
+// audio packet, measured in the audio receive goroutine (tight, unaffected
+// by CPU starvation of event handlers). Falls back to the speaking-update
+// stamped value when the user has no decoded audio yet.
 func (r *Recorder) writeOffsetsLocked() {
 	offsets := make(map[string]float64, len(r.userJoinOffset))
-	for userID, d := range r.userJoinOffset {
-		offsets[userID] = d.Seconds()
+	for userID, fallback := range r.userJoinOffset {
+		offsets[userID] = fallback.Seconds()
+	}
+	for _, us := range r.streams {
+		if fpa := us.FirstPacketAt(); !fpa.IsZero() {
+			offsets[us.userID] = fpa.Sub(r.sessionStart).Seconds()
+		}
 	}
 	data, err := json.Marshal(offsets)
 	if err != nil {
@@ -174,6 +184,7 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 	defer r.mu.Unlock()
 
 	if us, ok := r.streams[packet.SSRC]; ok {
+		hadFirstTS := us.hasFirstTS
 		if err := us.HandlePacket(packet); err != nil {
 			uid := r.ssrcToUser[packet.SSRC]
 			log.Printf("Error handling packet for %s: %v", uid, err)
@@ -182,6 +193,11 @@ func (r *Recorder) HandleVoicePacket(packet *discordgo.Packet) {
 		if a, ok := r.activity[uid]; ok {
 			a.PacketCount++
 			a.LastPacketAt = time.Now()
+		}
+		// Re-persist offsets with the tighter first-packet wall-clock time
+		// once we have decoded audio from this user.
+		if !hadFirstTS && us.hasFirstTS {
+			r.writeOffsetsLocked()
 		}
 		return
 	}
@@ -263,6 +279,10 @@ func (r *Recorder) UserFiles() map[string]string {
 
 // UserJoinOffsets returns userID → duration from session start to first audio
 // for each recorded user. Used to adjust transcript timestamps during merge.
+//
+// Prefers the first-packet wall-clock time stamped in the audio receive
+// goroutine (tight, unaffected by event-handler CPU starvation). Falls back
+// to the speaking-update stamped value when no audio was decoded.
 func (r *Recorder) UserJoinOffsets() map[string]time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -270,6 +290,11 @@ func (r *Recorder) UserJoinOffsets() map[string]time.Duration {
 	offsets := make(map[string]time.Duration, len(r.userJoinOffset))
 	for k, v := range r.userJoinOffset {
 		offsets[k] = v
+	}
+	for _, us := range r.streams {
+		if fpa := us.FirstPacketAt(); !fpa.IsZero() {
+			offsets[us.userID] = fpa.Sub(r.sessionStart)
+		}
 	}
 	return offsets
 }
