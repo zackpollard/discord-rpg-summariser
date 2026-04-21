@@ -111,8 +111,16 @@ func (p *ParakeetTranscriber) SetVocabulary(words []string) {
 	}
 
 	bpeVocabPath := filepath.Join(p.modelBase, "bpe.vocab")
-	if _, err := os.Stat(bpeVocabPath); os.IsNotExist(err) {
+	needsRegen := false
+	if info, err := os.Stat(bpeVocabPath); os.IsNotExist(err) {
 		log.Printf("parakeet: bpe.vocab not found, attempting to generate...")
+		needsRegen = true
+	} else if err == nil && info.Size() < 100 {
+		// sherpa-onnx expects ~8000 token lines — a tiny file is truncated.
+		log.Printf("parakeet: bpe.vocab is only %d bytes, regenerating...", info.Size())
+		needsRegen = true
+	}
+	if needsRegen {
 		if err := generateBpeVocab(p.modelBase); err != nil {
 			log.Printf("parakeet: failed to generate bpe.vocab: %v — hot words disabled", err)
 			return
