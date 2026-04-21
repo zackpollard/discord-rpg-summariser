@@ -39,6 +39,7 @@ type Recorder struct {
 	pendingPackets map[uint32][]*discordgo.Packet
 	activity       map[string]*UserActivity
 	userJoinOffset map[string]time.Duration // userID -> offset from session start to first audio
+	vsuJoinAt      map[string]time.Time     // userID -> wall-clock of VoiceStateUpdate channel join
 	outputDir      string
 	guildID        string
 	done           chan struct{}
@@ -54,12 +55,26 @@ func NewRecorder(outputDir, guildID string, liveCh chan ChunkReady) *Recorder {
 		pendingPackets: make(map[uint32][]*discordgo.Packet),
 		activity:       make(map[string]*UserActivity),
 		userJoinOffset: make(map[string]time.Duration),
+		vsuJoinAt:      make(map[string]time.Time),
 		outputDir:      outputDir,
 		guildID:        guildID,
 		done:           make(chan struct{}),
 		liveCh:         liveCh,
 		sessionStart:   time.Now(),
 	}
+}
+
+// RecordVoiceStateJoin records the wall-clock time at which a user was first
+// seen in the recorded voice channel (via VoiceStateUpdate or initial
+// enumeration). It's used as a secondary offset signal for users who join
+// the channel silently.
+func (r *Recorder) RecordVoiceStateJoin(userID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.vsuJoinAt[userID]; ok {
+		return // keep earliest observation
+	}
+	r.vsuJoinAt[userID] = time.Now()
 }
 
 // HandleSpeakingUpdate maps an SSRC to a user ID, creates a UserStream if
@@ -259,10 +274,80 @@ func (r *Recorder) Stop() error {
 			firstErr = fmt.Errorf("close stream for SSRC %d: %w", ssrc, err)
 		}
 	}
+	r.writeTimingDebugLocked()
 	if r.liveCh != nil {
 		close(r.liveCh)
 	}
 	return firstErr
+}
+
+// writeTimingDebugLocked persists all per-user timing signals to
+// timing-debug.json for post-hoc drift investigation. Includes the
+// speaking-update offset, the first-packet-receive offset, and the
+// voice-state-update channel-join offset.
+func (r *Recorder) writeTimingDebugLocked() {
+	type userTiming struct {
+		SpeakingUpdateOffset float64 `json:"speaking_update_offset_sec"`
+		FirstPacketOffset    float64 `json:"first_packet_offset_sec"`
+		VoiceStateOffset     float64 `json:"voice_state_offset_sec"`
+		HasFirstPacket       bool    `json:"has_first_packet"`
+		HasVoiceStateJoin    bool    `json:"has_voice_state_join"`
+	}
+
+	users := make(map[string]userTiming)
+	add := func(uid string) {
+		if _, ok := users[uid]; ok {
+			return
+		}
+		users[uid] = userTiming{}
+	}
+	for uid := range r.userJoinOffset {
+		add(uid)
+	}
+	for uid := range r.vsuJoinAt {
+		add(uid)
+	}
+	for _, us := range r.streams {
+		add(us.userID)
+	}
+
+	for uid := range users {
+		t := users[uid]
+		if d, ok := r.userJoinOffset[uid]; ok {
+			t.SpeakingUpdateOffset = d.Seconds()
+		}
+		if v, ok := r.vsuJoinAt[uid]; ok {
+			t.VoiceStateOffset = v.Sub(r.sessionStart).Seconds()
+			t.HasVoiceStateJoin = true
+		}
+		for _, us := range r.streams {
+			if us.userID == uid {
+				if fpa := us.FirstPacketAt(); !fpa.IsZero() {
+					t.FirstPacketOffset = fpa.Sub(r.sessionStart).Seconds()
+					t.HasFirstPacket = true
+				}
+				break
+			}
+		}
+		users[uid] = t
+	}
+
+	payload := struct {
+		SessionStart string                `json:"session_start"`
+		Users        map[string]userTiming `json:"users"`
+	}{
+		SessionStart: r.sessionStart.Format(time.RFC3339Nano),
+		Users:        users,
+	}
+
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return
+	}
+	path := filepath.Join(r.outputDir, "timing-debug.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		log.Printf("Failed to write %s: %v", path, err)
+	}
 }
 
 // UserFiles returns userID → WAV file path for every recorded user.

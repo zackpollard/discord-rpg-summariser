@@ -416,6 +416,7 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 	b.mu.Lock()
 	vc := b.activeVC
 	channelID := b.activeChannelID
+	rec := b.recorder
 	b.mu.Unlock()
 
 	if vc == nil {
@@ -425,6 +426,17 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 	// Only care about events in the guild we are recording in.
 	if vsu.GuildID != vc.GuildID {
 		return
+	}
+
+	// A user JOINED our channel (either fresh join or moved in from elsewhere).
+	botUserID := s.State.User.ID
+	if vsu.ChannelID == channelID && vsu.UserID != botUserID {
+		if rec != nil {
+			beforeInOurChannel := vsu.BeforeUpdate != nil && vsu.BeforeUpdate.ChannelID == channelID
+			if !beforeInOurChannel {
+				rec.RecordVoiceStateJoin(vsu.UserID)
+			}
+		}
 	}
 
 	// A user left our channel (their old channel was ours and they either

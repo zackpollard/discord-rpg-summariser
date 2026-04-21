@@ -281,6 +281,18 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	}
 	b.mu.Unlock()
 
+	// Record channel-join time for everyone already in the channel when the
+	// bot joined. They have no VoiceStateUpdate we can use, so the bot-join
+	// moment is the earliest reference point we have.
+	if guild, err := s.State.Guild(guildID); err == nil {
+		botUserID := s.State.User.ID
+		for _, vs := range guild.VoiceStates {
+			if vs.ChannelID == userVoiceChannelID && vs.UserID != botUserID {
+				rec.RecordVoiceStateJoin(vs.UserID)
+			}
+		}
+	}
+
 	followup(s, i, fmt.Sprintf("Recording started (session #%d). Use `/session stop` when finished.", sessionID))
 }
 
