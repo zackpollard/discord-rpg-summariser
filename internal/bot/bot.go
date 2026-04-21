@@ -456,7 +456,6 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 		return
 	}
 
-	botUserID := s.State.User.ID
 	for _, vs := range guild.VoiceStates {
 		if vs.ChannelID != channelID {
 			continue

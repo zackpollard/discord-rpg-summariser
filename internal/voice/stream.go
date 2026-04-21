@@ -276,6 +276,7 @@ func (us *UserStream) InsertSilenceDuration(d time.Duration) {
 func (us *UserStream) Close() error {
 	if us.liveBuf != nil {
 		us.liveBuf.Flush()
+		us.liveBuf.Close()
 	}
 	return us.wav.Close()
 }
