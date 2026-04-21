@@ -34,6 +34,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - ./.air.docker.toml:/app/.air.docker.toml:ro
       - ./data:/app/data
+      - ./models:/app/models
       - ~/.claude/.credentials.json:/root/.claude/.credentials.json:ro
     environment:
       DATABASE_URL: postgres://rpg:rpg@postgres:5432/rpg_summariser?sslmode=disable
