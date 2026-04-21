@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.19](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.18...v0.1.19) (2026-04-21)
+
+
+### Features
+
+* add PARAKEET_DISABLE_HOTWORDS env kill switch ([75370fd](https://github.com/zackpollard/discord-rpg-summariser/commit/75370fda6b4c3aae0c5fe81b21a83cdb37bebf37))
+* per-chunk transcription logging for stuck-run diagnostics ([52251f5](https://github.com/zackpollard/discord-rpg-summariser/commit/52251f52e028138f48f3d2c006212f8e316b3776))
+* record voice-state channel-join times and write timing debug dump ([809c643](https://github.com/zackpollard/discord-rpg-summariser/commit/809c643cdf8d8c6bc4de343235a467712b76e9d5))
+* wall-clock stale flush and trailing-silence trim in live buffer ([eee7c9d](https://github.com/zackpollard/discord-rpg-summariser/commit/eee7c9d1f28d966f2bc4ec78535e43f5fcbc9cc1))
+
+
+### Bug Fixes
+
+* defer Discord response for session start/stop ([0cdd094](https://github.com/zackpollard/discord-rpg-summariser/commit/0cdd09489c623e5f6e2bdc33fd89790958970877))
+* **dev:** bind-mount ./models so model downloads persist ([6b8ae4f](https://github.com/zackpollard/discord-rpg-summariser/commit/6b8ae4f9bf6f777489d62a50468f067ffe493571))
+* don't reset firstPacketAt on user reconnect ([c735cdc](https://github.com/zackpollard/discord-rpg-summariser/commit/c735cdcf19f1aa01c7aea7baac472d661ac5295a))
+* progress tracking on rerun and concurrent reprocess requests ([9d157d9](https://github.com/zackpollard/discord-rpg-summariser/commit/9d157d993ba7c85a419fd2953b6d7a4f0ad9f173))
+* recover from DAVE epoch transitions that corrupt opus plaintext ([7a5bdfb](https://github.com/zackpollard/discord-rpg-summariser/commit/7a5bdfb1f9c093baa4af0bd7d84ab17547c6a335))
+* rederive DAVE keys on reconnect and epoch framing shifts ([4669d6a](https://github.com/zackpollard/discord-rpg-summariser/commit/4669d6ad666e7f2882641d0daf1202b0ffded56b))
+* regenerate bpe.vocab if the file is suspiciously small ([cf3e054](https://github.com/zackpollard/discord-rpg-summariser/commit/cf3e0547ded29a6aac5c697bd770d5b8ab83dc04))
+* stamp join offset from audio receive loop, not event handler ([1d0b8a8](https://github.com/zackpollard/discord-rpg-summariser/commit/1d0b8a8cc1ae1645216ec7b9fac4f6ded1029ab9))
+
 ## [0.1.18](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.17...v0.1.18) (2026-04-20)
 
 
