@@ -132,6 +132,10 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	}
 	pcm = pcm[:n]
 
+	if !us.hasFirstTS {
+		log.Printf("FIRST_PACKET user=%s ssrc=%d rtp_ts=%d wall=%s",
+			us.userID, packet.SSRC, packet.Timestamp, time.Now().Format(time.RFC3339Nano))
+	}
 	us.insertSilenceForGap(packet.Timestamp)
 	us.lastTS = packet.Timestamp
 	us.hasFirstTS = true

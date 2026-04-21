@@ -114,6 +114,22 @@ func respond(s *discordgo.Session, i *discordgo.InteractionCreate, content strin
 	})
 }
 
+// deferResponse ACKs the interaction immediately so Discord's 3-second
+// deadline doesn't fire while we do slow work. Use followup() to send the
+// actual message content afterwards.
+func deferResponse(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+}
+
+// followup edits the deferred response with the given content.
+func followup(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
+	s.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+		Content: &content,
+	})
+}
+
 // respondEphemeral sends a response only visible to the invoking user.
 func respondEphemeral(s *discordgo.Session, i *discordgo.InteractionCreate, content string) {
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -151,11 +167,14 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
+	// ACK within 3s — the work below (voice join, model load) can take longer.
+	deferResponse(s, i)
+
 	// Ensure no session is already active.
 	b.mu.Lock()
 	if b.recorder != nil {
 		b.mu.Unlock()
-		respondEphemeral(s, i, "A recording session is already active.")
+		followup(s, i, "A recording session is already active.")
 		return
 	}
 	b.mu.Unlock()
@@ -163,18 +182,18 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	ctx := context.Background()
 	active, err := b.store.GetActiveSession(ctx, guildID)
 	if err != nil {
-		respondEphemeral(s, i, "Database error checking for active session.")
+		followup(s, i, "Database error checking for active session.")
 		return
 	}
 	if active != nil {
-		respondEphemeral(s, i, "A recording session is already active.")
+		followup(s, i, "A recording session is already active.")
 		return
 	}
 
 	// Resolve the active campaign for this guild.
 	campaign, err := b.store.GetOrCreateActiveCampaign(ctx, guildID)
 	if err != nil {
-		respondEphemeral(s, i, "Failed to resolve active campaign.")
+		followup(s, i, "Failed to resolve active campaign.")
 		log.Printf("GetOrCreateActiveCampaign error: %v", err)
 		return
 	}
@@ -182,13 +201,13 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	// Create session directory and DB row.
 	audioDir := fmt.Sprintf("%s/%s/%d", b.config.Storage.AudioDir, guildID, time.Now().Unix())
 	if err := os.MkdirAll(audioDir, 0o755); err != nil {
-		respondEphemeral(s, i, "Failed to create audio directory.")
+		followup(s, i, "Failed to create audio directory.")
 		log.Printf("MkdirAll %s: %v", audioDir, err)
 		return
 	}
 	sessionID, err := b.store.CreateSession(ctx, guildID, campaign.ID, userVoiceChannelID, audioDir)
 	if err != nil {
-		respondEphemeral(s, i, "Failed to create session in database.")
+		followup(s, i, "Failed to create session in database.")
 		log.Printf("CreateSession error: %v", err)
 		return
 	}
@@ -197,7 +216,7 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	log.Printf("Joining voice channel %s in guild %s", userVoiceChannelID, guildID)
 	vc, err := s.ChannelVoiceJoin(ctx, guildID, userVoiceChannelID, false, false)
 	if err != nil {
-		respondEphemeral(s, i, "Failed to join your voice channel.")
+		followup(s, i, "Failed to join your voice channel.")
 		log.Printf("VoiceJoin error: %v", err)
 		return
 	}
@@ -206,7 +225,7 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	// Load the transcription model for live transcription.
 	transcriber, err := b.acquireTranscriber()
 	if err != nil {
-		respondEphemeral(s, i, "Failed to load transcription model.")
+		followup(s, i, "Failed to load transcription model.")
 		log.Printf("acquireTranscriber error: %v", err)
 		return
 	}
@@ -262,7 +281,7 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	}
 	b.mu.Unlock()
 
-	respond(s, i, fmt.Sprintf("Recording started (session #%d). Use `/session stop` when finished.", sessionID))
+	followup(s, i, fmt.Sprintf("Recording started (session #%d). Use `/session stop` when finished.", sessionID))
 }
 
 func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -276,6 +295,10 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 		return
 	}
 
+	// ACK within 3s — stopRecording can take several seconds draining the live
+	// worker and incremental transcriber.
+	deferResponse(s, i)
+
 	// Stop recording and disconnect; get user WAV files and Telegram messages.
 	result := b.stopRecording()
 	// Release the live transcription's reference to the transcriber.
@@ -288,7 +311,7 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 		log.Printf("EndSession error: %v", err)
 	}
 
-	respond(s, i, fmt.Sprintf("Recording stopped (session #%d). Processing transcript and summary...", sessionID))
+	followup(s, i, fmt.Sprintf("Recording stopped (session #%d). Processing transcript and summary...", sessionID))
 
 	// Kick off async pipeline.
 	go b.runPipeline(sessionID, result)
