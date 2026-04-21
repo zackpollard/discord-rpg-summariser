@@ -28,6 +28,7 @@ type UserStream struct {
 	daveState     *discordgo.ReceiverState
 	daveActive    bool                       // true after the first successful DAVE decrypt
 	daveFailCount int                        // consecutive decryption failures
+	nonDaveCount  int                        // non-DAVE non-silence frames while DAVE was active
 	daveVC        *discordgo.VoiceConnection // for re-deriving keys
 	liveBuf       *LiveBuffer
 }
@@ -92,7 +93,12 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 	daveFrame, isDave := findDAVEFrame(opusData)
 	if isDave {
 		if us.daveState == nil {
-			return nil
+			// Key derivation failed earlier (e.g. DAVE session not yet
+			// re-handshaked after a reconnect). Retry on each packet until
+			// the session has an exporter secret available.
+			if !us.rederiveDAVE() {
+				return nil
+			}
 		}
 		decrypted, err := discordgo.DecryptFrame(us.daveState, daveFrame)
 		if err != nil {
@@ -118,6 +124,15 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 		if isOpusSilence(opusData) {
 			// Falls through to normal opus decode below.
 		} else {
+			// Once DAVE is active, non-silence non-DAVE frames shouldn't
+			// reach us. Log for diagnostics and try rederiving — an epoch
+			// transition may have shifted framing.
+			us.nonDaveCount++
+			if us.nonDaveCount <= 3 || us.nonDaveCount%100 == 0 {
+				log.Printf("non-DAVE non-silence frame for %s (seq=%d, %d bytes, count=%d) — attempting rederive",
+					us.userID, packet.Sequence, len(opusData), us.nonDaveCount)
+			}
+			us.rederiveDAVE()
 			us.decodePLC(packet.Timestamp)
 			return nil
 		}
