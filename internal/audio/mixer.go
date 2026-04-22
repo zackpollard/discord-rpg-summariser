@@ -310,8 +310,19 @@ func MixFromDir(audioDir, outputPath string) error {
 }
 
 // LoadJoinOffsets reads per-user join offsets (in seconds) from the audio
-// directory's offsets.json file. Returns nil if the file doesn't exist.
+// directory. If offsets_override.json exists it takes precedence over
+// offsets.json (for manual sync correction from the UI). Returns nil if
+// neither file exists.
 func LoadJoinOffsets(audioDir string) map[string]float64 {
+	// Try override first.
+	if data, err := os.ReadFile(filepath.Join(audioDir, "offsets_override.json")); err == nil {
+		var offsets map[string]float64
+		if err := json.Unmarshal(data, &offsets); err != nil {
+			log.Printf("audio: parse offsets_override.json: %v", err)
+		} else {
+			return offsets
+		}
+	}
 	data, err := os.ReadFile(filepath.Join(audioDir, "offsets.json"))
 	if err != nil {
 		return nil

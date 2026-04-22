@@ -72,6 +72,11 @@ func (s *Server) setupRoutes() {
 	s.handle("GET /api/sessions/{id}/combat", s.handleGetSessionCombat)
 	s.handle("GET /api/sessions/{id}/audio", s.handleGetSessionAudio)
 	s.handle("GET /api/sessions/{id}/waveform", s.handleGetSessionWaveform)
+	s.handle("GET /api/sessions/{id}/user-audio", s.handleGetUserAudio)
+	s.handle("GET /api/sessions/{id}/user-waveform", s.handleGetUserWaveform)
+	s.handle("GET /api/sessions/{id}/sync", s.handleGetSessionSync)
+	s.handle("PUT /api/sessions/{id}/sync", s.handleSetSessionSync)
+	s.handle("POST /api/sessions/{id}/remix", s.handleRemixSession)
 	s.handle("GET /api/sessions/{id}/llm-logs", s.handleGetLLMLogs)
 	s.handle("GET /api/sessions/{id}/quotes", s.handleGetSessionQuotes)
 

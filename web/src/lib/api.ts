@@ -592,6 +592,101 @@ export function sessionAudioURL(sessionId: number): string {
 	return `/api/sessions/${sessionId}/audio`;
 }
 
+// Sync correction (per-user offset editing)
+
+export interface UserOffset {
+	user_id: string;
+	display_name: string;
+	character_name?: string;
+	auto_offset: number;
+	override_offset: number;
+	has_override: boolean;
+	duration_sec: number;
+}
+
+export interface SessionSync {
+	session_id: number;
+	users: UserOffset[];
+}
+
+export interface WaveformResponse {
+	peaks: number[];
+	start_sec: number;
+	end_sec: number;
+	full_duration_sec: number;
+}
+
+export async function fetchSessionSync(sessionId: number): Promise<SessionSync> {
+	return request<SessionSync>(`/api/sessions/${sessionId}/sync`);
+}
+
+export async function saveSessionSync(
+	sessionId: number,
+	overrides: Record<string, number>
+): Promise<void> {
+	await request<void>(`/api/sessions/${sessionId}/sync`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ overrides })
+	});
+}
+
+export async function clearSessionSync(sessionId: number): Promise<void> {
+	await request<void>(`/api/sessions/${sessionId}/sync`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ clear: true })
+	});
+}
+
+export async function remixSession(sessionId: number): Promise<void> {
+	await request<void>(`/api/sessions/${sessionId}/remix`, { method: 'POST' });
+}
+
+export async function fetchSessionWaveform(
+	sessionId: number,
+	startSec?: number,
+	endSec?: number,
+	peaks?: number
+): Promise<WaveformResponse> {
+	const qs = buildRangeQS(startSec, endSec, peaks);
+	return request<WaveformResponse>(`/api/sessions/${sessionId}/waveform${qs}`);
+}
+
+export async function fetchUserWaveform(
+	sessionId: number,
+	userId: string,
+	startSec?: number,
+	endSec?: number,
+	peaks?: number
+): Promise<WaveformResponse> {
+	const qs = buildRangeQS(startSec, endSec, peaks, { user: userId });
+	return request<WaveformResponse>(`/api/sessions/${sessionId}/user-waveform${qs}`);
+}
+
+export function userAudioURL(sessionId: number, userId: string): string {
+	return `/api/sessions/${sessionId}/user-audio?user=${encodeURIComponent(userId)}`;
+}
+
+function buildRangeQS(
+	startSec?: number,
+	endSec?: number,
+	peaks?: number,
+	extra?: Record<string, string>
+): string {
+	const params = new URLSearchParams();
+	if (startSec !== undefined && endSec !== undefined) {
+		params.set('start_sec', String(startSec));
+		params.set('end_sec', String(endSec));
+	}
+	if (peaks !== undefined) params.set('peaks', String(peaks));
+	if (extra) {
+		for (const [k, v] of Object.entries(extra)) params.set(k, v);
+	}
+	const s = params.toString();
+	return s ? '?' + s : '';
+}
+
 // Relationship graph types and functions
 
 export interface GraphNode {

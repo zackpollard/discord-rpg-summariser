@@ -496,6 +496,7 @@
 		{/if}
 
 		<div class="reprocess-actions">
+			<a class="btn btn-secondary" href="/sessions/{session.id}/sync">Fix track sync</a>
 			<button
 				class="btn btn-secondary"
 				disabled={reprocessing}
