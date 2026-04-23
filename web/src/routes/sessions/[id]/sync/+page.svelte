@@ -381,6 +381,72 @@
 		if (rafId !== null) cancelAnimationFrame(rafId);
 		for (const a of Object.values(audioEls)) a.pause();
 	});
+
+	// Canvas-based waveform rendering. Previously each peak was an SVG
+	// <rect> — with ~100k peaks per track times N users, Firefox would
+	// freeze rendering hundreds of thousands of DOM nodes. Canvas draws
+	// pixels, so we downsample peaks to pixel columns at draw time and
+	// keep the DOM node count flat.
+	function drawWaveform(
+		canvas: HTMLCanvasElement,
+		peaks: number[] | undefined,
+		x0Frac: number,
+		x1Frac: number,
+	) {
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return;
+		const dpr = window.devicePixelRatio || 1;
+		const cssW = canvas.clientWidth;
+		const cssH = canvas.clientHeight;
+		if (cssW === 0 || cssH === 0) return;
+		canvas.width = Math.floor(cssW * dpr);
+		canvas.height = Math.floor(cssH * dpr);
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+		ctx.clearRect(0, 0, cssW, cssH);
+		if (!peaks || peaks.length === 0) return;
+
+		const startPx = x0Frac * cssW;
+		const endPx = x1Frac * cssW;
+		const spanPx = endPx - startPx;
+		if (spanPx <= 0) return;
+
+		const mid = cssH / 2;
+		ctx.fillStyle = getComputedStyle(canvas).color || '#bfa67a';
+
+		const peakPerPx = peaks.length / spanPx;
+		const drawStart = Math.max(0, Math.floor(startPx));
+		const drawEnd = Math.min(cssW, Math.ceil(endPx));
+		for (let px = drawStart; px < drawEnd; px++) {
+			const p0 = Math.max(0, Math.floor((px - startPx) * peakPerPx));
+			const p1 = Math.min(peaks.length, Math.max(p0 + 1, Math.floor((px + 1 - startPx) * peakPerPx)));
+			let maxPeak = 0;
+			for (let i = p0; i < p1; i++) {
+				if (peaks[i] > maxPeak) maxPeak = peaks[i];
+			}
+			const halfH = maxPeak * mid;
+			if (halfH > 0) ctx.fillRect(px, mid - halfH, 1, halfH * 2 || 1);
+		}
+	}
+
+	function waveformAction(
+		node: HTMLCanvasElement,
+		params: { peaks: number[] | undefined; x0Frac: number; x1Frac: number },
+	) {
+		let current = params;
+		const draw = () => drawWaveform(node, current.peaks, current.x0Frac, current.x1Frac);
+		draw();
+		const ro = new ResizeObserver(draw);
+		ro.observe(node);
+		return {
+			update(next: typeof params) {
+				current = next;
+				draw();
+			},
+			destroy() {
+				ro.disconnect();
+			},
+		};
+	}
 </script>
 
 <svelte:head>
@@ -443,13 +509,10 @@
 					onwheel={onTrackWheel}
 					role="presentation"
 				>
-					{#if mixWaveform}
-						<svg viewBox="0 0 {mixWaveform.peaks.length} 100" preserveAspectRatio="none">
-							{#each mixWaveform.peaks as peak, i}
-								<rect x={i} y={50 - peak * 50} width="1" height={peak * 100} fill="currentColor" />
-							{/each}
-						</svg>
-					{/if}
+					<canvas
+						class="waveform-canvas"
+						use:waveformAction={{ peaks: mixWaveform?.peaks, x0Frac: 0, x1Frac: 1 }}
+					></canvas>
 					<div class="playhead" style="left: {((playbackTime - viewStart) / (viewEnd - viewStart)) * 100}%"></div>
 				</div>
 			</div>
@@ -493,19 +556,14 @@
 						onwheel={onTrackWheel}
 						role="presentation"
 					>
-						{#if wf && (viewEnd - viewStart) > 0 && u.duration_sec > 0}
-							{@const trackStart = secondsToX(off, 1000)}
-							{@const trackEnd = secondsToX(off + u.duration_sec, 1000)}
-							<svg
-								preserveAspectRatio="none"
-								viewBox="0 0 {wf.peaks.length} 100"
-								style="position: absolute; left: {(trackStart / 1000) * 100}%; width: {((trackEnd - trackStart) / 1000) * 100}%; height: 100%;"
-							>
-								{#each wf.peaks as peak, i}
-									<rect x={i} y={50 - peak * 50} width="1" height={peak * 100} fill="currentColor" />
-								{/each}
-							</svg>
-						{/if}
+						<canvas
+							class="waveform-canvas"
+							use:waveformAction={{
+								peaks: wf?.peaks,
+								x0Frac: (off - viewStart) / (viewEnd - viewStart),
+								x1Frac: (off + u.duration_sec - viewStart) / (viewEnd - viewStart),
+							}}
+						></canvas>
 						<div class="playhead" style="left: {((playbackTime - viewStart) / (viewEnd - viewStart)) * 100}%"></div>
 					</div>
 					<audio
@@ -664,7 +722,14 @@
 	.track.draggable:active { cursor: grabbing; }
 	.track.pannable { cursor: ew-resize; }
 	.mix-track { color: var(--text-secondary); }
-	.track svg { width: 100%; height: 100%; display: block; }
+	.waveform-canvas {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		display: block;
+		pointer-events: none;
+	}
 	.playhead {
 		position: absolute;
 		top: 0;
