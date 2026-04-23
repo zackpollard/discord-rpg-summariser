@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.20](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.19...v0.1.20) (2026-04-23)
+
+
+### Features
+
+* manual track sync correction ui ([1599e13](https://github.com/zackpollard/discord-rpg-summariser/commit/1599e1309141282882bdb8a4780b96089024ec30))
+
+
+### Bug Fixes
+
+* **voice:** eliminate epoch-transition screech and auto-correct discord jitter-buffer drift ([76aba42](https://github.com/zackpollard/discord-rpg-summariser/commit/76aba4219e7c9ae10e6e03f8ae746efc8bedbb3e))
+
 ## [0.1.19](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.18...v0.1.19) (2026-04-21)
 
 
