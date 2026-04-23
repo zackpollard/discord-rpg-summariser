@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.21](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.20...v0.1.21) (2026-04-23)
+
+
+### Performance
+
+* **sync-ui:** render waveforms to canvas instead of per-peak svg rects ([58bf429](https://github.com/zackpollard/discord-rpg-summariser/commit/58bf429ce3940ab0192f23b901f8b9243c352801))
+
 ## [0.1.20](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.19...v0.1.20) (2026-04-23)
 
 
