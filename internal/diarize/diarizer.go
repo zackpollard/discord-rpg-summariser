@@ -165,6 +165,9 @@ func AttributeSegment(start, end float64, diarSegments []SpeakerSegment) int {
 
 // ExtractEmbedding computes a speaker embedding from 16kHz mono float32 audio.
 func (d *Diarizer) ExtractEmbedding(samples []float32) ([]float32, error) {
+	if len(samples) == 0 {
+		return nil, fmt.Errorf("cannot extract embedding from empty audio")
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 

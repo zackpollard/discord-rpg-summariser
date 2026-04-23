@@ -118,13 +118,33 @@ func MixAndNormalize(userFiles map[string]string, outputPath string, joinOffsets
 	}
 
 	// Compute per-track offset in samples from join offsets.
+	// Positive offset: prepend that many seconds of silence before the track.
+	// Negative offset: skip that many seconds from the start of the track
+	//   (the stream detected a Discord jitter-buffer dump and back-projected
+	//   firstPacketAt to before session start, so the first portion of the
+	//   WAV represents content from before the mix timeline begins).
 	offsetSamps := make(map[string]int64, len(files))
+	trimSamps := make(map[string]int64, len(files))
 	for userID, fi := range files {
-		if secs, ok := joinOffsets[userID]; ok && secs > 0 {
-			off := int64(secs * float64(mixSampleRate))
-			offsetSamps[userID] = off
-			if fi.numSamps+off > maxSamples {
-				maxSamples = fi.numSamps + off
+		secs, ok := joinOffsets[userID]
+		if !ok {
+			continue
+		}
+		sampCount := int64(secs * float64(mixSampleRate))
+		if sampCount >= 0 {
+			offsetSamps[userID] = sampCount
+			if fi.numSamps+sampCount > maxSamples {
+				maxSamples = fi.numSamps + sampCount
+			}
+		} else {
+			skip := -sampCount
+			if skip >= fi.numSamps {
+				skip = fi.numSamps
+			}
+			trimSamps[userID] = skip
+			remaining := fi.numSamps - skip
+			if remaining > maxSamples {
+				maxSamples = remaining
 			}
 		}
 	}
@@ -151,7 +171,9 @@ func MixAndNormalize(userFiles map[string]string, outputPath string, joinOffsets
 		return fmt.Errorf("write header: %w", err)
 	}
 
-	// Open all input files and seek past their headers.
+	// Open all input files and seek past their headers. For tracks with a
+	// negative offset, seek further to skip the leading samples whose
+	// wall-clock time is before the mix timeline starts.
 	readers := make(map[string]*os.File, len(files))
 	for userID, fi := range files {
 		f, err := os.Open(fi.path)
@@ -159,7 +181,8 @@ func MixAndNormalize(userFiles map[string]string, outputPath string, joinOffsets
 			closeReaders(readers)
 			return fmt.Errorf("open %s: %w", fi.path, err)
 		}
-		if _, err := f.Seek(fi.dataStart, io.SeekStart); err != nil {
+		seekTo := fi.dataStart + trimSamps[userID]*2 // 16-bit samples
+		if _, err := f.Seek(seekTo, io.SeekStart); err != nil {
 			f.Close()
 			closeReaders(readers)
 			return fmt.Errorf("seek %s: %w", fi.path, err)

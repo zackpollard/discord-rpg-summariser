@@ -239,6 +239,16 @@ func (d *DAVESession) IsActive() bool {
 	return d.active
 }
 
+// Epoch returns the current MLS epoch number. Callers can watch this value
+// to detect epoch transitions (which invalidate previously-derived receiver
+// keys — DAVE's frame decrypt does NOT verify GCM auth tags, so stale keys
+// return wrong plaintext silently).
+func (d *DAVESession) Epoch() uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.epoch
+}
+
 func (d *DAVESession) CanEncrypt() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -361,10 +371,11 @@ func decodeULEB128(data []byte) uint32 {
 	return result
 }
 
-// daveDecryptor decrypts GCM-encrypted data using only the CTR layer.
-// Go's standard GCM requires tag sizes 12-16, but DAVE uses 8-byte tags.
-// Since the SRTP layer already authenticates packets, we skip GCM tag
-// verification and just decrypt via AES-CTR.
+// daveDecryptor decrypts AES-128-GCM frames with an 8-byte truncated auth
+// tag. Go's stdlib GCM only supports tag sizes 12–16, so we hand-roll GHASH
+// to verify the 8-byte tag. Without this, wrong-key decrypts silently
+// return garbage plaintext (instead of an auth error), which after an
+// epoch transition produces audible screech once opus decodes the garbage.
 type daveDecryptor struct {
 	block cipher.Block
 }
@@ -379,19 +390,107 @@ func (d *daveDecryptor) Open(dst, nonce, ciphertext, additionalData []byte) ([]b
 	if len(ciphertext) < daveTagSize {
 		return nil, fmt.Errorf("ciphertext too short")
 	}
-	// Strip the truncated tag — we skip verification
 	ct := ciphertext[:len(ciphertext)-daveTagSize]
+	tag := ciphertext[len(ciphertext)-daveTagSize:]
 
-	// GCM encrypts using AES-CTR starting at nonce||0x00000002
-	// (nonce||0x00000001 is reserved for tag computation)
+	// H = AES(K, 0^128)
+	var h [16]byte
+	d.block.Encrypt(h[:], h[:])
+
+	// Tag = AES(K, J0) XOR GHASH(H, AAD, CT), truncated to daveTagSize.
+	// J0 = nonce || 0x00000001 for 96-bit nonces (which is what DAVE uses).
+	var j0 [16]byte
+	copy(j0[:], nonce)
+	binary.BigEndian.PutUint32(j0[12:], 1)
+	var encJ0 [16]byte
+	d.block.Encrypt(encJ0[:], j0[:])
+
+	expected := ghash(h, additionalData, ct)
+	for i := 0; i < daveTagSize; i++ {
+		expected[i] ^= encJ0[i]
+	}
+	if !constantTimeEqual(expected[:daveTagSize], tag) {
+		return nil, fmt.Errorf("auth tag mismatch")
+	}
+
+	// Decrypt via AES-CTR starting at nonce || 0x00000002 (J0 + 1).
 	counter := make([]byte, aes.BlockSize)
 	copy(counter, nonce)
 	binary.BigEndian.PutUint32(counter[12:], 2)
-
 	stream := cipher.NewCTR(d.block, counter)
 	plaintext := make([]byte, len(ct))
 	stream.XORKeyStream(plaintext, ct)
 	return plaintext, nil
+}
+
+// ghash computes GHASH(H, A, C) per NIST SP 800-38D §6.4.
+func ghash(h [16]byte, a, c []byte) [16]byte {
+	var y [16]byte
+	ghashUpdate(&y, h, a)
+	ghashUpdate(&y, h, c)
+	var lenBlock [16]byte
+	binary.BigEndian.PutUint64(lenBlock[0:8], uint64(len(a))*8)
+	binary.BigEndian.PutUint64(lenBlock[8:16], uint64(len(c))*8)
+	for j := 0; j < 16; j++ {
+		y[j] ^= lenBlock[j]
+	}
+	y = gfMul(y, h)
+	return y
+}
+
+func ghashUpdate(y *[16]byte, h [16]byte, data []byte) {
+	for len(data) >= 16 {
+		for j := 0; j < 16; j++ {
+			y[j] ^= data[j]
+		}
+		*y = gfMul(*y, h)
+		data = data[16:]
+	}
+	if len(data) > 0 {
+		var block [16]byte
+		copy(block[:], data)
+		for j := 0; j < 16; j++ {
+			y[j] ^= block[j]
+		}
+		*y = gfMul(*y, h)
+	}
+}
+
+// gfMul multiplies x and y in GF(2^128) with irreducible polynomial
+// x^128 + x^7 + x^2 + x + 1 (reduction constant 0xE1 on the high byte).
+// Operands are big-endian byte-strings per the GCM spec.
+func gfMul(x, y [16]byte) [16]byte {
+	var z [16]byte
+	v := y
+	for i := 0; i < 16; i++ {
+		for j := 7; j >= 0; j-- {
+			if x[i]>>uint(j)&1 == 1 {
+				for k := 0; k < 16; k++ {
+					z[k] ^= v[k]
+				}
+			}
+			lsb := v[15] & 1
+			for k := 15; k > 0; k-- {
+				v[k] = (v[k] >> 1) | ((v[k-1] & 1) << 7)
+			}
+			v[0] >>= 1
+			if lsb == 1 {
+				v[0] ^= 0xE1
+			}
+		}
+	}
+	return z
+}
+
+func constantTimeEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var v byte
+	for i := range a {
+		v |= a[i] ^ b[i]
+	}
+	return v == 0
 }
 
 func newDAVEDecryptor(key []byte) (cipher.AEAD, error) {

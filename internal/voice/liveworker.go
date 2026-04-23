@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"time"
 
 	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/transcribe"
@@ -90,6 +91,20 @@ func (w *LiveWorker) Run(ctx context.Context) {
 // Wait blocks until Run has returned (all in-flight chunks are processed).
 func (w *LiveWorker) Wait() {
 	<-w.done
+}
+
+// WaitTimeout blocks until Run has returned or the timeout elapses. Returns
+// true if Run exited cleanly, false if we gave up. Use this from shutdown
+// paths to avoid hanging forever if a transcribe call stalls on a
+// pathological input (e.g. post-epoch-transition garbage that we then
+// decoded — rare but has been observed).
+func (w *LiveWorker) WaitTimeout(d time.Duration) bool {
+	select {
+	case <-w.done:
+		return true
+	case <-time.After(d):
+		return false
+	}
 }
 
 func (w *LiveWorker) processChunk(ctx context.Context, chunk ChunkReady) {

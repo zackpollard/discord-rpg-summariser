@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"discord-rpg-summariser/internal/config"
 	"discord-rpg-summariser/internal/diarize"
@@ -449,6 +450,12 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 		return
 	}
 
+	// Clear the recorded VSU join time so a subsequent rejoin is captured
+	// fresh rather than being ignored as a duplicate observation.
+	if rec != nil && vsu.UserID != botUserID {
+		rec.RecordVoiceStateLeave(vsu.UserID)
+	}
+
 	// Check if any non-bot users remain.
 	guild, err := s.State.Guild(vc.GuildID)
 	if err != nil {
@@ -516,9 +523,12 @@ func (b *Bot) stopRecording() stopResult {
 	if lw != nil {
 		log.Println("Waiting for live worker to drain...")
 		b.mu.Unlock()
-		lw.Wait()
+		if lw.WaitTimeout(5 * time.Second) {
+			log.Println("Live worker drained")
+		} else {
+			log.Println("Live worker drain timed out after 5s — abandoning in-flight chunks")
+		}
 		b.mu.Lock()
-		log.Println("Live worker drained")
 	}
 	it := b.incrementalTranscriber
 	if it != nil {

@@ -44,6 +44,13 @@ func (s *Server) handleGetSessionAudio(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Check that there are user WAVs to mix before attempting — sessions
+		// that failed before recording anything have an empty audio dir.
+		if !hasUserWAVs(sess.AudioDir) {
+			writeError(w, http.StatusNotFound, "session has no recorded audio")
+			return
+		}
+
 		// For older sessions that finished before auto-mixing was added,
 		// generate on demand.
 		if err := audio.MixFromDir(sess.AudioDir, mixedPath); err != nil {
@@ -56,4 +63,23 @@ func (s *Server) handleGetSessionAudio(w http.ResponseWriter, r *http.Request) {
 	// Override the Content-Type that the CORS middleware sets for /api/ routes.
 	w.Header().Set("Content-Type", "audio/wav")
 	http.ServeFile(w, r, mixedPath)
+}
+
+// hasUserWAVs returns true if the audio dir contains at least one per-user
+// WAV file (excluding the mixed.wav output file).
+func hasUserWAVs(audioDir string) bool {
+	entries, err := os.ReadDir(audioDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if filepath.Ext(name) == ".wav" && name != "mixed.wav" {
+			return true
+		}
+	}
+	return false
 }

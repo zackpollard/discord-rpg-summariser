@@ -111,9 +111,19 @@
 		<h2>Voice Channel</h2>
 		<div class="voice-list">
 			{#each voiceUsers as user (user.user_id)}
-				<div class="voice-user" class:speaking={user.speaking}>
+				<div class="voice-user" class:speaking={user.speaking} class:status-handshaking={user.status === 'handshaking' || user.status === 'reconnecting'} class:status-failed={user.status === 'decrypt_failed'}>
 					<span class="voice-dot" class:active={user.speaking}></span>
 					<span class="voice-name">{user.display_name || user.user_id}</span>
+					{#if user.status === 'handshaking' || user.status === 'reconnecting'}
+						<span class="voice-status voice-status-warn" title={user.status_message || ''}>
+							{user.status === 'reconnecting' ? 'reconnecting…' : 'handshaking…'}
+							{#if user.lost_packets > 0}({user.lost_packets} lost){/if}
+						</span>
+					{:else if user.status === 'decrypt_failed'}
+						<span class="voice-status voice-status-error" title={user.status_message || ''}>decrypt failed</span>
+					{:else if user.status === 'active'}
+						<span class="voice-status voice-status-ok">active{#if user.lost_packets > 0} ({user.lost_packets} lost){/if}</span>
+					{/if}
 					<span class="voice-packets">{formatPackets(user.packet_count)} pkts</span>
 				</div>
 			{/each}
@@ -206,10 +216,16 @@
 	.voice-list { display: flex; flex-direction: column; gap: 0.5rem; }
 	.voice-user { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; background: var(--bg-surface-2); border: 1px solid var(--border); border-radius: var(--radius); }
 	.voice-user.speaking { border-color: #22c55e; }
+	.voice-user.status-handshaking { border-color: #eab308; }
+	.voice-user.status-failed { border-color: #ef4444; }
 	.voice-dot { width: 8px; height: 8px; border-radius: 50%; background: #525252; }
 	.voice-dot.active { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
 	.voice-name { font-family: monospace; font-size: 0.85rem; flex: 1; }
 	.voice-packets { color: var(--text-muted); font-size: 0.75rem; font-family: monospace; }
+	.voice-status { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.02em; font-weight: 600; }
+	.voice-status-ok { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+	.voice-status-warn { background: rgba(234, 179, 8, 0.15); color: #eab308; }
+	.voice-status-error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 
 	.transcript-scroll { max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 0.85rem; line-height: 1.6; padding: 0.5rem; background: var(--bg-surface-2); border-radius: var(--radius); }
 	.live-line { padding: 0.15rem 0; }

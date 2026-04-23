@@ -154,6 +154,9 @@ export interface VoiceUser {
 	speaking: boolean;
 	packet_count: number;
 	last_packet_at: string;
+	status: 'handshaking' | 'active' | 'decrypt_failed' | 'reconnecting' | '';
+	status_message: string;
+	lost_packets: number;
 }
 
 export function subscribeVoiceActivity(

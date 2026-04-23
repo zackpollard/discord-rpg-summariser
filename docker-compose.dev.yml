@@ -29,6 +29,7 @@ services:
     volumes:
       - ./cmd:/app/cmd
       - ./internal:/app/internal
+      - ./_deps/discordgo-fork:/app/_deps/discordgo-fork
       - ./migrations:/app/migrations
       - ./scripts:/app/scripts
       - ./config.yaml:/app/config.yaml:ro

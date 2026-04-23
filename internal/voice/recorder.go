@@ -19,11 +19,14 @@ const (
 
 // UserActivity tracks live voice activity for a single user.
 type UserActivity struct {
-	UserID       string    `json:"user_id"`
-	DisplayName  string    `json:"display_name"`
-	Speaking     bool      `json:"speaking"`
-	PacketCount  int64     `json:"packet_count"`
-	LastPacketAt time.Time `json:"last_packet_at"`
+	UserID        string       `json:"user_id"`
+	DisplayName   string       `json:"display_name"`
+	Speaking      bool         `json:"speaking"`
+	PacketCount   int64        `json:"packet_count"`
+	LastPacketAt  time.Time    `json:"last_packet_at"`
+	Status        StreamStatus `json:"status"`         // handshaking/active/decrypt_failed/reconnecting
+	StatusMessage string       `json:"status_message"` // optional human-readable detail
+	LostPackets   int          `json:"lost_packets"`   // DAVE packets lost before handshake completed
 }
 
 // NameResolver resolves a Discord user ID to a display name.
@@ -64,17 +67,35 @@ func NewRecorder(outputDir, guildID string, liveCh chan ChunkReady) *Recorder {
 	}
 }
 
-// RecordVoiceStateJoin records the wall-clock time at which a user was first
-// seen in the recorded voice channel (via VoiceStateUpdate or initial
-// enumeration). It's used as a secondary offset signal for users who join
-// the channel silently.
+// RecordVoiceStateJoin records the wall-clock time at which a user entered
+// the recorded voice channel (via VoiceStateUpdate or initial enumeration).
+// Overwrites any previous timestamp — for rejoins within the same session we
+// need the most recent join time, not the original one. Paired with
+// RecordVoiceStateLeave which clears the field on channel-leave.
+//
+// If a stream already exists for this user (rare VSU-after-speaking-update
+// ordering) channelJoinAt is updated so the next silence-pad uses the fresh
+// value.
 func (r *Recorder) RecordVoiceStateJoin(userID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.vsuJoinAt[userID]; ok {
-		return // keep earliest observation
+	now := time.Now()
+	r.vsuJoinAt[userID] = now
+	for _, us := range r.streams {
+		if us.userID == userID {
+			us.channelJoinAt = now
+			break
+		}
 	}
-	r.vsuJoinAt[userID] = time.Now()
+}
+
+// RecordVoiceStateLeave clears the recorded VSU join time so that the next
+// join VSU is captured fresh rather than being ignored. Called when a user
+// moves out of the recorded channel or disconnects.
+func (r *Recorder) RecordVoiceStateLeave(userID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.vsuJoinAt, userID)
 }
 
 // HandleSpeakingUpdate maps an SSRC to a user ID, creates a UserStream if
@@ -112,16 +133,44 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 	// Check if this user already has a stream under a previous SSRC (reconnect).
 	if oldSSRC, ok := r.userToSSRC[userID]; ok && oldSSRC != ssrc {
 		if existing, ok := r.streams[oldSSRC]; ok {
-			// Insert silence for the duration the user was disconnected.
+			// Anchor the rejoin to the VSU time if we have one (cleared on
+			// leave, set on rejoin). Fall back to now if VSU hasn't arrived
+			// yet (rare: speaking-update before VSU).
+			rejoinAnchor := time.Now()
+			if vsu, ok := r.vsuJoinAt[userID]; ok && !vsu.IsZero() {
+				rejoinAnchor = vsu
+			}
+			// Insert silence to fill the WAV from the last real packet up
+			// to the rejoin anchor. The silence-pad block in HandlePacket
+			// will cover the remaining rejoin-to-first-audio gap.
 			if a, ok := r.activity[userID]; ok && !a.LastPacketAt.IsZero() {
-				gap := time.Since(a.LastPacketAt)
-				existing.InsertSilenceDuration(gap)
+				if gap := rejoinAnchor.Sub(a.LastPacketAt); gap > 0 {
+					existing.InsertSilenceDuration(gap)
+				} else {
+					// Clock/ordering anomaly — just reset hasFirstTS and rely
+					// on the silence-pad block.
+					existing.hasFirstTS = false
+				}
+			} else {
+				existing.hasFirstTS = false
 			}
 
 			// Reuse the existing stream under the new SSRC.
 			existing.daveState = daveState
 			existing.daveVC = vc
 			existing.daveActive = false // reset so new DAVE handshake can proceed
+			existing.status = StatusReconnecting
+			existing.channelJoinAt = rejoinAnchor
+			if daveState == nil {
+				existing.statusMsg = "reconnected — waiting for DAVE handshake"
+			} else {
+				existing.statusMsg = "reconnected — waiting for first audio packet"
+			}
+			// Reset the opus decoder — the new SSRC starts a fresh opus
+			// stream, and reusing the old decoder's state produces artifacts.
+			if err := existing.resetDecoder(); err != nil {
+				log.Printf("failed to reset opus decoder for %s: %v", userID, err)
+			}
 			r.streams[ssrc] = existing
 			delete(r.streams, oldSSRC)
 			r.userToSSRC[userID] = ssrc
@@ -145,6 +194,18 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 		log.Printf("Failed to create stream for user %s: %v", userID, err)
 		return
 	}
+	// VoiceStateUpdate fires before SpeakingUpdate for new joiners, so the
+	// VSU time is already recorded in vsuJoinAt. Propagate it to the stream
+	// so it can pad silence for the VSU-to-first-audio gap.
+	if vsuTime, ok := r.vsuJoinAt[userID]; ok {
+		us.channelJoinAt = vsuTime
+	}
+	// Rewrite offsets.json when the stream detects Discord jitter-buffer
+	// drift and back-projects its firstPacketAt. The callback runs under
+	// r.mu because HandlePacket is called with the lock held.
+	us.onFirstPacketCorrected = func() {
+		r.writeOffsetsLocked()
+	}
 	joinOffset := time.Since(r.sessionStart)
 	r.userJoinOffset[userID] = joinOffset
 	if r.liveCh != nil {
@@ -162,6 +223,11 @@ func (r *Recorder) HandleSpeakingUpdate(vc *discordgo.VoiceConnection, ssrc uint
 		}
 		r.activity[userID].PacketCount += int64(len(pending))
 		delete(r.pendingPackets, ssrc)
+		// Pending packet drain may have set firstPacketAt via the silence-pad
+		// path. Re-persist offsets.json so it reflects the tighter timing.
+		if !us.FirstPacketAt().IsZero() {
+			r.writeOffsetsLocked()
+		}
 	}
 }
 
@@ -389,11 +455,21 @@ func (r *Recorder) Activity() []UserActivity {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	// Build a quick userID -> stream lookup for status/pending info.
+	streamByUser := make(map[string]*UserStream, len(r.streams))
+	for _, us := range r.streams {
+		streamByUser[us.userID] = us
+	}
+
 	now := time.Now()
 	out := make([]UserActivity, 0, len(r.activity))
 	for _, a := range r.activity {
 		snap := *a
 		snap.Speaking = now.Sub(a.LastPacketAt) < activityTimeout
+		if us, ok := streamByUser[a.UserID]; ok {
+			snap.Status, snap.StatusMessage = us.Status()
+			snap.LostPackets = us.LostPackets()
+		}
 		out = append(out, snap)
 	}
 	return out
