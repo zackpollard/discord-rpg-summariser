@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.22](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.21...v0.1.22) (2026-04-27)
+
+
+### CI/CD
+
+* split docker build into its own workflow triggered by github release ([c461eae](https://github.com/zackpollard/discord-rpg-summariser/commit/c461eaeb73e23c64656a2332223101edbaf4450a))
+
 ## [0.1.21](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.20...v0.1.21) (2026-04-23)
 
 
