@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.23](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.22...v0.1.23) (2026-04-27)
+
+
+### CI/CD
+
+* call docker workflow from release.yml via workflow_call ([2849bb0](https://github.com/zackpollard/discord-rpg-summariser/commit/2849bb0bcc771d5e9410aea1f92a577454456f64))
+
 ## [0.1.22](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.21...v0.1.22) (2026-04-27)
 
 
