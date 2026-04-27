@@ -73,9 +73,11 @@ RUN git clone --depth 1 https://github.com/k2-fsa/ZipVoice.git /opt/tts-venv/Zip
 RUN /opt/tts-venv/bin/pip install --no-cache-dir piper_phonemize \
     -f https://k2-fsa.github.io/icefall/piper_phonemize.html
 
-# Install remaining ZipVoice requirements + sentencepiece/huggingface_hub for bpe.vocab generation
+# Install remaining ZipVoice requirements + sentencepiece/huggingface_hub for
+# bpe.vocab generation. urllib3 is a transitive dep that lhotse imports
+# directly but doesn't declare; pin it here so the venv doesn't break.
 RUN /opt/tts-venv/bin/pip install --no-cache-dir \
-    -r /opt/tts-venv/ZipVoice/requirements.txt sentencepiece huggingface_hub
+    -r /opt/tts-venv/ZipVoice/requirements.txt sentencepiece huggingface_hub urllib3
 
 # Stage 4: Runtime
 FROM node:22-slim AS runtime

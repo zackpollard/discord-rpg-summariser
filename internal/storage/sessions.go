@@ -137,14 +137,63 @@ func (s *Store) GetLatestCompleteSessions(ctx context.Context, campaignID int64,
 	return sessions, nil
 }
 
+// CleanupStaleSessions marks sessions left in an active state (recording /
+// transcribing / summarising) from a previous run as failed. Preserves
+// ended_at if it was already set so durations stay accurate — only stamps
+// NOW() for sessions that genuinely never ended (stuck mid-recording).
 func (s *Store) CleanupStaleSessions(ctx context.Context) (int64, error) {
 	tag, err := s.Pool.Exec(ctx,
-		`UPDATE sessions SET status = 'failed', ended_at = NOW()
+		`UPDATE sessions SET status = 'failed', ended_at = COALESCE(ended_at, NOW())
 		 WHERE status IN ('recording', 'transcribing', 'summarising')`)
 	if err != nil {
 		return 0, fmt.Errorf("cleanup stale sessions: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// SessionForBackfill is a thin record used by RecalculateSessionEndTimes to
+// pull the candidate set without exposing the full Session type.
+type SessionForBackfill struct {
+	ID        int64
+	StartedAt time.Time
+	EndedAt   *time.Time
+	AudioDir  string
+}
+
+// ListSessionsForEndTimeBackfill returns sessions whose ended_at was likely
+// stamped by a bot restart rather than the actual recording end (i.e.
+// duration > maxRealDuration). The caller derives a real end-time from the
+// audio directory's latest file mtime and updates the row.
+func (s *Store) ListSessionsForEndTimeBackfill(ctx context.Context, maxRealDuration time.Duration) ([]SessionForBackfill, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT id, started_at, ended_at, audio_dir
+		FROM sessions
+		WHERE ended_at IS NOT NULL
+		  AND audio_dir <> ''
+		  AND EXTRACT(EPOCH FROM (ended_at - started_at)) > $1
+	`, maxRealDuration.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("list sessions for backfill: %w", err)
+	}
+	defer rows.Close()
+	var out []SessionForBackfill
+	for rows.Next() {
+		var s SessionForBackfill
+		if err := rows.Scan(&s.ID, &s.StartedAt, &s.EndedAt, &s.AudioDir); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// SetSessionEndedAt updates only the ended_at column for a session.
+func (s *Store) SetSessionEndedAt(ctx context.Context, id int64, endedAt time.Time) error {
+	_, err := s.Pool.Exec(ctx,
+		`UPDATE sessions SET ended_at = $1 WHERE id = $2`,
+		endedAt.UTC(), id,
+	)
+	return err
 }
 
 // DeleteSession permanently removes a session and all associated data.

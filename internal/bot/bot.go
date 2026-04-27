@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -350,6 +352,16 @@ func (b *Bot) Start() error {
 		log.Printf("Cleaned up %d stale session(s) from previous run", n)
 	}
 
+	// One-shot duration backfill. Older versions of CleanupStaleSessions
+	// unconditionally stamped ended_at = NOW() on every restart, inflating
+	// stored durations. Recompute end-time from the audio directory's latest
+	// file mtime for any session whose duration looks suspiciously long.
+	if n, err := b.recalculateSessionEndTimes(ctx); err != nil {
+		log.Printf("Warning: session end-time backfill failed: %v", err)
+	} else if n > 0 {
+		log.Printf("Backfilled ended_at for %d session(s) from audio file mtimes", n)
+	}
+
 	b.session.AddHandler(b.handleInteraction)
 	b.session.AddHandler(b.handleVoiceStateUpdate)
 
@@ -559,4 +571,64 @@ func (b *Bot) stopRecording() stopResult {
 	b.liveWorker = nil
 
 	return result
+}
+
+// recalculateSessionEndTimes finds sessions whose ended_at - started_at is
+// implausibly long (>maxRealSessionDuration) and re-derives ended_at from
+// the latest mtime of any file under the session's audio directory. Used
+// once at startup to clean up rows that were previously stamped at bot
+// restart time by the old CleanupStaleSessions behaviour.
+func (b *Bot) recalculateSessionEndTimes(ctx context.Context) (int, error) {
+	const maxRealSessionDuration = 12 * time.Hour
+	candidates, err := b.store.ListSessionsForEndTimeBackfill(ctx, maxRealSessionDuration)
+	if err != nil {
+		return 0, err
+	}
+	updated := 0
+	for _, c := range candidates {
+		latest, ok := latestMtimeUnder(c.AudioDir)
+		if !ok {
+			continue // no audio files — leave as-is, can't infer
+		}
+		if !latest.After(c.StartedAt) {
+			continue // mtime sanity-check failed
+		}
+		if c.EndedAt != nil && !latest.Before(*c.EndedAt) {
+			continue // mtime is after the stored end_at — stored value already trusted
+		}
+		if err := b.store.SetSessionEndedAt(ctx, c.ID, latest); err != nil {
+			log.Printf("session %d: backfill SetSessionEndedAt: %v", c.ID, err)
+			continue
+		}
+		updated++
+	}
+	return updated, nil
+}
+
+// latestMtimeUnder walks the given directory and returns the most-recent
+// modification time across all files. Returns ok=false if the dir doesn't
+// exist or contains no files.
+func latestMtimeUnder(dir string) (time.Time, bool) {
+	if dir == "" {
+		return time.Time{}, false
+	}
+	var latest time.Time
+	any := false
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip unreadable entries, don't abort
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if t := info.ModTime(); t.After(latest) {
+			latest = t
+			any = true
+		}
+		return nil
+	})
+	if err != nil || !any {
+		return time.Time{}, false
+	}
+	return latest, true
 }

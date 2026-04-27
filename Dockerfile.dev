@@ -80,7 +80,7 @@ RUN /opt/tts-venv/bin/pip install --no-cache-dir piper_phonemize \
     -f https://k2-fsa.github.io/icefall/piper_phonemize.html
 
 RUN /opt/tts-venv/bin/pip install --no-cache-dir \
-    -r /opt/tts-venv/ZipVoice/requirements.txt sentencepiece
+    -r /opt/tts-venv/ZipVoice/requirements.txt sentencepiece huggingface_hub urllib3
 
 # ---------------------------------------------------------------------------
 # Stage 4: Production runtime (same as production Dockerfile)
