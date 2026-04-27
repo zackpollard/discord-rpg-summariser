@@ -1,13 +1,18 @@
 name: Docker
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.21)'
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to build (e.g. v0.1.21). Defaults to the triggering release tag.'
-        required: false
+        description: 'Tag to build (e.g. v0.1.21)'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,22 +26,10 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve tag
-        id: tag
-        run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            echo "ref=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ github.event.release.tag_name }}" ]; then
-            echo "ref=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "no tag input or release context provided" >&2
-            exit 1
-          fi
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ steps.tag.outputs.ref }}
+          ref: ${{ inputs.tag }}
           submodules: recursive
 
       - name: Set up Docker Buildx
@@ -55,8 +48,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}},value=${{ steps.tag.outputs.ref }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.tag.outputs.ref }}
+            type=semver,pattern={{version}},value=${{ inputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag }}
             type=sha
             type=raw,value=latest
 
@@ -68,6 +61,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VERSION=${{ steps.tag.outputs.ref }}
+            VERSION=${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
