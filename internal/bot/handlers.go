@@ -170,14 +170,28 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	// ACK within 3s — the work below (voice join, model load) can take longer.
 	deferResponse(s, i)
 
-	// Ensure no session is already active.
+	// Ensure no session is already active, and claim the slot in the same
+	// critical section — b.recorder is not published until the very end of
+	// this handler, so a bare check would let a second /session start (or an
+	// enrollment) run concurrently and overwrite our state.
 	b.mu.Lock()
-	if b.recorder != nil {
+	if b.recorder != nil || b.starting {
 		b.mu.Unlock()
 		followup(s, i, "A recording session is already active.")
 		return
 	}
+	if b.enrolling {
+		b.mu.Unlock()
+		followup(s, i, "A voice enrollment is in progress. Try again in a moment.")
+		return
+	}
+	b.starting = true
 	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.starting = false
+		b.mu.Unlock()
+	}()
 
 	ctx := context.Background()
 	active, err := b.store.GetActiveSession(ctx, guildID)
@@ -212,12 +226,40 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 		return
 	}
 
+	// The row is created with status='recording', which blocks every later
+	// /session start until it reaches a terminal state. Roll it back on any
+	// failure between here and the state assignment below.
+	started := false
+	defer func() {
+		if started {
+			return
+		}
+		if err := b.store.UpdateSessionStatus(ctx, sessionID, "failed"); err != nil {
+			log.Printf("session start rollback: UpdateSessionStatus(%d): %v", sessionID, err)
+		}
+		if err := b.store.SetSessionEndedAt(ctx, sessionID, time.Now()); err != nil {
+			log.Printf("session start rollback: SetSessionEndedAt(%d): %v", sessionID, err)
+		}
+		if err := os.RemoveAll(audioDir); err != nil {
+			log.Printf("session start rollback: RemoveAll(%s): %v", audioDir, err)
+		}
+	}()
+
 	// Join voice channel.
 	log.Printf("Joining voice channel %s in guild %s", userVoiceChannelID, guildID)
-	vc, err := s.ChannelVoiceJoin(ctx, guildID, userVoiceChannelID, false, false)
+	// Bound the join: it waits on a gateway event that may never arrive, and
+	// the starting claim is held across it.
+	joinCtx, cancelJoin := context.WithTimeout(ctx, voiceJoinTimeout)
+	vc, err := s.ChannelVoiceJoin(joinCtx, guildID, userVoiceChannelID, false, false)
+	cancelJoin()
 	if err != nil {
 		followup(s, i, "Failed to join your voice channel.")
 		log.Printf("VoiceJoin error: %v", err)
+		// The join may have got as far as sending the gateway voice-state
+		// update, so leave the channel if we ended up with a connection.
+		if vc != nil {
+			disconnectVoice(vc)
+		}
 		return
 	}
 	log.Printf("Voice connection established (OpusRecv=%v)", vc.OpusRecv != nil)
@@ -227,6 +269,8 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 	if err != nil {
 		followup(s, i, "Failed to load transcription model.")
 		log.Printf("acquireTranscriber error: %v", err)
+		// Nothing owns the connection now that the session is failing.
+		disconnectVoice(vc)
 		return
 	}
 
@@ -280,6 +324,7 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 		b.telegramListener = b.telegramClient.StartListening(ctx, b.config.Telegram.ChatID)
 	}
 	b.mu.Unlock()
+	started = true
 
 	// Record channel-join time for everyone already in the channel when the
 	// bot joined. They have no VoiceStateUpdate we can use, so the bot-join
@@ -299,7 +344,6 @@ func (b *Bot) handleSessionStart(s *discordgo.Session, i *discordgo.InteractionC
 func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	b.mu.Lock()
 	rec := b.recorder
-	sessionID := b.sessionID
 	b.mu.Unlock()
 
 	if rec == nil {
@@ -312,10 +356,13 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 	deferResponse(s, i)
 
 	// Stop recording and disconnect; get user WAV files and Telegram messages.
-	result := b.stopRecording()
-	// Release the live transcription's reference to the transcriber.
-	// The pipeline will acquire its own reference.
-	b.releaseTranscriber()
+	// stopRecording claims the session and releases the live transcriber
+	// reference; if the auto-stop path beat us to it we must do nothing else.
+	result, sessionID, ok := b.stopRecording()
+	if !ok {
+		followup(s, i, "No active recording session.")
+		return
+	}
 
 	// Mark session as ended in DB.
 	ctx := context.Background()
@@ -327,6 +374,23 @@ func (b *Bot) handleSessionStop(s *discordgo.Session, i *discordgo.InteractionCr
 
 	// Kick off async pipeline.
 	go b.runPipeline(sessionID, result)
+}
+
+// voiceJoinTimeout bounds ChannelVoiceJoin, which waits for a gateway
+// VOICE_SERVER_UPDATE that never arrives if the gateway has gone away. Both
+// callers hold a claim (starting/enrolling) across the join, so an unbounded
+// wait would latch that claim for the rest of the process lifetime.
+const voiceJoinTimeout = 15 * time.Second
+
+// disconnectVoice leaves the voice channel with a bounded deadline. Without
+// one, Disconnect blocks until the gateway confirms the connection is dead,
+// which never happens if the gateway has gone away.
+func disconnectVoice(vc *discordgo.VoiceConnection) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := vc.Disconnect(ctx); err != nil {
+		log.Printf("Error disconnecting from voice: %v", err)
+	}
 }
 
 func (b *Bot) handleSessionStatus(s *discordgo.Session, i *discordgo.InteractionCreate) {

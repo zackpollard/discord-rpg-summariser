@@ -158,14 +158,32 @@ func (b *Bot) handleCampaignEnroll(s *discordgo.Session, i *discordgo.Interactio
 		}
 	}
 
-	// Ensure no session is active (would conflict with the recorder).
+	// Ensure no session is active or starting (enrollment starts a second
+	// recorder on the guild's voice connection and then disconnects it, which
+	// would silently kill a session's recording), and claim the slot in the
+	// same critical section so a /session start can't slip in behind us.
 	b.mu.Lock()
-	if b.recorder != nil {
+	if b.recorder != nil || b.starting {
 		b.mu.Unlock()
 		respondEphemeral(s, i, "A recording session is active. Enrollment will happen automatically when it ends.")
 		return
 	}
+	if b.enrolling {
+		b.mu.Unlock()
+		respondEphemeral(s, i, "A voice enrollment is already in progress.")
+		return
+	}
+	b.enrolling = true
 	b.mu.Unlock()
+
+	claimed := false
+	defer func() {
+		if !claimed {
+			b.mu.Lock()
+			b.enrolling = false
+			b.mu.Unlock()
+		}
+	}()
 
 	// Ensure the diarizer (and its embedding extractor) is available.
 	d := b.getDiarizer()
@@ -197,11 +215,19 @@ func (b *Bot) handleCampaignEnroll(s *discordgo.Session, i *discordgo.Interactio
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 	})
 
-	// Run enrollment in the background.
+	// Run enrollment in the background; it now owns the enrolling claim.
+	claimed = true
 	go b.runEnrollment(s, i, campaign.ID, micUserID, enrollUserID, enrollPartner, voiceChannelID)
 }
 
 func (b *Bot) runEnrollment(s *discordgo.Session, i *discordgo.InteractionCreate, campaignID int64, micUserID, enrollUserID string, isPartner bool, voiceChannelID string) {
+	defer recoverPanic("voice enrollment")
+	defer func() {
+		b.mu.Lock()
+		b.enrolling = false
+		b.mu.Unlock()
+	}()
+
 	ctx := context.Background()
 
 	// Create a temporary directory for the WAV file.
@@ -212,8 +238,13 @@ func (b *Bot) runEnrollment(s *discordgo.Session, i *discordgo.InteractionCreate
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Join voice channel.
-	vc, err := s.ChannelVoiceJoin(ctx, i.GuildID, voiceChannelID, false, false)
+	// Join voice channel. Bound the join: it waits for a gateway
+	// VOICE_SERVER_UPDATE that may never arrive, and the enrolling claim is
+	// held for the whole of runEnrollment, so a stalled join would block
+	// /session start and /campaign enroll for the rest of the process life.
+	joinCtx, cancelJoin := context.WithTimeout(ctx, voiceJoinTimeout)
+	vc, err := s.ChannelVoiceJoin(joinCtx, i.GuildID, voiceChannelID, false, false)
+	cancelJoin()
 	if err != nil {
 		b.enrollFollowup(s, i, "Failed to join voice channel.")
 		return
@@ -243,8 +274,16 @@ func (b *Bot) runEnrollment(s *discordgo.Session, i *discordgo.InteractionCreate
 	if err := rec.Stop(); err != nil {
 		log.Printf("enroll: stop recorder: %v", err)
 	}
-	if err := vc.Disconnect(ctx); err != nil {
-		log.Printf("enroll: disconnect: %v", err)
+	// ChannelVoiceJoin hands back the guild's existing connection, so only
+	// disconnect if nothing else has claimed it in the meantime — otherwise
+	// we would kill a session's recording.
+	b.mu.Lock()
+	sessionOwnsVC := b.activeVC != nil
+	b.mu.Unlock()
+	if sessionOwnsVC {
+		log.Println("enroll: leaving voice connection in place, a session owns it")
+	} else {
+		disconnectVoice(vc)
 	}
 
 	// Find the mic user's WAV file (audio comes from their Discord account).

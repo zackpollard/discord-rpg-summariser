@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -13,33 +14,38 @@ import (
 	"discord-rpg-summariser/internal/audio"
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
-	"discord-rpg-summariser/internal/telegram"
 	"discord-rpg-summariser/internal/transcribe"
 )
 
 // ReprocessSession re-runs the summarisation and extraction pipeline on an
 // existing session. If retranscribe is true, it also re-transcribes from the
 // original WAV files (replacing existing transcript segments).
-func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscribe bool) error {
-	ctx = summarise.WithSessionID(ctx, sessionID)
-
-	// Set up progress tracking.
-	b.mu.Lock()
-	b.progress = NewPipelineProgress(sessionID)
-	b.mu.Unlock()
+func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscribe bool) (err error) {
 	defer func() {
-		b.mu.Lock()
-		b.progress = nil
-		b.mu.Unlock()
+		if r := recover(); r != nil {
+			log.Printf("reprocess: panic for session %d: %v\n%s", sessionID, r, debug.Stack())
+			b.store.UpdateSessionStatus(context.Background(), sessionID, "failed")
+			err = fmt.Errorf("reprocess panicked: %v", r)
+		}
 	}()
 
+	ctx = summarise.WithSessionID(ctx, sessionID)
+
+	// Set up progress tracking. The tracker is kept in a local for the whole
+	// run; registering it also claims the session so two runs can't interleave
+	// their DB writes.
+	prog, ok := b.beginPipeline(sessionID)
+	if !ok {
+		return fmt.Errorf("a pipeline run for session %d is already in progress", sessionID)
+	}
+	defer b.endPipeline(sessionID, prog)
+
 	// Stream LLM stderr to the progress window.
-	if cli, ok := b.summariser.(*summarise.ClaudeCLI); ok {
-		progress := b.progress
-		cli.OnStream = func(operation, message string) {
-			progress.BroadcastLog(fmt.Sprintf("[%s] %s", operation, message))
-		}
-		defer func() { cli.OnStream = nil }()
+	if cli, isCLI := b.summariser.(*summarise.ClaudeCLI); isCLI {
+		cli.SetOnStream(func(operation, message string) {
+			prog.BroadcastLog(fmt.Sprintf("[%s] %s", operation, message))
+		})
+		defer cli.SetOnStream(nil)
 	}
 
 	session, err := b.store.GetSession(ctx, sessionID)
@@ -49,8 +55,8 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 
 	if retranscribe {
 		b.store.UpdateSessionStatus(ctx, sessionID, "transcribing")
-		b.progress.SetStage("transcribing", "Re-transcribing audio")
-		if err := b.retranscribeSession(ctx, session); err != nil {
+		prog.SetStage("transcribing", "Re-transcribing audio")
+		if err := b.retranscribeSession(ctx, prog, session); err != nil {
 			log.Printf("reprocess: retranscription failed for session %d: %v", sessionID, err)
 			b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 			return err
@@ -58,8 +64,8 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	} else {
 		// Skip the transcription weight so the progress bar starts at the
 		// right place instead of jumping from 0% to 60%.
-		b.progress.SkipStage("transcribing")
-		b.progress.SkipStage("mixing")
+		prog.SkipStage("transcribing")
+		prog.SkipStage("mixing")
 	}
 
 	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
@@ -93,9 +99,12 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 		}
 	}
 
-	// Build formatted transcript text.
+	// Build formatted transcript text, keeping each segment's DB ID alongside
+	// it so annotations can be matched by identity rather than by position.
 	var merged []transcribe.UserSegment
+	segmentIDs := make([]int64, 0, len(segments))
 	for _, seg := range segments {
+		segmentIDs = append(segmentIDs, seg.ID)
 		merged = append(merged, transcribe.UserSegment{
 			UserID:        seg.UserID,
 			CharacterName: charNames[seg.UserID],
@@ -120,19 +129,25 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	// Annotate transcript: classify segments, correct ASR errors, detect
 	// scene boundaries, and identify NPC voices. Required — downstream
 	// stages depend on the annotated transcript for quality.
-	b.progress.SetStage("summarising", "Annotating transcript")
-	annotations := b.annotateTranscript(ctx, session, sessionID, merged, charNames, dmName)
+	prog.SetStage("summarising", "Annotating transcript")
+	annotations, annotatedIDs := b.annotateTranscript(ctx, prog, session, sessionID, merged, charNames, dmName)
 
 	if len(annotations) == 0 {
 		log.Printf("reprocess: annotation failed for session %d, aborting", sessionID)
 		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 		return fmt.Errorf("transcript annotation failed")
 	}
+	if len(annotatedIDs) > 0 {
+		segmentIDs = annotatedIDs
+	}
 
-	transcript := buildAnnotatedTranscript(merged, annotations, dmName)
+	transcript := buildAnnotatedTranscript(merged, segmentIDs, annotations, dmName)
+
+	// Interleave any Telegram messages captured during the session.
+	transcript = b.interleaveTelegramIntoAnnotated(ctx, session, campaign, transcript, dmName)
 
 	// Summarise.
-	b.progress.SetStage("summarising", "Generating summary")
+	prog.SetStage("summarising", "Generating summary")
 	result, err := b.summariser.Summarise(ctx, transcript, "", dmName)
 	if err != nil {
 		log.Printf("reprocess: summarise failed for session %d: %v", sessionID, err)
@@ -155,28 +170,32 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	}
 
 	// Run extraction stages in parallel.
-	b.progress.SetStage("extracting", "Extracting title, entities, quests, and combat")
+	prog.SetStage("extracting", "Extracting title, entities, quests, and combat")
 
 	var extractWg sync.WaitGroup
 	extractWg.Add(4)
 
 	go func() {
 		defer extractWg.Done()
+		defer recoverPanic("reprocess title/quotes extraction")
 		b.extractTitleAndQuotes(ctx, session, sessionID, transcript, result.Summary, dmName)
 	}()
 
 	go func() {
 		defer extractWg.Done()
+		defer recoverPanic("reprocess entity extraction")
 		b.extractEntities(ctx, session, sessionID, transcript, result.Summary, dmName)
 	}()
 
 	go func() {
 		defer extractWg.Done()
+		defer recoverPanic("reprocess quest extraction")
 		b.extractQuests(ctx, session, sessionID, transcript, result.Summary, dmName)
 	}()
 
 	go func() {
 		defer extractWg.Done()
+		defer recoverPanic("reprocess combat extraction")
 		b.extractCombat(ctx, session, sessionID, transcript, result.Summary, dmName)
 		b.extractCreatures(ctx, session, sessionID, transcript, result.Summary, dmName)
 	}()
@@ -184,81 +203,20 @@ func (b *Bot) ReprocessSession(ctx context.Context, sessionID int64, retranscrib
 	extractWg.Wait()
 
 	// Regenerate embeddings after extractions complete.
-	b.progress.SetStage("generating embeddings", "Generating embeddings")
+	prog.SetStage("generating embeddings", "Generating embeddings")
 	if err := b.store.DeleteEmbeddingsForSession(ctx, sessionID); err != nil {
 		log.Printf("reprocess: DeleteEmbeddingsForSession: %v", err)
 	}
 	b.generateEmbeddings(ctx, session, sessionID, merged, result.Summary, dmName)
 
-	b.progress.Complete()
+	prog.Complete()
 	log.Printf("reprocess: session %d completed successfully", sessionID)
 	return nil
 }
 
-// buildTranscriptFromDB builds a formatted transcript from DB data, including
-// any stored Telegram messages.
-func (b *Bot) buildTranscriptFromDB(
-	ctx context.Context,
-	session *storage.Session,
-	campaign *storage.Campaign,
-	merged []transcribe.UserSegment,
-	dmName string,
-) string {
-	// Load stored Telegram messages for this session.
-	tgMsgs, err := b.store.GetTelegramMessages(ctx, session.ID, false)
-	if err != nil {
-		log.Printf("reprocess: GetTelegramMessages: %v", err)
-		return transcribe.FormatTranscript(merged)
-	}
-	if len(tgMsgs) == 0 {
-		return transcribe.FormatTranscript(merged)
-	}
-
-	var telegramDMID int64
-	if campaign != nil && campaign.TelegramDMUserID != nil {
-		telegramDMID = *campaign.TelegramDMUserID
-	}
-
-	senderLabel := "DM"
-	if dmName != "" {
-		senderLabel = dmName
-	}
-
-	var entries []transcribe.TelegramEntry
-	for _, m := range tgMsgs {
-		isDM := telegramDMID != 0 && m.FromUserID == telegramDMID
-		if !telegram.IsRelevant(telegram.Message{
-			FromID: m.FromUserID,
-			Text:   m.Text,
-		}, isDM) {
-			continue
-		}
-		elapsed := m.SentAt.Sub(session.StartedAt).Seconds()
-		if elapsed < 0 {
-			elapsed = 0
-		}
-		name := senderLabel
-		if !isDM {
-			name = m.FromDisplay
-		}
-		entries = append(entries, transcribe.TelegramEntry{
-			ElapsedSecs: elapsed,
-			SenderName:  name,
-			Text:        m.Text,
-		})
-	}
-
-	if len(entries) == 0 {
-		return transcribe.FormatTranscript(merged)
-	}
-
-	log.Printf("reprocess: interleaving %d Telegram messages into transcript", len(entries))
-	return transcribe.FormatTranscriptWithTelegram(merged, entries)
-}
-
 // retranscribeSession re-transcribes all WAV files in the session's audio
 // directory, replacing existing transcript segments.
-func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session) error {
+func (b *Bot) retranscribeSession(ctx context.Context, prog *PipelineProgress, session *storage.Session) error {
 	if session.AudioDir == "" {
 		return fmt.Errorf("no audio directory for session %d", session.ID)
 	}
@@ -308,20 +266,14 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 	totalUsers := len(userFiles)
 
 	// Wire up intra-file progress if the transcriber supports it.
-	// Capture the progress pointer at callback setup so a concurrent
-	// pipeline that replaces b.progress can't cause us to nil-deref.
 	type progressSetter interface {
 		SetProgressCallback(func(float64))
 	}
-	progress := b.progress
 	setIntraProgress := func(doneUsers int) {
 		if ps, ok := transcriber.(progressSetter); ok {
 			ps.SetProgressCallback(func(filePct float64) {
-				if progress == nil {
-					return
-				}
 				p := (float64(doneUsers) + filePct) / float64(totalUsers)
-				progress.SetSubProgress(p)
+				prog.SetSubProgress(p)
 			})
 		}
 	}
@@ -341,15 +293,15 @@ func (b *Bot) retranscribeSession(ctx context.Context, session *storage.Session)
 			if err != nil {
 				log.Printf("reprocess: transcribe user %s: %v", userID, err)
 				doneUsers++
-				b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
+				prog.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 				continue
 			}
 			userSegments[userID] = segs
 		}
 		doneUsers++
 		log.Printf("reprocess: user %s done in %s (%d of %d)", userID, time.Since(userStart).Round(time.Second), doneUsers, totalUsers)
-		b.progress.SetDetail(fmt.Sprintf("Re-transcribing audio (%d of %d users)", doneUsers, totalUsers))
-		b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
+		prog.SetDetail(fmt.Sprintf("Re-transcribing audio (%d of %d users)", doneUsers, totalUsers))
+		prog.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 	}
 	log.Printf("reprocess: all %d users transcribed in %s", totalUsers, time.Since(overallStart).Round(time.Second))
 

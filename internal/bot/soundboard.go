@@ -22,6 +22,21 @@ func (b *Bot) PlayClipInVoice(wavPath string) error {
 		return fmt.Errorf("not in a voice channel")
 	}
 
+	return playWAVSafe(vc, wavPath)
+}
+
+// playWAVSafe streams a clip through a voice connection, turning a panic into
+// an error. Playback outlives the caller's snapshot of the connection, so the
+// session can disconnect mid-clip; discordgo then closes vc.OpusSend and the
+// in-flight send panics with "send on closed channel". Since Kill() closes the
+// channel asynchronously, no liveness check can close that window — only
+// recovering can.
+func playWAVSafe(vc *discordgo.VoiceConnection, wavPath string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("voice connection closed during playback: %v", r)
+		}
+	}()
 	return voice.PlayWAV(vc, wavPath)
 }
 
@@ -74,7 +89,8 @@ func (b *Bot) handleSoundboardPlay(s *discordgo.Session, i *discordgo.Interactio
 	respond(s, i, fmt.Sprintf("Playing %q...", matchedClip.name))
 
 	go func() {
-		if err := voice.PlayWAV(vc, matchedClip.path); err != nil {
+		defer recoverPanic("soundboard playback")
+		if err := playWAVSafe(vc, matchedClip.path); err != nil {
 			log.Printf("soundboard play: %v", err)
 		}
 	}()
