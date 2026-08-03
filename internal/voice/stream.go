@@ -31,21 +31,21 @@ const (
 )
 
 type UserStream struct {
-	userID         string
-	wav            *WAVWriter
-	decoder        *opus.Decoder
-	lastTS         uint32
-	hasFirstTS     bool
-	firstPacketAt  time.Time // wall clock of first decoded audio packet
-	channelJoinAt  time.Time // wall clock when VSU said user was first in the channel
-	daveState      *discordgo.ReceiverState
-	daveActive     bool                       // true after the first successful DAVE decrypt
-	daveFailCount  int                        // consecutive decryption failures
-	nonDaveCount   int                        // non-DAVE non-silence frames while DAVE was active
-	daveVC         *discordgo.VoiceConnection // for re-deriving keys
-	daveEpoch     uint64                     // last observed DAVE epoch; change → rederive
-	prevDaveState *discordgo.ReceiverState   // previous-epoch key, retained as fallback for in-flight stale packets
-	liveBuf       *LiveBuffer
+	userID          string
+	wav             *WAVWriter
+	decoder         *opus.Decoder
+	lastTS          uint32
+	hasFirstTS      bool
+	firstPacketAt   time.Time // wall clock of first decoded audio packet
+	channelJoinAt   time.Time // wall clock when VSU said user was first in the channel
+	daveState       *discordgo.ReceiverState
+	daveActive      bool                       // true after the first successful DAVE decrypt
+	daveFailCount   int                        // consecutive decryption failures
+	nonDaveCount    int                        // non-DAVE non-silence frames while DAVE was active
+	daveVC          *discordgo.VoiceConnection // for re-deriving keys
+	daveEpoch       uint64                     // last observed DAVE epoch; change → rederive
+	prevDaveState   *discordgo.ReceiverState   // previous-epoch key, retained as fallback for in-flight stale packets
+	liveBuf         *LiveBuffer
 	status          StreamStatus
 	statusMsg       string // optional human-readable detail (e.g. "waiting for exporter secret")
 	lostPacketCount int    // packets we couldn't decrypt (pre-handshake / key gap)
@@ -541,4 +541,3 @@ func (us *UserStream) Close() error {
 	return us.wav.Close()
 }
 func (us *UserStream) FilePath() string { return us.wav.file.Name() }
-

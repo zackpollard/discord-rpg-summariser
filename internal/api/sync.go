@@ -311,4 +311,3 @@ func isValidUserIDSegment(s string) bool {
 	}
 	return true
 }
-

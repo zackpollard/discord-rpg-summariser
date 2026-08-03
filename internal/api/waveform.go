@@ -61,10 +61,10 @@ func (s *Server) handleGetSessionWaveform(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Cache-Control", "max-age=3600")
 	writeJSON(w, http.StatusOK, waveformResponse{
-		Peaks:         peaks,
-		StartSec:      startSec,
-		EndSec:        endSec,
-		FullDuration:  fullDuration,
+		Peaks:        peaks,
+		StartSec:     startSec,
+		EndSec:       endSec,
+		FullDuration: fullDuration,
 	})
 }
 
