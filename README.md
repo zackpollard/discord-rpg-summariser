@@ -242,7 +242,7 @@ All configuration is in `config.yaml`. Environment variables override config fil
 
 ### LLM Provider
 
-**Claude CLI** (default): Install the [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) and ensure `claude --print` works. Uses Claude Opus 4.6 with max effort and 1M context window. In Docker, claude-cli is pre-installed — authenticate with `docker exec -it <container> claude login` or set the `ANTHROPIC_API_KEY` environment variable.
+**Claude CLI** (default): Install the [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) and ensure `claude --print` works. Uses Claude Opus 5 with high effort and 1M context window. In Docker, claude-cli is pre-installed — authenticate with `docker exec -it <container> claude login` or set the `ANTHROPIC_API_KEY` environment variable.
 
 **Ollama**: Set `llm.provider: ollama` and configure `ollama_url` and `ollama_model` in config.yaml.
 

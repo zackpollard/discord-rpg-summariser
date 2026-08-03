@@ -54,7 +54,7 @@ func (c *ClaudeCLI) runPromptSession(ctx context.Context, operation, prompt, res
 
 	log.Printf("llm: starting %s (prompt: %d chars, resume: %s)", operation, len(prompt), resumeSessionID)
 
-	args := []string{"--print", "--model", "claude-opus-4-6", "--effort", "max",
+	args := []string{"--print", "--model", "claude-opus-5", "--effort", "high",
 		"--output-format", "stream-json", "--verbose", "--include-partial-messages"}
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
