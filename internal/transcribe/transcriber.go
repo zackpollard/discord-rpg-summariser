@@ -29,6 +29,8 @@ type Segment struct {
 // WhisperTranscriber performs speech-to-text using whisper.cpp in-process.
 type WhisperTranscriber struct {
 	model      whisper.Model
+	wctx       whisper.Context // reused across chunks, see TranscribeChunk
+	lastPrompt string          // initial prompt currently set on wctx
 	language   string
 	threads    int
 	vocabulary []string // campaign-specific words for prompt biasing
@@ -59,8 +61,15 @@ func NewWhisperTranscriber(modelName, modelDir, language string, threads int) (*
 	}, nil
 }
 
-// Close releases the whisper model resources.
+// Close releases the whisper model resources. It takes the same lock as
+// TranscribeChunk so the model cannot be unloaded while a chunk is being
+// processed.
 func (t *WhisperTranscriber) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.wctx = nil
+	t.lastPrompt = ""
 	return t.model.Close()
 }
 
@@ -124,29 +133,37 @@ func (t *WhisperTranscriber) TranscribeChunk(ctx context.Context, samples []floa
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	wctx, err := t.model.NewContext()
-	if err != nil {
-		return nil, fmt.Errorf("create whisper context: %w", err)
+	// The context is created once and reused: SetLanguage and SetInitialPrompt
+	// malloc C strings that the binding never frees, so re-creating the context
+	// (and re-setting unchanged values) leaks on every chunk.
+	if t.wctx == nil {
+		wctx, err := t.model.NewContext()
+		if err != nil {
+			return nil, fmt.Errorf("create whisper context: %w", err)
+		}
+		if err := wctx.SetLanguage(t.language); err != nil {
+			return nil, fmt.Errorf("set language: %w", err)
+		}
+		wctx.SetThreads(uint(t.threads))
+		t.wctx = wctx
 	}
 
-	if err := wctx.SetLanguage(t.language); err != nil {
-		return nil, fmt.Errorf("set language: %w", err)
+	if prompt == "" {
+		prompt = t.buildInitialPrompt()
 	}
-	wctx.SetThreads(uint(t.threads))
-	if prompt != "" {
-		wctx.SetInitialPrompt(prompt)
-	} else {
-		wctx.SetInitialPrompt(t.buildInitialPrompt())
+	if prompt != t.lastPrompt {
+		t.wctx.SetInitialPrompt(prompt)
+		t.lastPrompt = prompt
 	}
 
-	if err := wctx.Process(samples, nil, nil, nil); err != nil {
+	if err := t.wctx.Process(samples, nil, nil, nil); err != nil {
 		return nil, fmt.Errorf("whisper process: %w", err)
 	}
 
 	offsetSec := timeOffset.Seconds()
 	var segments []Segment
 	for {
-		seg, err := wctx.NextSegment()
+		seg, err := t.wctx.NextSegment()
 		if err == io.EOF {
 			break
 		}

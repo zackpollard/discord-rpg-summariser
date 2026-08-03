@@ -124,21 +124,53 @@ func (e *OnnxEmbedder) Close() {
 
 const hiddenSize = 768
 
+// maxBatchTokens caps batchSize*maxSeq for a single inference so the output
+// tensor and the attention intermediates inside ONNX Runtime stay bounded no
+// matter how many texts the caller passes in one call.
+const maxBatchTokens = 8192
+
 func (e *OnnxEmbedder) embedTexts(texts []string) ([][]float32, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	batchSize := int64(len(texts))
-
-	// Tokenize all texts and find the max sequence length.
+	// Tokenize all texts up front.
 	encodings := make([]TokenizerOutput, len(texts))
-	var maxSeq int64
 	for i, text := range texts {
 		encodings[i] = e.tokenizer.Encode(text)
-		if n := int64(len(encodings[i].InputIDs)); n > maxSeq {
-			maxSeq = n
-		}
 	}
+
+	// Run in sub-batches, padding each one to its own longest sequence, so a
+	// large caller batch is never turned into one huge allocation.
+	results := make([][]float32, len(texts))
+	for start := 0; start < len(encodings); {
+		end := start
+		var maxSeq int64
+		for end < len(encodings) {
+			seq := maxSeq
+			if n := int64(len(encodings[end].InputIDs)); n > seq {
+				seq = n
+			}
+			if end > start && int64(end-start+1)*seq > maxBatchTokens {
+				break
+			}
+			maxSeq = seq
+			end++
+		}
+
+		vecs, err := e.runBatch(encodings[start:end], maxSeq)
+		if err != nil {
+			return nil, err
+		}
+		copy(results[start:end], vecs)
+		start = end
+	}
+
+	return results, nil
+}
+
+// runBatch runs a single inference over one padded sub-batch of encodings.
+func (e *OnnxEmbedder) runBatch(encodings []TokenizerOutput, maxSeq int64) ([][]float32, error) {
+	batchSize := int64(len(encodings))
 
 	// Build padded batch tensors.
 	totalInputs := batchSize * maxSeq
