@@ -1,6 +1,55 @@
 package voice
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+func TestInsertSilenceForGap(t *testing.T) {
+	const fortySeconds = 40 * sampleRate
+
+	// after returns the timestamp delta samples on from ts, wrapping at 2^32
+	// the way Discord's 32-bit RTP timestamps do.
+	after := func(ts, delta uint32) uint32 { return ts + delta }
+
+	tests := []struct {
+		name       string
+		lastTS     uint32
+		timestamp  uint32
+		wantSample uint32
+	}{
+		{"in order", 1000, 1000 + frameSamples, 0},
+		{"duplicate", 1000, 1000, 0},
+		{"reordered backwards", 100000, 5000, 0},
+		{"forward gap", 1000, after(1000, frameSamples+fortySeconds), fortySeconds},
+		// The 32-bit timestamp wraps during the gap: the new value is
+		// numerically smaller than the expected one but is still 40s ahead.
+		{"forward gap across wrap", 0xFFF00000, after(0xFFF00000, frameSamples+fortySeconds), fortySeconds},
+		// A packet from just before the wrap arriving after lastTS wrapped.
+		{"reordered across wrap", 0x000000FF, 0xFFFFFF00, 0},
+		// Beyond the RTP ceiling the timestamp is corrupt, so the run is
+		// clamped rather than dropped — dropping it would shift every later
+		// sample earlier and desync the track for the rest of the session.
+		{"implausible gap", 1000, after(1000, frameSamples+maxRTPGapSamples+1), maxRTPGapSamples},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, err := NewWAVWriter(filepath.Join(t.TempDir(), "gap.wav"))
+			if err != nil {
+				t.Fatalf("NewWAVWriter: %v", err)
+			}
+			defer w.Close()
+
+			us := &UserStream{userID: "u1", wav: w, hasFirstTS: true, lastTS: tt.lastTS}
+			us.insertSilenceForGap(tt.timestamp)
+
+			if got := w.dataSize / 2; got != tt.wantSample {
+				t.Errorf("silence written: got %d samples, want %d", got, tt.wantSample)
+			}
+		})
+	}
+}
 
 func TestFindDAVEFrame_ValidFrame(t *testing.T) {
 	// Build a minimal valid DAVE frame:

@@ -119,6 +119,40 @@ func TestStreamResample_ChunkSplitOnSilence(t *testing.T) {
 	}
 }
 
+func TestStreamResample_ChunkOffsetsMatchDelivered(t *testing.T) {
+	// 16.5s tone, 2s silence, 10s tone. The silence split lands part-way
+	// through a one-second read block, which is exactly where an offset
+	// derived from the block counter runs ahead of the delivered audio.
+	// Chunks are contiguous, so each offset must equal the number of output
+	// samples handed to the callback so far.
+	var samples []int16
+	samples = append(samples, genSine48(16.5, 300, 10000)...)
+	samples = append(samples, genSilence48(2.0)...)
+	samples = append(samples, genSine48(10.0, 300, 10000)...)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "offset_contiguity.wav")
+	writeTestWAV(t, path, samples)
+
+	var delivered int64
+	var chunkCount int
+	err := StreamResample(path, func(s []float32, off float64) error {
+		want := float64(delivered) / float64(outputRate)
+		if math.Abs(off-want) > 1e-9 {
+			t.Errorf("chunk %d offset: got %.4fs, want %.4fs", chunkCount, off, want)
+		}
+		delivered += int64(len(s))
+		chunkCount++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("StreamResample: %v", err)
+	}
+	if chunkCount < 2 {
+		t.Fatalf("expected at least 2 chunks, got %d", chunkCount)
+	}
+}
+
 func TestStreamResample_MaxChunkEnforcement(t *testing.T) {
 	// Generate 3 minutes (180s) of continuous tone — no silence at all.
 	// Should be forcibly split into two chunks at maxChunkSamples (90s each).

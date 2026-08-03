@@ -400,11 +400,10 @@ func (us *UserStream) HandlePacket(packet *discordgo.Packet) error {
 			gap := now.Sub(anchor)
 			if gap > 50*time.Millisecond {
 				samples := int(gap.Seconds() * sampleRate)
-				silence := make([]int16, samples)
-				us.wav.Write(silence)
-				if us.liveBuf != nil {
-					us.liveBuf.AddSamples(silence)
+				if samples > maxSilenceGapSamples {
+					samples = maxSilenceGapSamples
 				}
+				us.writeSilence(samples)
 				log.Printf("Padded %.2fs silence for %s (rejoin to first-audio gap)",
 					gap.Seconds(), us.userID)
 			}
@@ -457,6 +456,38 @@ func (us *UserStream) rederiveDAVE() bool {
 	return true
 }
 
+// maxSilenceGapSamples caps a single inserted silence run at two hours. It
+// bounds the rejoin paths, where a genuinely long absence is plausible, so a
+// corrupt duration cannot turn into gigabytes of writes.
+const maxSilenceGapSamples = 2 * 60 * 60 * sampleRate
+
+// maxRTPGapSamples caps silence derived from an RTP timestamp delta at ten
+// minutes. Discord keeps sending frames while a user is connected, so a delta
+// beyond this means a corrupt timestamp rather than real silence; a longer
+// absence arrives as a reconnect and is padded via InsertSilenceDuration.
+const maxRTPGapSamples = 10 * 60 * sampleRate
+
+// silenceBlock is a shared read-only zero buffer used to write long silence
+// runs in bounded blocks. Both sinks copy out of it (WAVWriter through
+// binary.Write, LiveBuffer through append), so sharing it is safe.
+var silenceBlock = make([]int16, sampleRate)
+
+// writeSilence writes n samples of silence to the WAV file and live buffer in
+// fixed-size blocks, so a long gap never allocates one giant slice.
+func (us *UserStream) writeSilence(n int) {
+	for n > 0 {
+		block := min(n, len(silenceBlock))
+		if err := us.wav.Write(silenceBlock[:block]); err != nil {
+			log.Printf("silence write failed for %s: %v", us.userID, err)
+			return
+		}
+		if us.liveBuf != nil {
+			us.liveBuf.AddSamples(silenceBlock[:block])
+		}
+		n -= block
+	}
+}
+
 // insertSilenceForGap writes silence into the WAV based on the RTP timestamp
 // gap between the last packet and the current one. Discord's RTP timestamps
 // run at 48kHz and continue incrementing even when no packets are sent, so
@@ -466,15 +497,22 @@ func (us *UserStream) insertSilenceForGap(timestamp uint32) {
 		return
 	}
 	expected := us.lastTS + uint32(frameSamples)
-	if timestamp <= expected {
-		return
+	// RTP timestamps are 32-bit and wrap, and the initial value is random per
+	// SSRC, so compare with modular arithmetic: a real forward gap is a delta
+	// in the lower half of the range. Comparing the absolute values would drop
+	// any gap straddling the wrap and turn reordered packets into huge ones.
+	delta := timestamp - expected
+	if delta == 0 || delta >= 1<<31 {
+		return // in order, duplicate, or a reordered (backward) timestamp
 	}
-	gap := int(timestamp - expected)
-	silence := make([]int16, gap)
-	us.wav.Write(silence)
-	if us.liveBuf != nil {
-		us.liveBuf.AddSamples(silence)
+	samples := int(delta)
+	if delta > maxRTPGapSamples {
+		// Clamp rather than skip: dropping the gap entirely would shift every
+		// later sample earlier and desync the track for the rest of the session.
+		log.Printf("Clamping implausible RTP gap for user %s (%d samples) to %ds", us.userID, delta, maxRTPGapSamples/sampleRate)
+		samples = maxRTPGapSamples
 	}
+	us.writeSilence(samples)
 }
 
 // InsertSilenceDuration writes the given duration of silence into the WAV file
@@ -484,15 +522,15 @@ func (us *UserStream) InsertSilenceDuration(d time.Duration) {
 	if samples <= 0 {
 		return
 	}
-	silence := make([]int16, samples)
-	us.wav.Write(silence)
-	if us.liveBuf != nil {
-		us.liveBuf.AddSamples(silence)
+	if samples > maxSilenceGapSamples {
+		log.Printf("Clamping %.1fs reconnect gap for user %s to %ds", d.Seconds(), us.userID, maxSilenceGapSamples/sampleRate)
+		samples = maxSilenceGapSamples
 	}
+	us.writeSilence(samples)
 	// Reset RTP timestamp tracking so the next packet doesn't trigger
 	// insertSilenceGap with a stale lastTS.
 	us.hasFirstTS = false
-	log.Printf("Inserted %.1fs silence for user %s (reconnect gap)", d.Seconds(), us.userID)
+	log.Printf("Inserted %.1fs silence for user %s (reconnect gap)", float64(samples)/sampleRate, us.userID)
 }
 
 func (us *UserStream) Close() error {
