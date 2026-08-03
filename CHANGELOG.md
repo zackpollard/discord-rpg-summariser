@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.23](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.22...v0.1.23) (2026-08-03)
+
+
+### Features
+
+* update claude-code and use opus 5 with high effort ([#24](https://github.com/zackpollard/discord-rpg-summariser/issues/24)) ([dca9e56](https://github.com/zackpollard/discord-rpg-summariser/commit/dca9e56acdc64d4bd667f6977cc5a5c33cff8273))
+
+
+### CI/CD
+
+* call docker workflow from release.yml via workflow_call ([2849bb0](https://github.com/zackpollard/discord-rpg-summariser/commit/2849bb0bcc771d5e9410aea1f92a577454456f64))
+
 ## [0.1.22](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.21...v0.1.22) (2026-04-27)
 
 
