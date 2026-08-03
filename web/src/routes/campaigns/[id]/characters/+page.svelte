@@ -3,19 +3,26 @@
 	import { page } from '$app/stores';
 	import {
 		fetchCharacters,
+		fetchCampaigns,
 		fetchMembers,
 		upsertCharacter,
 		deleteCharacter,
 		fetchCharacterSummary,
 		type CharacterMapping,
 		type GuildMember,
-		type CharacterSummaryResult
+		type CharacterSummaryResult,
+		type Campaign
 	} from '$lib/api';
 
 	const campaignId = $derived(Number($page.params.id));
 
 	let characters = $state<CharacterMapping[]>([]);
 	let members = $state<GuildMember[]>([]);
+	// The campaign these mappings actually belong to, or null until a load has
+	// positively resolved it. Starts null so the editor stays hidden if the
+	// load fails — writing blind would hit whichever campaign is active.
+	let activeCampaign = $state<Campaign | null>(null);
+	const isActiveCampaign = $derived(activeCampaign?.id === campaignId);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 
@@ -78,10 +85,17 @@
 		loading = true;
 		error = null;
 		try {
-			const [chars, mems] = await Promise.all([fetchCharacters(), fetchMembers()]);
+			const [chars, mems, camps] = await Promise.all([fetchCharacters(), fetchMembers(), fetchCampaigns()]);
+			// The character endpoints are scoped to the guild's active campaign,
+			// not to the campaign in the URL. Show the mappings either way —
+			// they are the ones the bot uses — but resolve which campaign owns
+			// them so the page can say so instead of mislabelling them as this
+			// campaign's.
+			activeCampaign = camps.find((c) => c.is_active) ?? null;
 			characters = chars;
 			members = mems;
 		} catch (e) {
+			activeCampaign = null;
 			error = e instanceof Error ? e.message : 'Failed to load data';
 		} finally {
 			loading = false;
@@ -160,37 +174,47 @@
 	<h1>Character Mappings</h1>
 	<p class="subtitle">Map Discord users to their character names for transcripts.</p>
 
-	<section class="add-form card">
-		<h2>Add Mapping</h2>
-		<form onsubmit={(e) => { e.preventDefault(); handleAdd(); }}>
-			<div class="form-row">
-				<div class="field">
-					<label for="userId">Discord User</label>
-					<select id="userId" bind:value={newUserId}>
-						<option value="">Select a user...</option>
-						{#each members as m (m.user_id)}
-							<option value={m.user_id}>{m.display_name} (@{m.username})</option>
-						{/each}
-					</select>
+	{#if activeCampaign && !isActiveCampaign}
+		<div class="notice-box">
+			Character mappings are stored against the campaign that is currently active
+			for this Discord server — <strong>{activeCampaign.name}</strong> — not this
+			one. Anything you add or edit here applies to that campaign.
+		</div>
+	{/if}
+
+	{#if activeCampaign}
+		<section class="add-form card">
+			<h2>Add Mapping</h2>
+			<form onsubmit={(e) => { e.preventDefault(); handleAdd(); }}>
+				<div class="form-row">
+					<div class="field">
+						<label for="userId">Discord User</label>
+						<select id="userId" bind:value={newUserId}>
+							<option value="">Select a user...</option>
+							{#each members as m (m.user_id)}
+								<option value={m.user_id}>{m.display_name} (@{m.username})</option>
+							{/each}
+						</select>
+					</div>
+					<div class="field">
+						<label for="charName">Character Name</label>
+						<input
+							id="charName"
+							type="text"
+							bind:value={newName}
+							placeholder="e.g. Tharivol Starweaver"
+						/>
+					</div>
+					<button type="submit" class="btn-primary" disabled={adding}>
+						{adding ? 'Adding...' : 'Add'}
+					</button>
 				</div>
-				<div class="field">
-					<label for="charName">Character Name</label>
-					<input
-						id="charName"
-						type="text"
-						bind:value={newName}
-						placeholder="e.g. Tharivol Starweaver"
-					/>
-				</div>
-				<button type="submit" class="btn-primary" disabled={adding}>
-					{adding ? 'Adding...' : 'Add'}
-				</button>
-			</div>
-			{#if addError}
-				<p class="field-error">{addError}</p>
-			{/if}
-		</form>
-	</section>
+				{#if addError}
+					<p class="field-error">{addError}</p>
+				{/if}
+			</form>
+		</section>
+	{/if}
 
 	{#if error}
 		<div class="error-box">{error}</div>
@@ -498,6 +522,14 @@
 		border-radius: var(--radius);
 	}
 	.muted { color: var(--text-muted); }
+	.notice-box {
+		background: rgba(161, 98, 7, 0.15);
+		border: 1px solid #92400e;
+		color: #fcd34d;
+		padding: 0.75rem;
+		border-radius: var(--radius);
+		font-size: 0.9rem;
+	}
 	.error-box {
 		background: rgba(185, 28, 28, 0.15);
 		border: 1px solid #7f1d1d;

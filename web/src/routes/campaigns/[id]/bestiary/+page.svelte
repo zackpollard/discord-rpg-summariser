@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { page } from '$app/stores';
 	import { fetchBestiary, type BestiaryEntry } from '$lib/api';
 
@@ -30,18 +30,25 @@
 		{ value: 'undead', label: 'Undead' }
 	];
 
+	// Bumped per request so a slow earlier response can't overwrite a newer one.
+	let reqSeq = 0;
+
 	async function loadCreatures() {
+		const seq = ++reqSeq;
 		loading = true;
 		error = null;
 		try {
-			creatures = await fetchBestiary(campaignId, {
+			const result = await fetchBestiary(campaignId, {
 				creature_type: activeType || undefined,
 				search: searchQuery || undefined
 			});
+			if (seq !== reqSeq) return;
+			creatures = result;
 		} catch (e) {
+			if (seq !== reqSeq) return;
 			error = e instanceof Error ? e.message : 'Failed to load bestiary';
 		} finally {
-			loading = false;
+			if (seq === reqSeq) loading = false;
 		}
 	}
 
@@ -57,12 +64,15 @@
 		return 'status-unknown';
 	}
 
-	onMount(loadCreatures);
-
+	// Runs on mount and whenever the campaign or type filter changes. The call is
+	// untracked so the search box (debounced in handleSearch) is not a dependency.
 	$effect(() => {
+		campaignId;
 		activeType;
-		loadCreatures();
+		untrack(loadCreatures);
 	});
+
+	onDestroy(() => clearTimeout(searchTimeout));
 </script>
 
 <svelte:head>

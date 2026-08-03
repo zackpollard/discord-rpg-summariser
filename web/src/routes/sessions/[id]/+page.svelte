@@ -2,7 +2,7 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { fetchSession, fetchTranscript, fetchSessionCombat, fetchQuotes, fetchLLMLogs, reprocessSession, deleteSession, sessionAudioURL, subscribePipelineProgress, fetchCombatAnalysis, type Session, type TranscriptSegment, type CombatEncounter, type SessionQuote, type PipelineProgressEvent, type LLMLog, type CombatAnalysisResult } from '$lib/api';
+	import { fetchSession, fetchTranscript, fetchSessionCombat, fetchQuotes, fetchLLMLogs, reprocessSession, deleteSession, sessionAudioURL, subscribePipelineProgress, fetchCombatAnalysis, fetchAuthMe, type Session, type TranscriptSegment, type CombatEncounter, type SessionQuote, type PipelineProgressEvent, type LLMLog, type CombatAnalysisResult } from '$lib/api';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TranscriptLine from '$lib/components/TranscriptLine.svelte';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
@@ -84,10 +84,12 @@
 	let liveSegments = $state<{ speaker: string; text: string; start_time: number; end_time: number }[]>([]);
 	let unsubProgress: (() => void) | null = null;
 	let liveTranscriptSource: EventSource | null = null;
+	let liveTranscriptError = $state(false);
 
-	function subscribeToLiveTranscript() {
+	function subscribeToLiveTranscript(keepSegments = false) {
 		liveTranscriptSource?.close();
-		liveSegments = [];
+		if (!keepSegments) liveSegments = [];
+		liveTranscriptError = false;
 		const source = new EventSource('/api/live-transcript');
 		liveTranscriptSource = source;
 		source.onmessage = (e) => {
@@ -109,8 +111,12 @@
 			} catch { }
 		};
 		source.onerror = () => {
-			source.close();
-			liveTranscriptSource = null;
+			// EventSource retries transient drops itself (readyState stays
+			// CONNECTING); CLOSED means the failure is fatal — e.g. a 401 — so
+			// don't retry it, surface it and check whether we are logged out.
+			if (source.readyState !== EventSource.CLOSED) return;
+			liveTranscriptError = true;
+			fetchAuthMe().catch(() => goto('/login'));
 		};
 	}
 
@@ -158,6 +164,13 @@
 			() => {
 				// idle — no pipeline running
 				progressEvent = null;
+			},
+			() => {
+				// Stream is dead — don't leave a frozen progress bar behind, and
+				// reload so the real (possibly failed) status is shown.
+				progressEvent = null;
+				llmOutput = '';
+				reloadSession(sessionId);
 			}
 		);
 	}
@@ -473,6 +486,12 @@
 					<span class="recording-dot"></span>
 					Recording in progress
 				</div>
+				{#if liveTranscriptError}
+					<div class="live-transcript-error">
+						Live feed disconnected.
+						<button class="btn-reconnect" onclick={() => subscribeToLiveTranscript(true)}>Reconnect</button>
+					</div>
+				{/if}
 				{#if liveSegments.length > 0}
 					<div class="live-transcript-preview">
 						<h3>Live Transcript ({liveSegments.length} segments)</h3>
@@ -938,6 +957,31 @@
 	}
 	.recording-panel .live-transcript-scroll {
 		max-height: 500px;
+	}
+	.live-transcript-error {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		background: rgba(161, 98, 7, 0.15);
+		border: 1px solid #92400e;
+		color: #fcd34d;
+		padding: 0.5rem 0.75rem;
+		border-radius: var(--radius);
+		font-size: 0.85rem;
+		margin-bottom: 0.75rem;
+	}
+	.btn-reconnect {
+		background: var(--bg-surface-2);
+		border: 1px solid var(--border);
+		color: var(--text-primary);
+		padding: 0.2rem 0.6rem;
+		border-radius: var(--radius);
+		cursor: pointer;
+		font-size: 0.8rem;
+	}
+	.btn-reconnect:hover {
+		background: var(--surface-hover);
+		border-color: var(--accent-gold-dim);
 	}
 	@keyframes pulse-dot {
 		0%, 100% { opacity: 1; }

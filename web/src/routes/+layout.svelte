@@ -1,31 +1,41 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { fetchAuthMe, logout, type AuthUser } from '$lib/api';
 
 	let { children }: { children: Snippet } = $props();
 
 	let navOpen = $state(false);
 	let user = $state<AuthUser | null>(null);
-	let authChecked = $state(false);
+	let authState = $state<'checking' | 'ok' | 'failed'>('checking');
+	let authPending: Promise<void> | null = null;
 
 	const isLoginPage = $derived($page.url.pathname === '/login');
 
-	onMount(async () => {
-		if (isLoginPage) {
-			authChecked = true;
-			return;
-		}
-		try {
-			user = await fetchAuthMe();
-		} catch {
-			// 401 or network error — redirect to login
-			goto('/login');
-			return;
-		}
-		authChecked = true;
+	function runAuthCheck() {
+		if (authPending) return;
+		authState = 'checking';
+		authPending = (async () => {
+			try {
+				user = await fetchAuthMe();
+				authState = 'ok';
+			} catch {
+				// 401 or network error — redirect to login
+				user = null;
+				authState = 'failed';
+				goto('/login');
+			} finally {
+				authPending = null;
+			}
+		})();
+	}
+
+	// Runs on mount and on every client-side navigation, so a Back press after
+	// a redirect to /login re-checks instead of leaving the app in limbo.
+	afterNavigate(() => {
+		if (isLoginPage || authState === 'ok') return;
+		runAuthCheck();
 	});
 
 	function avatarURL(u: AuthUser): string {
@@ -44,15 +54,16 @@
 			// ignore
 		}
 		user = null;
+		authState = 'failed';
 		goto('/login');
 	}
 </script>
 
 {#if isLoginPage}
 	{@render children()}
-{:else if !authChecked}
+{:else if authState !== 'ok'}
 	<div class="loading-screen">
-		<p>Loading...</p>
+		<p>{authState === 'failed' ? 'Redirecting to login...' : 'Loading...'}</p>
 	</div>
 {:else}
 	<div class="app">
