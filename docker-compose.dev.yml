@@ -2,7 +2,8 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     ports:
-      - "5432:5432"
+      # Loopback only: the dev database is not meant to be reachable off-box.
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: rpg
       POSTGRES_PASSWORD: rpg
@@ -25,20 +26,45 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      # Loopback only: this panel runs unauthenticated. Vite proxies to
+      # localhost:8080 from the host, so nothing in `make dev` needs it public.
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./cmd:/app/cmd
       - ./internal:/app/internal
       - ./_deps/discordgo-fork:/app/_deps/discordgo-fork
       - ./migrations:/app/migrations
       - ./scripts:/app/scripts
-      - ./config.yaml:/app/config.yaml:ro
+      # Single-file bind mounts use the long syntax with create_host_path: false
+      # so a missing source fails the container start instead of Docker silently
+      # creating a root-owned directory in its place on the host.
+      - type: bind
+        source: ./config.yaml
+        target: /app/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
       - ./.air.docker.toml:/app/.air.docker.toml:ro
       - ./data:/app/data
       - ./models:/app/models
-      - ~/.claude/.credentials.json:/root/.claude/.credentials.json:ro
+      # Host Claude CLI credentials, reused so the container does not need its
+      # own `claude login`. create_host_path: false is deliberate: with the
+      # short mount syntax Docker creates a root-owned *directory* at this path
+      # when the file is absent, which breaks the Claude CLI on the host.
+      # If you authenticate with an API key instead, comment this mount out and
+      # export ANTHROPIC_API_KEY.
+      - type: bind
+        source: ${HOME}/.claude/.credentials.json
+        target: /root/.claude/.credentials.json
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       DATABASE_URL: postgres://rpg:rpg@postgres:5432/rpg_summariser?sslmode=disable
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # The dev panel runs without Discord OAuth2. It is published on loopback
+      # only (above), so silence the fail-open startup warning.
+      WEB_ALLOW_UNAUTHENTICATED: "true"
 
 volumes:
   pgdata:

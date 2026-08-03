@@ -125,3 +125,48 @@ discord:
 		t.Errorf("Storage.DatabaseURL = %q, want env override", cfg.Storage.DatabaseURL)
 	}
 }
+
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name         string
+		clientID     string
+		clientSecret string
+		listenAddr   string
+		allowUnauth  bool
+		wantErr      bool
+		wantWarning  bool
+	}{
+		{name: "oauth configured", clientID: "id", clientSecret: "secret", listenAddr: ":8080"},
+		{name: "no oauth on loopback", listenAddr: "127.0.0.1:8080"},
+		{name: "no oauth on localhost", listenAddr: "localhost:8080"},
+		{name: "no oauth with opt-in", listenAddr: ":8080", allowUnauth: true},
+		{name: "no oauth on all interfaces", listenAddr: ":8080", wantWarning: true},
+		{name: "no oauth on 0.0.0.0", listenAddr: "0.0.0.0:8080", wantWarning: true},
+		{name: "client id without secret", clientID: "id", listenAddr: "127.0.0.1:8080", wantErr: true},
+		{name: "client secret without id", clientSecret: "secret", listenAddr: "127.0.0.1:8080", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Discord: DiscordConfig{ClientID: tt.clientID, ClientSecret: tt.clientSecret},
+				Web:     WebConfig{ListenAddr: tt.listenAddr, AllowUnauthenticated: tt.allowUnauth},
+			}
+			err := cfg.Validate()
+			if tt.wantErr && err == nil {
+				t.Error("Validate() = nil, want error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("Validate() error: %v", err)
+			}
+
+			warnings := cfg.Warnings()
+			if tt.wantWarning && len(warnings) == 0 {
+				t.Error("Warnings() = none, want a fail-open warning")
+			}
+			if !tt.wantWarning && len(warnings) > 0 {
+				t.Errorf("Warnings() = %v, want none", warnings)
+			}
+		})
+	}
+}
