@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -22,14 +23,32 @@ type TranscriberProvider interface {
 	ReleaseTranscriber()
 }
 
+const (
+	// maxVoiceProfileUpload bounds the uploaded audio file size.
+	maxVoiceProfileUpload = 50 << 20
+	// maxVoiceProfileSec bounds how much audio is decoded from an upload.
+	// Only the first few seconds are ever used as a reference clip, so this
+	// stops a small compressed file expanding into a huge WAV.
+	maxVoiceProfileSec = 60
+	// normalizeTimeout bounds a single ffmpeg run.
+	normalizeTimeout = 2 * time.Minute
+)
+
 func (s *Server) handleUploadVoiceProfile(w http.ResponseWriter, r *http.Request) {
 	campaignID, ok := parsePathID(w, r, "id")
 	if !ok {
 		return
 	}
 
-	// Parse multipart form (max 50MB).
-	if err := r.ParseMultipartForm(50 << 20); err != nil {
+	// Cap the whole request body — ParseMultipartForm's argument is only a
+	// memory hint, anything beyond it is spooled to disk unbounded.
+	r.Body = http.MaxBytesReader(w, r.Body, maxVoiceProfileUpload)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "audio file too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "failed to parse form")
 		return
 	}
@@ -74,13 +93,14 @@ func (s *Server) handleUploadVoiceProfile(w http.ResponseWriter, r *http.Request
 	}
 	dst.Close()
 
-	// Normalize to 48kHz mono 16-bit WAV (no trim yet — we'll find a
-	// natural boundary after transcription).
+	// Normalize to 48kHz mono 16-bit WAV (trimmed to a generous upper bound —
+	// we'll find the natural boundary after transcription).
 	normalizedPath := audioPath + ".norm.wav"
-	if err := normalizeAudio(audioPath, normalizedPath, 0); err != nil {
+	if err := normalizeAudio(r.Context(), audioPath, normalizedPath, maxVoiceProfileSec); err != nil {
 		log.Printf("voice profile normalize: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to process audio — ensure the file is a valid audio format")
 		os.Remove(audioPath)
+		os.Remove(normalizedPath)
 		return
 	}
 	os.Remove(audioPath)
@@ -117,10 +137,12 @@ func (s *Server) handleUploadVoiceProfile(w http.ResponseWriter, r *http.Request
 			// Re-trim the WAV to the natural boundary.
 			if trimSec > 0 && trimSec < 30 {
 				trimmedPath := audioPath + ".trim.wav"
-				if err := normalizeAudio(audioPath, trimmedPath, trimSec); err == nil {
+				if err := normalizeAudio(r.Context(), audioPath, trimmedPath, trimSec); err == nil {
 					os.Remove(audioPath)
 					os.Rename(trimmedPath, audioPath)
 					log.Printf("voice profile trimmed to %.1fs (sentence boundary)", trimSec)
+				} else {
+					os.Remove(trimmedPath)
 				}
 			}
 		}
@@ -212,8 +234,12 @@ func (s *Server) handleGetVoiceProfileAudio(w http.ResponseWriter, r *http.Reque
 }
 
 // normalizeAudio converts any audio file to 48kHz mono 16-bit WAV using ffmpeg.
-// If trimSec > 0, the output is trimmed to that duration.
-func normalizeAudio(inputPath, outputPath string, trimSec float64) error {
+// If trimSec > 0, the output is trimmed to that duration. The run is bounded
+// by normalizeTimeout and by ctx, so a client disconnect kills the child.
+func normalizeAudio(ctx context.Context, inputPath, outputPath string, trimSec float64) error {
+	ctx, cancel := context.WithTimeout(ctx, normalizeTimeout)
+	defer cancel()
+
 	args := []string{"-y", "-i", inputPath}
 	if trimSec > 0 {
 		args = append(args, "-t", fmt.Sprintf("%.2f", trimSec))
@@ -225,7 +251,7 @@ func normalizeAudio(inputPath, outputPath string, trimSec float64) error {
 		"-f", "wav",
 		outputPath,
 	)
-	cmd := exec.Command("ffmpeg", args...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg: %w: %s", err, string(out))

@@ -20,6 +20,9 @@ type SoundboardPlayer interface {
 	PlayClipInVoice(wavPath string) error
 }
 
+// maxClipDurationSec caps how much audio a single soundboard clip may cover.
+const maxClipDurationSec = 600
+
 type createClipRequest struct {
 	SessionID int64    `json:"session_id"`
 	Name      string   `json:"name"`
@@ -47,6 +50,11 @@ func (s *Server) handleCreateClip(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "end_time must be after start_time")
 		return
 	}
+	// The mixer allocates a buffer for the whole range, so bound it.
+	if req.EndTime-req.StartTime > maxClipDurationSec {
+		writeError(w, http.StatusBadRequest, "clip is too long")
+		return
+	}
 	if len(req.UserIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "at least one user_id is required")
 		return
@@ -62,9 +70,14 @@ func (s *Server) handleCreateClip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build the user files map for selected users.
+	// Build the user files map for selected users. User IDs come straight
+	// from the request body, so validate them before joining them onto a path.
 	userFiles := make(map[string]string)
 	for _, uid := range req.UserIDs {
+		if !isValidUserIDSegment(uid) {
+			writeError(w, http.StatusBadRequest, "invalid user_id")
+			return
+		}
 		wavPath := filepath.Join(sess.AudioDir, uid+".wav")
 		if _, err := os.Stat(wavPath); err == nil {
 			userFiles[uid] = wavPath

@@ -1,16 +1,15 @@
 package api
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
-
-	"discord-rpg-summariser/internal/audio"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -39,14 +38,10 @@ func (s *Server) handleGetSessionWaveform(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	mixedPath := filepath.Join(sess.AudioDir, "mixed.wav")
-	if _, err := os.Stat(mixedPath); os.IsNotExist(err) {
-		// Generate on demand for older sessions that don't have a cached mix.
-		if err := audio.MixFromDir(sess.AudioDir, mixedPath); err != nil {
-			log.Printf("waveform: generate mix: %v", err)
-			writeError(w, http.StatusNotFound, "mixed audio not available")
-			return
-		}
+	mixedPath, status, msg := ensureMixedAudio(sess.AudioDir, sess.Status)
+	if status != 0 {
+		writeError(w, status, msg)
+		return
 	}
 
 	startSec, endSec, parseErr := parseWaveformRange(r)
@@ -195,26 +190,45 @@ func computePeaksRange(wavPath string, numPeaks int, startSec, endSec float64) (
 	}
 
 	peaks := make([]float64, numPeaks)
-	buf := make([]byte, samplesPerPeak*bytesPerSample)
+
+	// Read in fixed-size chunks: sizing the buffer by samplesPerPeak would
+	// allocate the whole file for a small client-supplied ?peaks value.
+	const chunkBytes = 64 << 10
+	bufBytes := samplesPerPeak * bytesPerSample
+	if bufBytes > chunkBytes {
+		bufBytes = chunkBytes
+	}
+	buf := make([]byte, bufBytes)
+	rd := bufio.NewReaderSize(f, chunkBytes)
 
 	for i := 0; i < numPeaks; i++ {
-		n, err := f.Read(buf)
-		if n == 0 {
-			break
-		}
-		samples := n / bytesPerSample
 		var maxAmp float64
-		for j := 0; j < samples; j++ {
-			s := int16(binary.LittleEndian.Uint16(buf[j*2 : j*2+2]))
-			amp := math.Abs(float64(s) / 32768.0)
-			if amp > maxAmp {
-				maxAmp = amp
+		remaining := samplesPerPeak
+		for remaining > 0 {
+			want := remaining * bytesPerSample
+			if want > len(buf) {
+				want = len(buf)
+			}
+			n, err := io.ReadFull(rd, buf[:want])
+			samples := n / bytesPerSample
+			for j := 0; j < samples; j++ {
+				s := int16(binary.LittleEndian.Uint16(buf[j*2 : j*2+2]))
+				amp := math.Abs(float64(s) / 32768.0)
+				if amp > maxAmp {
+					maxAmp = amp
+				}
+			}
+			remaining -= samples
+			if err != nil {
+				// Short read — the range ended early.
+				if samples == 0 {
+					return peaks[:i], fullDuration, nil
+				}
+				peaks[i] = maxAmp
+				return peaks[:i+1], fullDuration, nil
 			}
 		}
 		peaks[i] = maxAmp
-		if err != nil {
-			break
-		}
 	}
 
 	return peaks, fullDuration, nil
