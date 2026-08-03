@@ -81,7 +81,7 @@ func (s *Store) ListTTSCache(ctx context.Context, campaignID int64) ([]TTSAudioC
 		}
 		entries = append(entries, c)
 	}
-	return entries, nil
+	return entries, rows.Err()
 }
 
 // DeleteTTSCacheForCampaignSource removes cache entries and returns the
@@ -103,6 +103,11 @@ func (s *Store) DeleteTTSCacheForCampaignSource(ctx context.Context, campaignID 
 			return paths, err
 		}
 		paths = append(paths, p)
+	}
+	// A mid-stream failure aborts the DELETE server-side, so callers must not
+	// unlink the paths they did receive.
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("delete tts cache: %w", err)
 	}
 	return paths, nil
 }
