@@ -58,6 +58,42 @@ func TestStripCodeFences_TextBeforeArray(t *testing.T) {
 	}
 }
 
+func TestStripCodeFences_TextAfterRawJSON(t *testing.T) {
+	input := []byte("{\"key\": \"value\"}\n\nLet me know if you'd like more detail.")
+	got := string(StripCodeFences(input))
+	want := `{"key": "value"}`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestStripCodeFences_TextBothSidesOfRawJSON(t *testing.T) {
+	input := []byte("Looking at the transcript...\n\n{\"key\": [1, 2]}\n\nHope that helps.")
+	got := string(StripCodeFences(input))
+	want := `{"key": [1, 2]}`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestStripCodeFences_BracketsInsideStrings(t *testing.T) {
+	input := []byte(`{"summary": "he said {this} and [that]", "note": "quote: \"}\""} trailing`)
+	got := string(StripCodeFences(input))
+	want := `{"summary": "he said {this} and [that]", "note": "quote: \"}\""}`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestStripCodeFences_UnbalancedJSON(t *testing.T) {
+	input := []byte("Here you go:\n\n{\"key\": \"value\"")
+	got := string(StripCodeFences(input))
+	want := `{"key": "value"`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestStripCodeFences_EmptyInput(t *testing.T) {
 	got := string(StripCodeFences([]byte("")))
 	if got != "" {
