@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.24](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.23...v0.1.24) (2026-08-03)
+
+
+### Bug Fixes
+
+* remediate defects from full-application review ([#25](https://github.com/zackpollard/discord-rpg-summariser/issues/25)) ([1fb78ab](https://github.com/zackpollard/discord-rpg-summariser/commit/1fb78ab622bcd1a4ac21c8b1d84ad38034153dae))
+
 ## [0.1.23](https://github.com/zackpollard/discord-rpg-summariser/compare/v0.1.22...v0.1.23) (2026-08-03)
 
 
