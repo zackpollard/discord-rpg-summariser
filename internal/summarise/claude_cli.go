@@ -5,11 +5,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os/exec"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
+
+// claudeCLITimeout bounds a single claude CLI invocation. LLM calls over a full
+// session transcript are slow, so this is deliberately generous — it exists
+// only so a wedged CLI cannot hang the pipeline forever.
+const claudeCLITimeout = 30 * time.Minute
+
+// claudeCLIWaitDelay is how long Wait gives the child to exit after the context
+// is cancelled before force-closing its I/O pipes.
+const claudeCLIWaitDelay = 10 * time.Second
 
 // LLMLogEntry contains the data captured for a single LLM call.
 type LLMLogEntry struct {
@@ -28,7 +40,13 @@ type LogFunc func(ctx context.Context, entry LLMLogEntry)
 type LLMStreamFunc func(operation, message string)
 
 // ClaudeCLI implements Summariser by shelling out to the `claude` CLI tool.
+//
+// A single instance is shared by the bot and the API and their runs overlap, so
+// the callbacks must only ever be assigned via SetOnLog/SetOnStream and read via
+// the onLog/onStream accessors, which serialise access with mu.
 type ClaudeCLI struct {
+	mu sync.RWMutex
+
 	OnLog    LogFunc
 	OnStream LLMStreamFunc // called with real-time stderr lines during generation
 }
@@ -36,6 +54,35 @@ type ClaudeCLI struct {
 // NewClaudeCLI creates a new ClaudeCLI summariser.
 func NewClaudeCLI() *ClaudeCLI {
 	return &ClaudeCLI{}
+}
+
+// SetOnLog sets the LLM log callback. Safe to call while calls are in flight.
+func (c *ClaudeCLI) SetOnLog(fn LogFunc) {
+	c.mu.Lock()
+	c.OnLog = fn
+	c.mu.Unlock()
+}
+
+// SetOnStream sets the real-time stream callback, or clears it when fn is nil.
+// Safe to call while calls are in flight.
+func (c *ClaudeCLI) SetOnStream(fn LLMStreamFunc) {
+	c.mu.Lock()
+	c.OnStream = fn
+	c.mu.Unlock()
+}
+
+// onLog returns the current log callback, or nil if none is set.
+func (c *ClaudeCLI) onLog() LogFunc {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.OnLog
+}
+
+// onStream returns the current stream callback, or nil if none is set.
+func (c *ClaudeCLI) onStream() LLMStreamFunc {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.OnStream
 }
 
 // runPrompt executes the claude CLI with the given prompt and unmarshals the
@@ -54,13 +101,29 @@ func (c *ClaudeCLI) runPromptSession(ctx context.Context, operation, prompt, res
 
 	log.Printf("llm: starting %s (prompt: %d chars, resume: %s)", operation, len(prompt), resumeSessionID)
 
+	// Bound the call so a wedged CLI cannot block the pipeline indefinitely.
+	// Keep the caller's context for logging: runCtx is expired exactly when the
+	// timeout fires, which is when the log entry matters most.
+	runCtx, cancel := context.WithTimeout(ctx, claudeCLITimeout)
+	defer cancel()
+
+	// The prompt embeds untrusted transcript text, so run with every built-in
+	// tool disabled (`--tools ""`) and no MCP servers — an injected instruction
+	// must not be able to read local files or reach the network.
 	args := []string{"--print", "--model", "claude-opus-5", "--effort", "high",
-		"--output-format", "stream-json", "--verbose", "--include-partial-messages"}
+		"--output-format", "stream-json", "--verbose", "--include-partial-messages",
+		"--tools", "", "--strict-mcp-config"}
 	if resumeSessionID != "" {
 		args = append(args, "--resume", resumeSessionID)
 	}
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	cmd := exec.CommandContext(runCtx, "claude", args...)
 	cmd.Stdin = strings.NewReader(prompt)
+	// Run the CLI in its own process group and kill the whole group on
+	// cancellation, so the node children it spawns die with it.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	// Backstop: make Wait close the I/O pipes if anything survives the kill.
+	cmd.WaitDelay = claudeCLIWaitDelay
 
 	stdoutPipe, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
@@ -133,20 +196,20 @@ func (c *ClaudeCLI) runPromptSession(ctx context.Context, operation, prompt, res
 					chunk := event.Event.Delta.Text
 					textAccum.WriteString(chunk)
 
-					if c.OnStream != nil {
+					if onStream := c.onStream(); onStream != nil {
 						full := textAccum.String()
 						preview := full
 						if len(preview) > 200 {
 							preview = "..." + preview[len(preview)-200:]
 						}
 						tokens := fmt.Sprintf(" [%d tokens]", outputTokens)
-						c.OnStream(operation, preview+tokens)
+						onStream(operation, preview+tokens)
 					}
 				}
 			case "message_start":
 				inputTokens = event.Event.Message.Usage.InputTokens
-				if c.OnStream != nil {
-					c.OnStream(operation, fmt.Sprintf("Processing %d input tokens...", inputTokens))
+				if onStream := c.onStream(); onStream != nil {
+					onStream(operation, fmt.Sprintf("Processing %d input tokens...", inputTokens))
 				}
 			case "message_delta":
 				outputTokens = event.Event.Usage.OutputTokens
@@ -162,6 +225,10 @@ func (c *ClaudeCLI) runPromptSession(ctx context.Context, operation, prompt, res
 			}
 		}
 	}
+
+	// Drain anything the scanner did not consume (e.g. an over-long line) so the
+	// child is never blocked writing to a full pipe when we Wait.
+	_, _ = io.Copy(io.Discard, stdoutPipe)
 
 	// If no result event, use accumulated text.
 	if response == "" {
@@ -215,8 +282,8 @@ func (c *ClaudeCLI) runPromptSession(ctx context.Context, operation, prompt, res
 }
 
 func (c *ClaudeCLI) log(ctx context.Context, entry LLMLogEntry) {
-	if c.OnLog != nil {
-		c.OnLog(ctx, entry)
+	if onLog := c.onLog(); onLog != nil {
+		onLog(ctx, entry)
 	}
 }
 
@@ -403,13 +470,51 @@ func StripCodeFences(b []byte) []byte {
 	}
 
 	// No code fence — try to find raw JSON by locating the first { or [.
-	for i, c := range s {
-		if c == '{' || c == '[' {
-			// Find the matching closing bracket.
-			candidate := s[i:]
-			return []byte(strings.TrimSpace(candidate))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '{' || s[i] == '[' {
+			// Find the matching closing bracket so trailing prose after the
+			// JSON does not break parsing. If the value is unbalanced (e.g. a
+			// truncated response) fall back to everything from the bracket on.
+			if end := matchBracket(s, i); end >= 0 {
+				return []byte(s[i : end+1])
+			}
+			return []byte(strings.TrimSpace(s[i:]))
 		}
 	}
 
 	return []byte(s)
+}
+
+// matchBracket returns the index of the bracket closing the one at start, or -1
+// if it is never closed. Brackets inside JSON string literals are ignored.
+func matchBracket(s string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }

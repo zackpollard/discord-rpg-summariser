@@ -33,6 +33,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid config: %v", err)
+	}
+	for _, warning := range cfg.Warnings() {
+		log.Printf("WARNING: %s", warning)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -126,7 +132,10 @@ func main() {
 	} else {
 		embedder = onnxEmb
 		discordBot.SetEmbedder(embedder)
-		defer onnxEmb.Close()
+		// Deliberately not closed at shutdown: nothing waits for in-flight
+		// pipeline goroutines, so destroying the ONNX session here can free the
+		// native handle while one is mid-inference (SIGSEGV). The OS reclaims it
+		// when the process exits anyway.
 		log.Println("Embedding model enabled: in-process ONNX (nomic-embed-text-v1.5)")
 	}
 

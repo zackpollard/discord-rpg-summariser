@@ -181,7 +181,17 @@ func (s *Server) handleRemixSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no audio directory for session")
 		return
 	}
+	// Same guard as the audio endpoint — remixing a session whose per-user
+	// WAVs are still being written produces a truncated mix.
+	switch sess.Status {
+	case "recording", "transcribing", "summarising":
+		writeError(w, http.StatusConflict, "session is still in progress")
+		return
+	}
 	mixedPath := filepath.Join(sess.AudioDir, "mixed.wav")
+	lock := mixLock(mixedPath)
+	lock.Lock()
+	defer lock.Unlock()
 	_ = os.Remove(mixedPath)
 	if err := audio.MixFromDir(sess.AudioDir, mixedPath); err != nil {
 		log.Printf("remix session %d: %v", id, err)
@@ -301,4 +311,3 @@ func isValidUserIDSegment(s string) bool {
 	}
 	return true
 }
-

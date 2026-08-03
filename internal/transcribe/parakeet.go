@@ -29,6 +29,7 @@ const (
 	parakeetJoiner    = "joiner.int8.onnx"
 	parakeetTokens    = "tokens.txt"
 	parakeetModelType = "nemo_transducer"
+	parakeetStagePfx  = ".parakeet-stage-"
 )
 
 // ParakeetTranscriber performs speech-to-text using NVIDIA Parakeet TDT 0.6B v3
@@ -50,8 +51,16 @@ func NewParakeetTranscriber(modelDir string, threads int) (*ParakeetTranscriber,
 	joinerPath := filepath.Join(modelBase, parakeetJoiner)
 	tokensPath := filepath.Join(modelBase, parakeetTokens)
 
-	// Download models if needed.
-	if _, err := os.Stat(encoderPath); os.IsNotExist(err) {
+	// Download models if needed. Every artefact must be present — a partial
+	// set means an earlier extract never completed.
+	needsDownload := false
+	for _, path := range []string{encoderPath, decoderPath, joinerPath, tokensPath} {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			needsDownload = true
+			break
+		}
+	}
+	if needsDownload {
 		if err := downloadAndExtractParakeet(modelDir); err != nil {
 			return nil, fmt.Errorf("download parakeet model: %w", err)
 		}
@@ -82,11 +91,18 @@ func NewParakeetTranscriber(modelDir string, threads int) (*ParakeetTranscriber,
 	}, nil
 }
 
-// Close releases the sherpa-onnx recognizer resources.
+// Close releases the sherpa-onnx recognizer resources. It takes the same lock
+// as transcribe() so the native handle cannot be freed while a decode is in
+// flight; the field is cleared first so any later call fails with an error
+// instead of dereferencing a freed handle.
 func (p *ParakeetTranscriber) Close() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if p.recognizer != nil {
-		sherpa.DeleteOfflineRecognizer(p.recognizer)
+		recognizer := p.recognizer
 		p.recognizer = nil
+		sherpa.DeleteOfflineRecognizer(recognizer)
 	}
 	return nil
 }
@@ -144,6 +160,7 @@ func (p *ParakeetTranscriber) SetVocabulary(words []string) {
 
 	if p.recognizer != nil {
 		sherpa.DeleteOfflineRecognizer(p.recognizer)
+		p.recognizer = nil
 	}
 
 	config := &sherpa.OfflineRecognizerConfig{}
@@ -171,6 +188,9 @@ func (p *ParakeetTranscriber) SetVocabulary(words []string) {
 		config.ModelConfig.BpeVocab = ""
 		config.HotwordsFile = ""
 		recognizer = sherpa.NewOfflineRecognizer(config)
+		if recognizer == nil {
+			log.Printf("parakeet: greedy-search fallback also failed — transcriber is unusable")
+		}
 	} else {
 		log.Printf("parakeet: hot words enabled with %d terms", len(words))
 	}
@@ -254,6 +274,10 @@ func (p *ParakeetTranscriber) TranscribeChunk(ctx context.Context, samples []flo
 func (p *ParakeetTranscriber) transcribe(samples []float32, timeOffset float64) ([]Segment, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if p.recognizer == nil {
+		return nil, fmt.Errorf("parakeet: recognizer unavailable")
+	}
 
 	stream := sherpa.NewOfflineStream(p.recognizer)
 	defer sherpa.DeleteOfflineStream(stream)
@@ -345,6 +369,14 @@ func downloadAndExtractParakeet(destDir string) error {
 		return err
 	}
 
+	// Clean up staging directories leaked by an attempt that was killed
+	// before its deferred cleanup could run.
+	if leftovers, err := filepath.Glob(filepath.Join(destDir, parakeetStagePfx+"*")); err == nil {
+		for _, dir := range leftovers {
+			os.RemoveAll(dir)
+		}
+	}
+
 	resp, err := http.Get(parakeetModelURL)
 	if err != nil {
 		return fmt.Errorf("download: %w", err)
@@ -355,11 +387,29 @@ func downloadAndExtractParakeet(destDir string) error {
 		return fmt.Errorf("download returned %d", resp.StatusCode)
 	}
 
-	if err := extractParakeetTarBz2(resp.Body, destDir); err != nil {
+	// Extract into a staging directory inside destDir (same filesystem, so the
+	// rename below is atomic) and only move the model into place once the
+	// whole archive has been read. An interrupted download then leaves no
+	// truncated files behind for the next start to mistake for a full model.
+	staging, err := os.MkdirTemp(destDir, parakeetStagePfx)
+	if err != nil {
+		return fmt.Errorf("create staging dir: %w", err)
+	}
+	defer os.RemoveAll(staging)
+
+	if err := extractParakeetTarBz2(resp.Body, staging); err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
 
-	log.Printf("Downloaded and extracted Parakeet TDT model to %s", filepath.Join(destDir, parakeetModelDir))
+	modelBase := filepath.Join(destDir, parakeetModelDir)
+	if err := os.RemoveAll(modelBase); err != nil {
+		return fmt.Errorf("clear %s: %w", modelBase, err)
+	}
+	if err := os.Rename(filepath.Join(staging, parakeetModelDir), modelBase); err != nil {
+		return fmt.Errorf("move model into place: %w", err)
+	}
+
+	log.Printf("Downloaded and extracted Parakeet TDT model to %s", modelBase)
 	return nil
 }
 
@@ -456,7 +506,9 @@ func extractParakeetTarBz2(r io.Reader, destDir string) error {
 				f.Close()
 				return fmt.Errorf("write file %s: %w", target, err)
 			}
-			f.Close()
+			if err := f.Close(); err != nil {
+				return fmt.Errorf("close file %s: %w", target, err)
+			}
 		}
 	}
 	return nil

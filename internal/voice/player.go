@@ -22,7 +22,16 @@ const (
 // PlayWAV reads a WAV file and streams it as Opus audio through a Discord
 // voice connection. The WAV file can be any sample rate — it will be
 // resampled to 48kHz for Discord.
-func PlayWAV(vc *discordgo.VoiceConnection, wavPath string) error {
+func PlayWAV(vc *discordgo.VoiceConnection, wavPath string) (err error) {
+	// discordgo closes OpusSend 100ms after the connection dies. The
+	// <-vc.Dead select arm below normally wins that race; this is the
+	// backstop so a send on the closed channel can't kill the process.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("voice send panic: %v", r)
+		}
+	}()
+
 	samples, srcRate, err := loadWAVSamples(wavPath)
 	if err != nil {
 		return fmt.Errorf("load wav: %w", err)
@@ -71,8 +80,16 @@ func PlayWAV(vc *discordgo.VoiceConnection, wavPath string) error {
 			continue
 		}
 
+		// discordgo's sender goroutine reads queued frames asynchronously,
+		// so every send needs its own backing array — reusing opusBuf lets
+		// the sender transmit a frame we've already encoded over.
+		frameBuf := make([]byte, n)
+		copy(frameBuf, opusBuf[:n])
+
 		select {
-		case vc.OpusSend <- opusBuf[:n]:
+		case <-vc.Dead:
+			return fmt.Errorf("voice connection closed during playback")
+		case vc.OpusSend <- frameBuf:
 		case <-time.After(time.Second):
 			return fmt.Errorf("opus send timed out at frame %d/%d", i/frameSize, totalFrames)
 		}

@@ -41,8 +41,9 @@ func TestBuildAnnotatedTranscript_FilterTableTalk(t *testing.T) {
 		2: {SegmentID: 2, Classification: "table_talk"},
 		3: {SegmentID: 3, Classification: "narrative"},
 	}
+	segmentIDs := []int64{1, 2, 3}
 
-	result := buildAnnotatedTranscript(segs, annotations, "DM")
+	result := buildAnnotatedTranscript(segs, segmentIDs, annotations, "DM")
 
 	if !strings.Contains(result, "[TABLE TALK]") {
 		t.Error("table_talk segment should be marked with [TABLE TALK]")
@@ -67,8 +68,9 @@ func TestBuildAnnotatedTranscript_CorrectedText(t *testing.T) {
 	annotations := map[int64]*storage.TranscriptAnnotation{
 		1: {SegmentID: 1, Classification: "narrative", CorrectedText: &corrected},
 	}
+	segmentIDs := []int64{1}
 
-	result := buildAnnotatedTranscript(segs, annotations, "DM")
+	result := buildAnnotatedTranscript(segs, segmentIDs, annotations, "DM")
 
 	if strings.Contains(result, "cassed") {
 		t.Error("original text should be replaced by corrected text")
@@ -90,8 +92,9 @@ func TestBuildAnnotatedTranscript_SceneBoundaries(t *testing.T) {
 		1: {SegmentID: 1, Classification: "narrative", Scene: &scene1},
 		2: {SegmentID: 2, Classification: "narrative", Scene: &scene2},
 	}
+	segmentIDs := []int64{1, 2}
 
-	result := buildAnnotatedTranscript(segs, annotations, "DM")
+	result := buildAnnotatedTranscript(segs, segmentIDs, annotations, "DM")
 
 	if !strings.Contains(result, "--- Dungeon entrance ---") {
 		t.Errorf("expected scene boundary marker, got: %s", result)
@@ -110,8 +113,9 @@ func TestBuildAnnotatedTranscript_NPCVoice(t *testing.T) {
 	annotations := map[int64]*storage.TranscriptAnnotation{
 		1: {SegmentID: 1, Classification: "narrative", NPCVoice: &npc},
 	}
+	segmentIDs := []int64{1}
 
-	result := buildAnnotatedTranscript(segs, annotations, "DM")
+	result := buildAnnotatedTranscript(segs, segmentIDs, annotations, "DM")
 
 	if !strings.Contains(result, "DM (as Shopkeeper)") {
 		t.Errorf("expected NPC voice label, got: %s", result)
@@ -128,8 +132,9 @@ func TestBuildAnnotatedTranscript_MergeSegments(t *testing.T) {
 		1: {SegmentID: 1, Classification: "narrative", MergeWithNext: true},
 		2: {SegmentID: 2, Classification: "narrative"},
 	}
+	segmentIDs := []int64{1, 2}
 
-	result := buildAnnotatedTranscript(segs, annotations, "DM")
+	result := buildAnnotatedTranscript(segs, segmentIDs, annotations, "DM")
 
 	if !strings.Contains(result, "I want to cast fireball.") {
 		t.Errorf("merged segments should form one line, got: %s", result)
@@ -154,12 +159,56 @@ func TestBuildAnnotatedTranscript_NoAnnotations(t *testing.T) {
 		segEntry{"u2", "Bob", "General Kenobi.", 5, 10},
 	)
 
-	result := buildAnnotatedTranscript(segs, nil, "DM")
+	result := buildAnnotatedTranscript(segs, nil, nil, "DM")
 
 	if !strings.Contains(result, "Alice: Hello there.") {
 		t.Errorf("expected normal transcript line, got: %s", result)
 	}
 	if !strings.Contains(result, "Bob: General Kenobi.") {
 		t.Errorf("expected normal transcript line, got: %s", result)
+	}
+}
+
+func TestBuildAnnotatedTranscript_MissingAnnotationDoesNotShift(t *testing.T) {
+	segs := makeSegments(
+		segEntry{"u1", "Alice", "First line.", 0, 5},
+		segEntry{"u2", "Bob", "Second line.", 5, 10},
+		segEntry{"u1", "Alice", "Third line.", 10, 15},
+	)
+
+	// Segment 2's annotation is missing (e.g. its batch failed). The
+	// remaining annotations must stay on their own segments.
+	npc := "Shopkeeper"
+	annotations := map[int64]*storage.TranscriptAnnotation{
+		1: {SegmentID: 1, Classification: "narrative"},
+		3: {SegmentID: 3, Classification: "narrative", NPCVoice: &npc},
+	}
+	segmentIDs := []int64{1, 2, 3}
+
+	result := buildAnnotatedTranscript(segs, segmentIDs, annotations, "DM")
+
+	if !strings.Contains(result, "Alice (as Shopkeeper): Third line.") {
+		t.Errorf("NPC voice should stay on segment 3, got: %s", result)
+	}
+	if strings.Contains(result, "Bob (as Shopkeeper)") {
+		t.Errorf("annotation shifted onto the wrong segment, got: %s", result)
+	}
+}
+
+func TestInsertTelegramEntries_Chronological(t *testing.T) {
+	transcript := "[00:00:05] Alice: First line.\n[00:00:20] Bob: Second line.\n"
+	entries := []transcribe.TelegramEntry{
+		{ElapsedSecs: 30, SenderName: "DM", Text: "after the end"},
+		{ElapsedSecs: 10, SenderName: "DM", Text: "between the lines"},
+	}
+
+	result := insertTelegramEntries(transcript, entries)
+
+	want := "[00:00:05] Alice: First line.\n" +
+		"[00:00:10] [DM via Telegram]: between the lines\n" +
+		"[00:00:20] Bob: Second line.\n" +
+		"[00:00:30] [DM via Telegram]: after the end\n"
+	if result != want {
+		t.Errorf("unexpected interleaving:\ngot:\n%s\nwant:\n%s", result, want)
 	}
 }

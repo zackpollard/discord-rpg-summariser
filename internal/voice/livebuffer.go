@@ -153,7 +153,13 @@ func (lb *LiveBuffer) flush() {
 			lb.overlap = make([]int16, len(lb.buf))
 			copy(lb.overlap, lb.buf)
 		}
-		lb.buf = lb.buf[:0]
+		// Re-allocate if a long silence-gap fill grew the backing array well
+		// past the working size — lb.buf[:0] alone would pin that capacity.
+		if cap(lb.buf) > 2*windowSamples {
+			lb.buf = make([]int16, 0, windowSamples)
+		} else {
+			lb.buf = lb.buf[:0]
+		}
 		lb.buf = append(lb.buf, lb.overlap...)
 		lb.silenceCount = 0
 		lb.lastAddAt = time.Time{}

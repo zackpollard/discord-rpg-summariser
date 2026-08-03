@@ -1,7 +1,10 @@
 package config
 
 import (
+	"fmt"
+	"net"
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -67,6 +70,9 @@ type WebConfig struct {
 	ListenAddr    string `yaml:"listen_addr"`
 	BaseURL       string `yaml:"base_url"`
 	SessionSecret string `yaml:"session_secret"`
+	// AllowUnauthenticated opts in to serving the panel without Discord OAuth2
+	// on a non-loopback listen address. Without it, Validate refuses to start.
+	AllowUnauthenticated bool `yaml:"allow_unauthenticated"`
 }
 
 func Load(path string) (*Config, error) {
@@ -120,6 +126,13 @@ func Load(path string) (*Config, error) {
 	if sessionSecret := os.Getenv("WEB_SESSION_SECRET"); sessionSecret != "" {
 		cfg.Web.SessionSecret = sessionSecret
 	}
+	if allowUnauth := os.Getenv("WEB_ALLOW_UNAUTHENTICATED"); allowUnauth != "" {
+		v, err := strconv.ParseBool(allowUnauth)
+		if err != nil {
+			return nil, fmt.Errorf("invalid WEB_ALLOW_UNAUTHENTICATED %q: %w", allowUnauth, err)
+		}
+		cfg.Web.AllowUnauthenticated = v
+	}
 	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
 		cfg.Storage.DatabaseURL = dbURL
 	}
@@ -128,4 +141,56 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// Validate checks for configurations that cannot work as intended. It only
+// rejects genuine misconfiguration; settings that are merely risky are
+// reported by Warnings so an existing deployment still starts after an
+// upgrade.
+func (c *Config) Validate() error {
+	hasClientID := c.Discord.ClientID != ""
+	hasClientSecret := c.Discord.ClientSecret != ""
+
+	if hasClientID != hasClientSecret {
+		return fmt.Errorf("discord.client_id and discord.client_secret must both be set to enable web authentication (set both, or leave both empty)")
+	}
+
+	return nil
+}
+
+// Warnings returns security-relevant conditions that are permitted but likely
+// unintended. Web authentication is disabled whenever the OAuth2 credentials
+// are absent, so serving on a non-loopback address exposes session audio and
+// transcripts to anyone who can reach the port.
+func (c *Config) Warnings() []string {
+	var warnings []string
+
+	if c.Discord.ClientID == "" && !c.Web.AllowUnauthenticated && !isLoopback(c.Web.ListenAddr) {
+		warnings = append(warnings, fmt.Sprintf(
+			"web.listen_addr %q accepts connections from any interface but discord.client_id/client_secret are unset, "+
+				"so the web panel serves session audio and transcripts to anyone who can reach it: configure OAuth2, "+
+				"bind web.listen_addr to 127.0.0.1, or set web.allow_unauthenticated: true to silence this",
+			c.Web.ListenAddr))
+	}
+
+	return warnings
+}
+
+// isLoopback reports whether a listen address binds the loopback interface
+// only. An empty host (":8080") binds every interface.
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }

@@ -1649,6 +1649,44 @@ func TestMergeEntitiesConflictingRelationships(t *testing.T) {
 	}
 }
 
+// TestMergeEntitiesChained verifies an entity that was previously the kept side
+// of a merge can itself be merged away later (the entity_merges audit row must
+// not block its deletion).
+func TestMergeEntitiesChained(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	guildID := uniqueGuild(t)
+	campID := createTestCampaign(t, store, guildID)
+
+	aID, _ := store.UpsertEntity(ctx, campID, "Captain Vex", "npc", "")
+	bID, _ := store.UpsertEntity(ctx, campID, "Cpt. Vex", "npc", "")
+	cID, _ := store.UpsertEntity(ctx, campID, "Vex the Captain", "npc", "")
+
+	if err := store.MergeEntities(ctx, campID, aID, bID); err != nil {
+		t.Fatalf("MergeEntities (B into A): %v", err)
+	}
+	// A is now the kept side of a merge; merging it away must still work.
+	if err := store.MergeEntities(ctx, campID, cID, aID); err != nil {
+		t.Fatalf("MergeEntities (A into C): %v", err)
+	}
+
+	if _, err := store.GetEntity(ctx, aID); err == nil {
+		t.Fatal("expected error when getting deleted merged entity")
+	}
+
+	// Both audit rows survive.
+	var auditCount int
+	err := store.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM entity_merges WHERE campaign_id = $1`, campID,
+	).Scan(&auditCount)
+	if err != nil {
+		t.Fatalf("query entity_merges: %v", err)
+	}
+	if auditCount != 2 {
+		t.Fatalf("expected 2 audit rows, got %d", auditCount)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Combat Encounters
 // ---------------------------------------------------------------------------

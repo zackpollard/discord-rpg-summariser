@@ -15,7 +15,6 @@ import (
 	"discord-rpg-summariser/internal/storage"
 	"discord-rpg-summariser/internal/summarise"
 	"discord-rpg-summariser/internal/tts"
-	"discord-rpg-summariser/internal/voice"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -261,7 +260,7 @@ func (b *Bot) handleCampaignPlayRecap(s *discordgo.Session, i *discordgo.Interac
 	}
 
 	log.Printf("play-recap: playing %s in channel %s", cached.AudioPath, userVoiceChannelID)
-	if err := voice.PlayWAV(vc, cached.AudioPath); err != nil {
+	if err := playWAVSafe(vc, cached.AudioPath); err != nil {
 		log.Printf("play-recap: playback error: %v", err)
 	}
 

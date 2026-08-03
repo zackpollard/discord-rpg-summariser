@@ -1,12 +1,18 @@
 package audio
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
 	"os"
 )
+
+// maxClipSeconds bounds the clip length MixClip will mix. The whole range is
+// buffered in memory, so an unbounded (caller- or API-supplied) range would
+// otherwise be an out-of-memory kill.
+const maxClipSeconds = 600
 
 // MixClip extracts a time range [startSec, endSec) from the selected per-user
 // WAV files, mixes them with peak normalization, and writes the result.
@@ -15,8 +21,19 @@ func MixClip(userFiles map[string]string, outputPath string, joinOffsets map[str
 	if len(userFiles) == 0 {
 		return fmt.Errorf("no input files")
 	}
+	// NaN/Inf must be rejected first — every comparison against NaN is false,
+	// so they slip through the range check and produce a garbage int64.
+	if math.IsNaN(startSec) || math.IsNaN(endSec) || math.IsInf(startSec, 0) || math.IsInf(endSec, 0) {
+		return fmt.Errorf("invalid time range: %.1f-%.1f", startSec, endSec)
+	}
+	if startSec < 0 {
+		return fmt.Errorf("negative start time: %.1f", startSec)
+	}
 	if endSec <= startSec {
 		return fmt.Errorf("invalid time range: %.1f-%.1f", startSec, endSec)
+	}
+	if endSec-startSec > maxClipSeconds {
+		return fmt.Errorf("clip too long: %.1fs (max %ds)", endSec-startSec, maxClipSeconds)
 	}
 
 	clipSamples := int64((endSec - startSec) * float64(mixSampleRate))
@@ -196,6 +213,8 @@ func MixClip(userFiles map[string]string, outputPath string, joinOffsets map[str
 		return fmt.Errorf("write header: %w", err)
 	}
 
+	// Buffer the sample writes — unbuffered, this is one syscall per 2 bytes.
+	w := bufio.NewWriter(outFile)
 	outBuf := make([]byte, 2)
 	for i := int64(0); i < clipSamples; i++ {
 		clamped := mixBuf[i]
@@ -205,9 +224,12 @@ func MixClip(userFiles map[string]string, outputPath string, joinOffsets map[str
 			clamped = -1.0
 		}
 		binary.LittleEndian.PutUint16(outBuf, uint16(int16(clamped*32767.0)))
-		if _, err := outFile.Write(outBuf); err != nil {
+		if _, err := w.Write(outBuf); err != nil {
 			return fmt.Errorf("write sample: %w", err)
 		}
+	}
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("flush output: %w", err)
 	}
 
 	return nil

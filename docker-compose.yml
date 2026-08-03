@@ -2,7 +2,8 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     ports:
-      - "5432:5432"
+      # Loopback only: the dev database is not meant to be reachable off-box.
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: rpg
       POSTGRES_PASSWORD: rpg

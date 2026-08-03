@@ -74,6 +74,23 @@
 		return r.display_name || r.user_id;
 	}
 
+	// The server's headline is transcript text with <mark> delimiters spliced in
+	// by ts_headline, which does not escape the document. Split it into plain
+	// text parts so Svelte escapes them instead of injecting raw HTML.
+	function headlineParts(headline: string): { text: string; highlighted: boolean }[] {
+		const parts: { text: string; highlighted: boolean }[] = [];
+		const re = /<mark>([\s\S]*?)<\/mark>/g;
+		let last = 0;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(headline)) !== null) {
+			if (m.index > last) parts.push({ text: headline.slice(last, m.index), highlighted: false });
+			parts.push({ text: m[1], highlighted: true });
+			last = m.index + m[0].length;
+		}
+		if (last < headline.length) parts.push({ text: headline.slice(last), highlighted: false });
+		return parts;
+	}
+
 	function charColor(name: string): string {
 		let hash = 0;
 		for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
@@ -133,7 +150,7 @@
 						<span class="speaker" style="color: {charColor(speakerLabel(result))}">{speakerLabel(result)}</span>
 						<span class="timestamp">[{formatTimestamp(result.start_time)}]</span>
 					</div>
-					<div class="result-headline">{@html result.headline}</div>
+					<div class="result-headline">{#each headlineParts(result.headline) as part}{#if part.highlighted}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</div>
 					<div class="result-actions">
 						<a href="/sessions/{result.session_id}#seg-{Math.floor(result.start_time)}" class="view-link">View in transcript</a>
 					</div>

@@ -1,16 +1,16 @@
 module discord-rpg-summariser
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20260318204338-ef3463bb29ef
 	github.com/go-pdf/fpdf v0.9.0
-	github.com/jackc/pgx/v5 v5.7.4
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/k2-fsa/sherpa-onnx-go v1.12.30
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/yalue/onnxruntime_go v1.22.0
-	golang.org/x/text v0.23.0
+	golang.org/x/text v0.39.0
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -29,6 +29,6 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
-	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 )

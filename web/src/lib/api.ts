@@ -66,9 +66,20 @@ class ApiError extends Error {
 	}
 }
 
+// A 401 means the session cookie expired or was revoked — surface it as a
+// logged-out state instead of a silent failure somewhere in the UI.
+function redirectToLogin() {
+	if (typeof window === 'undefined') return;
+	if (window.location.pathname === '/login') return;
+	import('$app/navigation').then((nav) => nav.goto('/login')).catch(() => {
+		window.location.href = '/login';
+	});
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(path, init);
 	if (!res.ok) {
+		if (res.status === 401) redirectToLogin();
 		let msg = res.statusText;
 		try {
 			const body = await res.json();
@@ -217,7 +228,8 @@ export interface PipelineProgressEvent {
 export function subscribePipelineProgress(
 	sessionId: number,
 	onEvent: (event: PipelineProgressEvent) => void,
-	onIdle?: () => void
+	onIdle?: () => void,
+	onError?: () => void
 ): () => void {
 	const source = new EventSource(`/api/sessions/${sessionId}/progress`);
 	source.addEventListener('progress', (e) => {
@@ -235,7 +247,11 @@ export function subscribePipelineProgress(
 		source.close();
 	});
 	source.onerror = () => {
-		source.close();
+		// EventSource retries transient failures itself (readyState stays
+		// CONNECTING); it only reports CLOSED when the failure is fatal, e.g. a
+		// non-2xx response such as a 401. Only then is the stream really dead.
+		if (source.readyState !== EventSource.CLOSED) return;
+		if (onError) onError();
 	};
 	return () => source.close();
 }

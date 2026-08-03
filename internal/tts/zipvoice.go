@@ -3,6 +3,7 @@ package tts
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -129,30 +130,39 @@ func (s *Synthesizer) Synthesize(ctx context.Context, text string, refAudio []fl
 		return nil, 0, fmt.Errorf("start tts: %w", err)
 	}
 
-	// Read stderr for progress updates.
-	go s.parseProgress(stderrPipe)
+	// Read stderr for progress updates. The reader must be drained fully
+	// before Wait, which closes the pipe as soon as the command exits.
+	// The callback is snapshotted here (s.mu is held) so the goroutine never
+	// touches the struct field.
+	onProgress := s.onProgress
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		parseProgress(stderrPipe, onProgress)
+	}()
+	<-done
 
 	if err := cmd.Wait(); err != nil {
 		return nil, 0, fmt.Errorf("tts failed: %w\noutput: %s", err, stdoutBuf.String())
 	}
 
 	// Read the output WAV.
-	samples, err := loadWAV24k(outPath)
+	samples, sampleRate, err := loadWAV(outPath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("read output wav: %w", err)
 	}
 
-	return samples, 24000, nil
+	return samples, sampleRate, nil
 }
 
-func (s *Synthesizer) parseProgress(r io.Reader) {
+func parseProgress(r io.Reader, onProgress func(float64)) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "PROGRESS:") {
 			val := strings.TrimPrefix(line, "PROGRESS:")
-			if p, err := strconv.ParseFloat(val, 64); err == nil && s.onProgress != nil {
-				s.onProgress(p)
+			if p, err := strconv.ParseFloat(val, 64); err == nil && onProgress != nil {
+				onProgress(p)
 			}
 		}
 	}
@@ -174,22 +184,76 @@ func writeTempWAV(samples []float32, sampleRate int) (string, error) {
 	return path, nil
 }
 
-// loadWAV24k reads a 24kHz 16-bit mono WAV file into float32 samples.
-func loadWAV24k(path string) ([]float32, error) {
+const (
+	wavFormatPCM        = 1
+	wavFormatExtensible = 0xFFFE
+)
+
+// loadWAV reads a 16-bit mono PCM WAV file into float32 samples and returns
+// the sample rate declared by the file. The RIFF chunk table is walked instead
+// of assuming a 44-byte header: the TTS engine writes its output via
+// torchaudio, which prepends extra chunks (LIST/INFO) before the audio data.
+func loadWAV(path string) ([]float32, int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if len(data) < 44 {
-		return nil, fmt.Errorf("wav too short: %d bytes", len(data))
+	if len(data) < 12 || string(data[0:4]) != "RIFF" || string(data[8:12]) != "WAVE" {
+		return nil, 0, fmt.Errorf("not a RIFF/WAVE file: %s", path)
 	}
 
-	pcm := data[44:]
+	var (
+		sampleRate int
+		pcm        []byte
+		haveFmt    bool
+	)
+	for off := 12; off+8 <= len(data); {
+		id := string(data[off : off+4])
+		size := int(binary.LittleEndian.Uint32(data[off+4 : off+8]))
+		body := off + 8
+		// A negative or oversized length means the writer never patched the
+		// chunk size (non-seekable output) or the file is truncated — take
+		// whatever is left instead of slicing out of range.
+		if size < 0 || body+size > len(data) {
+			size = len(data) - body
+		}
+
+		switch id {
+		case "fmt ":
+			if size < 16 {
+				return nil, 0, fmt.Errorf("fmt chunk too short: %d bytes", size)
+			}
+			format := binary.LittleEndian.Uint16(data[body : body+2])
+			channels := binary.LittleEndian.Uint16(data[body+2 : body+4])
+			rate := binary.LittleEndian.Uint32(data[body+4 : body+8])
+			bits := binary.LittleEndian.Uint16(data[body+14 : body+16])
+			if format == wavFormatExtensible && size >= 26 {
+				format = binary.LittleEndian.Uint16(data[body+24 : body+26])
+			}
+			if format != wavFormatPCM || channels != 1 || bits != 16 {
+				return nil, 0, fmt.Errorf("unsupported wav encoding (format=%d channels=%d bits=%d)", format, channels, bits)
+			}
+			sampleRate = int(rate)
+			haveFmt = true
+		case "data":
+			pcm = data[body : body+size]
+		}
+
+		off = body + size + (size & 1) // chunks are word-aligned
+	}
+
+	if !haveFmt {
+		return nil, 0, fmt.Errorf("wav has no fmt chunk: %s", path)
+	}
+	if len(pcm) == 0 {
+		return nil, 0, fmt.Errorf("wav has no audio data: %s", path)
+	}
+
 	n := len(pcm) / 2
 	samples := make([]float32, n)
 	for i := 0; i < n; i++ {
 		s := int16(uint16(pcm[i*2]) | uint16(pcm[i*2+1])<<8)
 		samples[i] = float32(s) / 32768.0
 	}
-	return samples, nil
+	return samples, sampleRate, nil
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +54,13 @@ type Bot struct {
 	liveWorker             *voice.LiveWorker
 	incrementalTranscriber *voice.IncrementalTranscriber
 
+	// starting is set while /session start is between its "already active"
+	// check and publishing the recorder, so a second start (or an enrollment)
+	// cannot slip into the gap. enrolling is the equivalent claim for
+	// /campaign enroll, which borrows the guild's voice connection.
+	starting  bool
+	enrolling bool
+
 	// Telegram integration (nil if not configured).
 	telegramClient   *telegram.Client
 	telegramListener *telegram.Listener
@@ -64,8 +72,10 @@ type Bot struct {
 	// Embedding generation for RAG (nil if not configured).
 	embedder embed.Embedder
 
-	// Pipeline progress tracking (non-nil while a pipeline is running).
-	progress *PipelineProgress
+	// Pipeline progress tracking, keyed by session ID. An entry exists only
+	// while a run for that session is in flight; it doubles as the in-flight
+	// guard so two runs for the same session cannot overlap.
+	progress map[int64]*PipelineProgress
 
 	// TTS synthesizer for voice-cloned recap playback (nil if not configured).
 	ttsSynth interface {
@@ -133,10 +143,44 @@ func (b *Bot) LiveTranscriptWorker() *voice.LiveWorker {
 func (b *Bot) PipelineProgressFor(sessionID int64) *PipelineProgress {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.progress != nil && b.progress.SessionID() == sessionID {
-		return b.progress
+	return b.progress[sessionID]
+}
+
+// beginPipeline registers a fresh progress tracker for the session and returns
+// it. ok is false when a run for that session is already in flight — callers
+// must abandon their run in that case, since two runs would corrupt each
+// other's DB rows and SSE stream. Callers must pair a successful call with
+// endPipeline.
+func (b *Bot) beginPipeline(sessionID int64) (*PipelineProgress, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, running := b.progress[sessionID]; running {
+		return nil, false
 	}
-	return nil
+	if b.progress == nil {
+		b.progress = make(map[int64]*PipelineProgress)
+	}
+	p := NewPipelineProgress(sessionID)
+	b.progress[sessionID] = p
+	return p, true
+}
+
+// endPipeline deregisters the tracker, but only if it is still the one this
+// run registered, so a finishing run can never evict a newer one.
+func (b *Bot) endPipeline(sessionID int64, p *PipelineProgress) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.progress[sessionID] == p {
+		delete(b.progress, sessionID)
+	}
+}
+
+// recoverPanic turns a panic in a background goroutine into a log line so a
+// bug in one session's processing cannot take the whole bot down.
+func recoverPanic(what string) {
+	if r := recover(); r != nil {
+		log.Printf("panic recovered in %s: %v\n%s", what, r, debug.Stack())
+	}
 }
 
 // MemberInfo represents a Discord guild member.
@@ -251,8 +295,10 @@ func (b *Bot) AskLore(ctx context.Context, campaignID int64, question, loreConte
 	output := summarise.StripCodeFences(stdout.Bytes())
 	var result loreResult
 	if err := json.Unmarshal(output, &result); err != nil {
-		// If JSON parse fails, return raw text as answer
-		return strings.TrimSpace(string(output)), nil
+		// Not JSON after all — answer with the model's own text. Use the raw
+		// output rather than the stripped bytes, which are only the first
+		// balanced {...} span and would truncate a prose answer.
+		return strings.TrimSpace(stdout.String()), nil
 	}
 	return result.Answer, nil
 }
@@ -390,9 +436,13 @@ func (b *Bot) Stop() error {
 		b.recorder = nil
 	}
 	if b.activeVC != nil {
-		if err := b.activeVC.Disconnect(context.Background()); err != nil {
+		// Bounded — an unbounded Disconnect never returns if the gateway has
+		// gone away, and shutdown would hang holding b.mu.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := b.activeVC.Disconnect(ctx); err != nil {
 			log.Printf("Error disconnecting voice during shutdown: %v", err)
 		}
+		cancel()
 		b.activeVC = nil
 	}
 	if b.diarizer != nil {
@@ -487,12 +537,14 @@ func (b *Bot) handleVoiceStateUpdate(s *discordgo.Session, vsu *discordgo.VoiceS
 	}
 
 	log.Println("Voice channel emptied, auto-stopping session.")
-	b.mu.Lock()
-	sessionID := b.sessionID
-	b.mu.Unlock()
 
-	result := b.stopRecording()
-	b.releaseTranscriber() // release live transcription reference
+	// stopRecording claims the session; if another goroutine (a second
+	// voice-state event, or /session stop) got there first we must not run
+	// any of the teardown follow-ups a second time.
+	result, sessionID, ok := b.stopRecording()
+	if !ok {
+		return
+	}
 
 	if sessionID != 0 {
 		ctx := context.Background()
@@ -512,65 +564,96 @@ type stopResult struct {
 }
 
 // stopRecording stops the recorder, Telegram listener, and disconnects from
-// voice, returning audio files and captured Telegram messages before clearing
-// state. Caller must NOT hold b.mu.
-func (b *Bot) stopRecording() stopResult {
+// voice, returning audio files and captured Telegram messages. It also
+// releases the live transcription's reference to the transcriber.
+//
+// The session state is claimed in a single critical section before any
+// blocking work happens, so exactly one caller performs the teardown: a
+// concurrent caller gets ok=false and must not run EndSession or the
+// pipeline. Caller must NOT hold b.mu.
+func (b *Bot) stopRecording() (result stopResult, sessionID int64, ok bool) {
+	// Take every piece of session state out of the Bot in one go. A second
+	// caller then sees nils and bails out immediately, rather than racing us
+	// through the blocking shutdown below (which would double-Stop the
+	// incremental transcriber and double-release the transcriber).
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	rec := b.recorder
+	lw := b.liveWorker
+	it := b.incrementalTranscriber
+	tl := b.telegramListener
+	vc := b.activeVC
+	sessionID = b.sessionID
+	if rec == nil && lw == nil && it == nil && tl == nil && vc == nil && sessionID == 0 {
+		b.mu.Unlock()
+		return stopResult{}, 0, false
+	}
+	b.recorder = nil
+	b.liveWorker = nil
+	b.incrementalTranscriber = nil
+	b.telegramListener = nil
+	b.activeVC = nil
+	b.activeChannelID = ""
+	b.sessionID = 0
+	b.mu.Unlock()
 
-	var result stopResult
-
-	if b.recorder != nil {
+	if rec != nil {
 		log.Println("Stopping recorder...")
-		if err := b.recorder.Stop(); err != nil {
+		if err := rec.Stop(); err != nil {
 			log.Printf("Error stopping recorder: %v", err)
 		}
-		result.UserFiles = b.recorder.UserFiles()
-		b.recorder = nil
+		result.UserFiles = rec.UserFiles()
 		log.Println("Recorder stopped")
 	}
 	// Wait for the live worker to finish processing any in-flight chunks
 	// before we release the transcriber — it shares the same ONNX model.
-	lw := b.liveWorker
+	releaseNow := true
 	if lw != nil {
 		log.Println("Waiting for live worker to drain...")
-		b.mu.Unlock()
 		if lw.WaitTimeout(5 * time.Second) {
 			log.Println("Live worker drained")
 		} else {
-			log.Println("Live worker drain timed out after 5s — abandoning in-flight chunks")
+			// The worker is still inside TranscribeChunk. Hand our reference
+			// to it rather than releasing now — dropping the refcount to zero
+			// here would free the native model underneath the running decode.
+			log.Println("Live worker drain timed out after 5s — deferring transcriber release until it exits")
+			releaseNow = false
+			go func() {
+				defer recoverPanic("live worker transcriber release")
+				lw.Wait()
+				b.releaseTranscriber()
+				log.Println("Live worker exited, transcriber reference released")
+			}()
 		}
-		b.mu.Lock()
 	}
-	it := b.incrementalTranscriber
 	if it != nil {
 		log.Println("Stopping incremental transcriber...")
-		b.mu.Unlock()
 		it.Stop()
-		b.mu.Lock()
 		result.PreTranscribed, result.ProcessedOffsets = it.CollectedSegments()
 		log.Printf("Incremental transcriber: %d users pre-transcribed", len(result.PreTranscribed))
-		b.incrementalTranscriber = nil
 	}
-	if b.telegramListener != nil {
+	if tl != nil {
 		log.Println("Stopping Telegram listener...")
-		result.TelegramMsgs = b.telegramListener.Stop()
-		b.telegramListener = nil
+		result.TelegramMsgs = tl.Stop()
 		log.Println("Telegram listener stopped")
 	}
-	if b.activeVC != nil {
+	if vc != nil {
 		log.Println("Disconnecting from voice...")
-		if err := b.activeVC.Disconnect(context.Background()); err != nil {
+		// Bounded — Disconnect blocks until the gateway confirms the
+		// connection is dead, which never happens if the gateway went away.
+		disconnCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := vc.Disconnect(disconnCtx); err != nil {
 			log.Printf("Error disconnecting from voice: %v", err)
 		}
-		b.activeVC = nil
+		cancel()
 		log.Println("Voice disconnected")
 	}
-	b.activeChannelID = ""
-	b.sessionID = 0
-	b.liveWorker = nil
 
-	return result
+	// Release the live transcription's reference. The pipeline acquires its own.
+	if releaseNow {
+		b.releaseTranscriber()
+	}
+
+	return result, sessionID, true
 }
 
 // recalculateSessionEndTimes finds sessions whose ended_at - started_at is

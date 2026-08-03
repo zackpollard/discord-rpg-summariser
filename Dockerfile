@@ -7,7 +7,7 @@ COPY web/ ./
 RUN npm run build
 
 # Stage 2: Build whisper.cpp and Go binary
-FROM golang:1.23-bookworm AS backend
+FROM golang:1.25-bookworm AS backend
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake build-essential git pkg-config libopus-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -66,18 +66,26 @@ RUN /opt/tts-venv/bin/pip install --no-cache-dir \
     torch==2.6.0+cpu torchaudio==2.6.0+cpu \
     --index-url https://download.pytorch.org/whl/cpu
 
-# Clone ZipVoice
-RUN git clone --depth 1 https://github.com/k2-fsa/ZipVoice.git /opt/tts-venv/ZipVoice
+# Clone ZipVoice at a pinned commit. scripts/tts_generate.py string-patches
+# zipvoice/models/modules/solver.py for per-step progress, so an unpinned HEAD
+# can silently drop progress reporting as well as make builds unreproducible.
+ARG ZIPVOICE_COMMIT=2f7326fbfe999a3ad179e3f1af82a424d4a62819
+RUN mkdir -p /opt/tts-venv/ZipVoice \
+    && git -C /opt/tts-venv/ZipVoice init -q \
+    && git -C /opt/tts-venv/ZipVoice remote add origin https://github.com/k2-fsa/ZipVoice.git \
+    && git -C /opt/tts-venv/ZipVoice fetch --depth 1 origin ${ZIPVOICE_COMMIT} \
+    && git -C /opt/tts-venv/ZipVoice checkout -q FETCH_HEAD
 
 # Install piper_phonemize from custom index
-RUN /opt/tts-venv/bin/pip install --no-cache-dir piper_phonemize \
+RUN /opt/tts-venv/bin/pip install --no-cache-dir piper_phonemize==1.3.0 \
     -f https://k2-fsa.github.io/icefall/piper_phonemize.html
 
 # Install remaining ZipVoice requirements + sentencepiece/huggingface_hub for
 # bpe.vocab generation. urllib3 is a transitive dep that lhotse imports
 # directly but doesn't declare; pin it here so the venv doesn't break.
 RUN /opt/tts-venv/bin/pip install --no-cache-dir \
-    -r /opt/tts-venv/ZipVoice/requirements.txt sentencepiece huggingface_hub urllib3
+    -r /opt/tts-venv/ZipVoice/requirements.txt \
+    sentencepiece==0.2.1 huggingface_hub==0.36.2 urllib3==2.6.3
 
 # Stage 4: Runtime
 FROM node:22-slim AS runtime

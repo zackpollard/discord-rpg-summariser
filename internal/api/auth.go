@@ -154,6 +154,9 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 
 // handleAuthLogout clears the session cookie.
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	s.sessions.Clear(w)
+	// s.sessions is nil when auth is disabled — there is no cookie to clear.
+	if s.sessions != nil {
+		s.sessions.Clear(w)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 }

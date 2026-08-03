@@ -34,7 +34,7 @@ export CGO_LDFLAGS      += -L$(abspath $(WHISPER_LIB)) -L$(abspath $(WHISPER_GGM
 export CGO_CFLAGS       += -I$(abspath $(WHISPER_INCLUDE)) -I$(abspath $(WHISPER_DIR)/ggml/include)
 export LD_LIBRARY_PATH  := $(abspath $(WHISPER_LIB)):$(abspath $(WHISPER_GGML_LIB)):$(LD_LIBRARY_PATH)
 
-.PHONY: dev dev-local dev-deps dev-stop build test test-unit test-integration test-web lint clean help whisper
+.PHONY: dev dev-local dev-deps dev-stop build test test-unit test-integration test-web lint fmt clean help whisper
 
 help: ## Show this help
 	@grep -E '^[a-z][a-z_-]+:.*## ' $(MAKEFILE_LIST) | sort | \
@@ -131,9 +131,18 @@ test-web: web/node_modules ## Run web frontend tests
 # Quality
 # ---------------------------------------------------------------------------
 
-lint: whisper ## Run Go vet and Svelte check
+lint: whisper ## Run gofmt check, Go vet and Svelte check
+	@unformatted=$$(gofmt -l cmd/ internal/); \
+	if [ -n "$$unformatted" ]; then \
+		echo "Files not formatted with gofmt (run 'make fmt'):"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
 	go vet -tags $(BUILD_TAGS) ./...
 	@if [ -d web/node_modules ]; then cd web && npx svelte-check --tsconfig tsconfig.json; fi
+
+fmt: ## Format Go sources with gofmt
+	gofmt -w cmd/ internal/
 
 # ---------------------------------------------------------------------------
 # Cleanup

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"discord-rpg-summariser/internal/storage"
@@ -13,33 +14,38 @@ import (
 )
 
 // annotateTranscript runs the LLM annotation stage on the transcript segments.
-// Returns a map of segment ID → annotation, or nil on failure.
+// Returns a map of segment ID → annotation and the DB segment IDs in
+// transcript order (so callers can pair annotations with merged segments), or
+// nil on failure.
 func (b *Bot) annotateTranscript(
 	ctx context.Context,
+	prog *PipelineProgress,
 	session *storage.Session,
 	sessionID int64,
 	merged []transcribe.UserSegment,
 	charNames map[string]string,
 	dmName string,
-) map[int64]*storage.TranscriptAnnotation {
+) (map[int64]*storage.TranscriptAnnotation, []int64) {
 	annotator, ok := b.summariser.(summarise.TranscriptAnnotator)
 	if !ok {
 		log.Printf("pipeline: summariser does not support annotation, skipping")
-		return nil
+		return nil, nil
 	}
 
 	// Query segments from DB to get their assigned IDs.
 	dbSegments, err := b.store.GetTranscript(ctx, sessionID)
 	if err != nil {
 		log.Printf("pipeline: get transcript for annotation: %v", err)
-		return nil
+		return nil, nil
 	}
 	if len(dbSegments) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Build annotation inputs.
 	inputs := make([]summarise.AnnotationInput, len(dbSegments))
+	segmentIDs := make([]int64, len(dbSegments))
+	validIDs := make(map[int64]struct{}, len(dbSegments))
 	for i, seg := range dbSegments {
 		speaker := charNames[seg.UserID]
 		if speaker == "" {
@@ -51,6 +57,8 @@ func (b *Bot) annotateTranscript(
 			StartTime: seg.StartTime,
 			Text:      seg.Text,
 		}
+		segmentIDs[i] = seg.ID
+		validIDs[seg.ID] = struct{}{}
 	}
 
 	// Build vocabulary from campaign data.
@@ -86,8 +94,8 @@ func (b *Bot) annotateTranscript(
 
 		log.Printf("pipeline: annotating batch %d-%d of %d segments (session: %s)",
 			i+1, end, len(inputs), claudeSessionID)
-		if b.progress != nil {
-			b.progress.SetDetail(fmt.Sprintf("Annotating transcript (%d/%d segments)", end, len(inputs)))
+		if prog != nil {
+			prog.SetDetail(fmt.Sprintf("Annotating transcript (%d/%d segments)", end, len(inputs)))
 		}
 
 		var result *summarise.AnnotationResult
@@ -112,7 +120,7 @@ func (b *Bot) annotateTranscript(
 
 	if len(allAnnotated) == 0 {
 		log.Printf("pipeline: all annotation batches failed")
-		return nil
+		return nil, nil
 	}
 
 	// Persist to DB.
@@ -121,7 +129,16 @@ func (b *Bot) annotateTranscript(
 	var dbAnnotations []storage.TranscriptAnnotation
 	annotationMap := make(map[int64]*storage.TranscriptAnnotation)
 
+	dropped := 0
 	for _, seg := range allAnnotated {
+		// The segment ID comes straight out of the model's JSON. An invented
+		// or renumbered ID would either violate the segment_id foreign key or,
+		// worse, silently overwrite another session's annotation, so only
+		// accept IDs we actually sent.
+		if _, valid := validIDs[seg.ID]; !valid {
+			dropped++
+			continue
+		}
 		a := storage.TranscriptAnnotation{
 			SegmentID:      seg.ID,
 			SessionID:      sessionID,
@@ -142,40 +159,39 @@ func (b *Bot) annotateTranscript(
 		annotationMap[seg.ID] = &aCopy
 	}
 
+	if dropped > 0 {
+		log.Printf("pipeline: dropped %d annotation(s) with unknown segment IDs", dropped)
+	}
+	if len(annotationMap) == 0 {
+		log.Printf("pipeline: no annotations matched a real segment ID")
+		return nil, nil
+	}
+
 	if err := b.store.InsertAnnotations(ctx, dbAnnotations); err != nil {
 		log.Printf("pipeline: insert annotations: %v", err)
 	}
 
 	log.Printf("pipeline: annotated %d/%d segments across %d batches",
-		len(allAnnotated), len(inputs), (len(inputs)+batchSize-1)/batchSize)
+		len(annotationMap), len(inputs), (len(inputs)+batchSize-1)/batchSize)
 
-	return annotationMap
+	return annotationMap, segmentIDs
 }
 
 // buildAnnotatedTranscript produces a transcript string from merged segments
 // and annotations. Table talk is marked with [TABLE TALK] so the summariser
 // can deprioritize it while still having full context. Corrected text is used
 // when available, scene boundaries are inserted, and NPC voices are labelled.
+// segmentIDs holds the DB ID of merged[i] at index i, so annotations are
+// looked up by segment identity. Matching positionally against a compacted
+// list of annotations would shift every later annotation onto the wrong
+// segment whenever one is missing (a failed batch, or a short LLM response).
+// A nil/short segmentIDs slice simply means those segments are unannotated.
 func buildAnnotatedTranscript(
 	merged []transcribe.UserSegment,
+	segmentIDs []int64,
 	annotations map[int64]*storage.TranscriptAnnotation,
 	dmName string,
 ) string {
-	// We need to match merged segments to annotations by position since
-	// merged segments don't have DB IDs. Build a positional lookup.
-	// The annotations map is keyed by segment DB ID, but we can match
-	// by index since both are in the same order.
-
-	// Actually, the merged segments and DB segments are in the same order
-	// (both sorted by start_time from MergeTranscripts / InsertSegments).
-	// We'll match by collecting annotation values in order.
-	orderedAnnotations := make([]*storage.TranscriptAnnotation, 0, len(annotations))
-	for _, a := range annotations {
-		orderedAnnotations = append(orderedAnnotations, a)
-	}
-	// Sort by segment ID to match insertion order.
-	sortAnnotationsBySegmentID(orderedAnnotations)
-
 	var b strings.Builder
 	var lastScene string
 	var mergeBuffer string // accumulates text from merged segments
@@ -191,8 +207,8 @@ func buildAnnotatedTranscript(
 
 	for i, seg := range merged {
 		var ann *storage.TranscriptAnnotation
-		if i < len(orderedAnnotations) {
-			ann = orderedAnnotations[i]
+		if i < len(segmentIDs) {
+			ann = annotations[segmentIDs[i]]
 		}
 
 		// Mark table talk so the summariser can deprioritize it, but keep
@@ -255,14 +271,6 @@ func buildAnnotatedTranscript(
 	return b.String()
 }
 
-func sortAnnotationsBySegmentID(annotations []*storage.TranscriptAnnotation) {
-	for i := 1; i < len(annotations); i++ {
-		for j := i; j > 0 && annotations[j].SegmentID < annotations[j-1].SegmentID; j-- {
-			annotations[j], annotations[j-1] = annotations[j-1], annotations[j]
-		}
-	}
-}
-
 func formatSeconds(secs float64) string {
 	total := int(secs)
 	h := total / 3600
@@ -281,23 +289,123 @@ func countClassification(annotations map[int64]*storage.TranscriptAnnotation, cl
 	return count
 }
 
-// interleaveTelegramIntoAnnotated adds Telegram messages to an already-built
-// annotated transcript. This is a simplified version that appends them at the
-// end since the annotated transcript doesn't easily support mid-insertion.
+// interleaveTelegramIntoAnnotated inserts the session's stored Telegram
+// messages into an already-built annotated transcript, in timestamp order.
+// It reads from the DB so the live and reprocess paths produce the same
+// transcript.
 func (b *Bot) interleaveTelegramIntoAnnotated(
 	ctx context.Context,
 	session *storage.Session,
 	campaign *storage.Campaign,
 	transcript string,
-	telegramMsgs []telegram.Message,
 	dmName string,
 ) string {
-	if len(telegramMsgs) == 0 {
+	tgMsgs, err := b.store.GetTelegramMessages(ctx, session.ID, false)
+	if err != nil {
+		log.Printf("pipeline: GetTelegramMessages: %v", err)
 		return transcript
 	}
 
-	// For now, just return the annotated transcript without Telegram messages
-	// rather than risk misaligning them. The Telegram messages are already
-	// persisted to DB and can be interleaved in the reprocess path.
-	return transcript
+	entries := telegramTranscriptEntries(session, campaign, tgMsgs, dmName)
+	if len(entries) == 0 {
+		return transcript
+	}
+
+	log.Printf("pipeline: interleaving %d Telegram message(s) into transcript", len(entries))
+	return insertTelegramEntries(transcript, entries)
+}
+
+// telegramTranscriptEntries filters stored Telegram messages down to the
+// session-relevant ones and converts them to transcript entries with elapsed
+// timestamps.
+func telegramTranscriptEntries(
+	session *storage.Session,
+	campaign *storage.Campaign,
+	msgs []storage.TelegramMessage,
+	dmName string,
+) []transcribe.TelegramEntry {
+	var telegramDMID int64
+	if campaign != nil && campaign.TelegramDMUserID != nil {
+		telegramDMID = *campaign.TelegramDMUserID
+	}
+
+	senderLabel := "DM"
+	if dmName != "" {
+		senderLabel = dmName
+	}
+
+	var entries []transcribe.TelegramEntry
+	for _, m := range msgs {
+		isDM := telegramDMID != 0 && m.FromUserID == telegramDMID
+		if !telegram.IsRelevant(telegram.Message{FromID: m.FromUserID, Text: m.Text}, isDM) {
+			continue
+		}
+		elapsed := m.SentAt.Sub(session.StartedAt).Seconds()
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		name := senderLabel
+		if !isDM {
+			name = m.FromDisplay
+		}
+		entries = append(entries, transcribe.TelegramEntry{
+			ElapsedSecs: elapsed,
+			SenderName:  name,
+			Text:        m.Text,
+		})
+	}
+	return entries
+}
+
+// insertTelegramEntries splices Telegram entries into a rendered transcript,
+// placing each one before the first "[HH:MM:SS]" line that starts later than
+// it. Lines without a timestamp (scene headers, blank lines) are passed
+// through untouched.
+func insertTelegramEntries(transcript string, entries []transcribe.TelegramEntry) string {
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].ElapsedSecs < entries[j].ElapsedSecs
+	})
+
+	trailingNewline := strings.HasSuffix(transcript, "\n")
+	lines := strings.Split(strings.TrimSuffix(transcript, "\n"), "\n")
+
+	out := make([]string, 0, len(lines)+len(entries))
+	next := 0
+	for _, line := range lines {
+		if secs, ok := parseLineSeconds(line); ok {
+			for next < len(entries) && entries[next].ElapsedSecs <= secs {
+				out = append(out, formatTelegramLine(entries[next]))
+				next++
+			}
+		}
+		out = append(out, line)
+	}
+	for ; next < len(entries); next++ {
+		out = append(out, formatTelegramLine(entries[next]))
+	}
+
+	joined := strings.Join(out, "\n")
+	if trailingNewline {
+		joined += "\n"
+	}
+	return joined
+}
+
+// formatTelegramLine renders a Telegram entry using the same "[Name via
+// Telegram]" marker the summariser prompts tell the model to look for.
+func formatTelegramLine(e transcribe.TelegramEntry) string {
+	return fmt.Sprintf("[%s] [%s via Telegram]: %s", formatSeconds(e.ElapsedSecs), e.SenderName, e.Text)
+}
+
+// parseLineSeconds extracts the elapsed seconds from a transcript line that
+// begins with an "[HH:MM:SS]" timestamp.
+func parseLineSeconds(line string) (float64, bool) {
+	if len(line) < 10 || line[0] != '[' || line[9] != ']' {
+		return 0, false
+	}
+	var h, m, s int
+	if _, err := fmt.Sscanf(line[1:9], "%02d:%02d:%02d", &h, &m, &s); err != nil {
+		return 0, false
+	}
+	return float64(h*3600 + m*60 + s), true
 }

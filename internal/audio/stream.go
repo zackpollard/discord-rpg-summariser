@@ -138,7 +138,6 @@ func StreamResample(wavPath string, cb ChunkCallback) error {
 	// Chunk accumulation state.
 	var chunkBuf []float32
 	var silenceFrameCount int        // consecutive silent frames
-	var totalInputSamples int64      // cumulative input samples read (for offset tracking)
 	var chunkStartInputSamples int64 // input sample index where the current chunk started
 
 	// flush delivers the current chunk and resets accumulation state.
@@ -147,10 +146,14 @@ func StreamResample(wavPath string, cb ChunkCallback) error {
 			return nil
 		}
 		offsetSeconds := float64(chunkStartInputSamples) / float64(inputRate)
+		// Advance by the audio actually delivered, not by how much of the
+		// input block has been read — a split can land mid-block, and the
+		// remaining frames of that block belong to the next chunk.
+		delivered := int64(len(chunkBuf))
 		err := cb(chunkBuf, offsetSeconds)
 		chunkBuf = nil
 		silenceFrameCount = 0
-		chunkStartInputSamples = totalInputSamples
+		chunkStartInputSamples += delivered * decimationFactor
 		return err
 	}
 
@@ -175,8 +178,6 @@ func StreamResample(wavPath string, cb ChunkCallback) error {
 		// Filter and decimate.
 		filtered := fState.process(floats)
 		resampled := dState.process(filtered)
-
-		totalInputSamples += int64(nSamples)
 
 		// Append to the silence check buffer and process frames.
 		silenceCheckBuf = append(silenceCheckBuf, resampled...)

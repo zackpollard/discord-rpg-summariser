@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -31,23 +32,35 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	telegramMsgs := result.TelegramMsgs
 	ctx := summarise.WithSessionID(context.Background(), sessionID)
 
-	// Set up progress tracking.
-	b.mu.Lock()
-	b.progress = NewPipelineProgress(sessionID)
-	b.mu.Unlock()
+	// Set up progress tracking. The tracker is kept in a local for the whole
+	// run — reading b.progress mid-run would race with, and could pick up or
+	// be nilled by, a concurrent run.
+	prog, ok := b.beginPipeline(sessionID)
+	if !ok {
+		log.Printf("pipeline: a run for session %d is already in flight, skipping", sessionID)
+		return
+	}
+	defer b.endPipeline(sessionID, prog)
+
+	// A panic here must still leave the session in a terminal state and close
+	// the progress stream, or the row stays 'transcribing'/'summarising'
+	// forever and the session page's SSE subscriber never returns.
 	defer func() {
-		b.mu.Lock()
-		b.progress = nil
-		b.mu.Unlock()
+		if r := recover(); r != nil {
+			log.Printf("panic recovered in pipeline for session %d: %v\n%s", sessionID, r, debug.Stack())
+			if err := b.store.UpdateSessionStatus(context.Background(), sessionID, "failed"); err != nil {
+				log.Printf("pipeline: marking session %d failed after panic: %v", sessionID, err)
+			}
+			prog.Complete()
+		}
 	}()
 
 	// Stream LLM stderr to the progress window.
-	if cli, ok := b.summariser.(*summarise.ClaudeCLI); ok {
-		progress := b.progress
-		cli.OnStream = func(operation, message string) {
-			progress.BroadcastLog(fmt.Sprintf("[%s] %s", operation, message))
-		}
-		defer func() { cli.OnStream = nil }()
+	if cli, isCLI := b.summariser.(*summarise.ClaudeCLI); isCLI {
+		cli.SetOnStream(func(operation, message string) {
+			prog.BroadcastLog(fmt.Sprintf("[%s] %s", operation, message))
+		})
+		defer cli.SetOnStream(nil)
 	}
 
 	session, err := b.store.GetSession(ctx, sessionID)
@@ -56,6 +69,10 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 		b.store.UpdateSessionStatus(ctx, sessionID, "failed")
 		return
 	}
+
+	// Persist captured Telegram messages before anything can bail out — the
+	// in-memory copy from the listener is the only one there is.
+	b.persistTelegramMessages(ctx, session, telegramMsgs)
 
 	if len(userFiles) == 0 {
 		log.Printf("pipeline: no user audio files for session %d", sessionID)
@@ -84,7 +101,7 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	// Transcribe each user's WAV, with diarization for shared mics.
 	b.store.UpdateSessionStatus(ctx, sessionID, "transcribing")
 	totalUsers := len(userFiles)
-	b.progress.SetStage("transcribing", fmt.Sprintf("Transcribing audio (0 of %d users)", totalUsers))
+	prog.SetStage("transcribing", fmt.Sprintf("Transcribing audio (0 of %d users)", totalUsers))
 
 	// Load shared mic config for this campaign.
 	sharedMics, _ := b.store.GetSharedMics(ctx, session.CampaignID)
@@ -109,20 +126,14 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	}
 
 	// Wire up intra-file progress if the transcriber supports it.
-	// Capture the progress pointer at callback setup so a concurrent
-	// pipeline that replaces b.progress can't cause us to nil-deref.
 	type progressSetter interface {
 		SetProgressCallback(func(float64))
 	}
-	progress := b.progress
 	setIntraProgress := func(doneUsers int) {
 		if ps, ok := transcriber.(progressSetter); ok {
 			ps.SetProgressCallback(func(filePct float64) {
-				if progress == nil {
-					return
-				}
 				p := (float64(doneUsers) + filePct) / float64(totalUsers)
-				progress.SetSubProgress(p)
+				prog.SetSubProgress(p)
 			})
 		}
 	}
@@ -158,7 +169,7 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 			if err != nil {
 				log.Printf("pipeline: transcribe user %s: %v", userID, err)
 				doneUsers++
-				b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
+				prog.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 				continue
 			}
 			userSegments[userID] = segments
@@ -166,8 +177,8 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 		doneUsers++
 		log.Printf("pipeline: user %s done in %s (%d of %d, %d segments)",
 			userID, time.Since(userStart).Round(time.Second), doneUsers, totalUsers, len(userSegments[userID]))
-		b.progress.SetDetail(fmt.Sprintf("Transcribing audio (%d of %d users)", doneUsers, totalUsers))
-		b.progress.SetSubProgress(float64(doneUsers) / float64(totalUsers))
+		prog.SetDetail(fmt.Sprintf("Transcribing audio (%d of %d users)", doneUsers, totalUsers))
+		prog.SetSubProgress(float64(doneUsers) / float64(totalUsers))
 
 		// Stream completed segments to subscribers.
 		for _, seg := range userSegments[userID] {
@@ -175,7 +186,7 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 			if name == "" {
 				name = b.ResolveUsername(userID)
 			}
-			b.progress.BroadcastTranscript(name, seg.Text, seg.StartTime, seg.EndTime)
+			prog.BroadcastTranscript(name, seg.Text, seg.StartTime, seg.EndTime)
 		}
 
 		// Reclaim ONNX inference memory between users.
@@ -240,7 +251,7 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	joinOffsetSecs := audio.LoadJoinOffsets(session.AudioDir)
 
 	// Generate the mixed-down audio file now that recording is finished.
-	b.progress.SetStage("mixing", "Mixing audio tracks")
+	prog.SetStage("mixing", "Mixing audio tracks")
 	mixedPath := filepath.Join(session.AudioDir, "mixed.wav")
 	if err := audio.MixAndNormalize(userFiles, mixedPath, joinOffsetSecs); err != nil {
 		log.Printf("pipeline: mix audio: %v", err)
@@ -278,8 +289,8 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	// Annotate transcript: classify segments, correct ASR errors, detect
 	// scene boundaries, and identify NPC voices. Required — downstream
 	// stages depend on the annotated transcript for quality.
-	b.progress.SetStage("summarising", "Annotating transcript")
-	annotations := b.annotateTranscript(ctx, session, sessionID, merged, charNames, dmName)
+	prog.SetStage("summarising", "Annotating transcript")
+	annotations, segmentIDs := b.annotateTranscript(ctx, prog, session, sessionID, merged, charNames, dmName)
 
 	if len(annotations) == 0 {
 		log.Printf("pipeline: annotation failed for session %d, aborting pipeline", sessionID)
@@ -288,18 +299,18 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 		return
 	}
 
-	transcript := buildAnnotatedTranscript(merged, annotations, dmName)
+	transcript := buildAnnotatedTranscript(merged, segmentIDs, annotations, dmName)
 	log.Printf("pipeline: annotated transcript built (%d annotations, %d narrative, %d table_talk)",
 		len(annotations),
 		countClassification(annotations, "narrative"),
 		countClassification(annotations, "table_talk"))
 
-	// Interleave Telegram messages.
-	transcript = b.interleaveTelegramIntoAnnotated(ctx, session, campaign, transcript, telegramMsgs, dmName)
+	// Interleave Telegram messages (persisted above).
+	transcript = b.interleaveTelegramIntoAnnotated(ctx, session, campaign, transcript, dmName)
 
 	// Summarise.
 	b.store.UpdateSessionStatus(ctx, sessionID, "summarising")
-	b.progress.SetStage("summarising", "Generating summary")
+	prog.SetStage("summarising", "Generating summary")
 
 	sumResult, err := b.summariser.Summarise(ctx, transcript, "", dmName)
 	if err != nil {
@@ -319,28 +330,32 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	b.sendNotification(sessionID, sumResult.Summary)
 
 	// Run extraction stages in parallel — they are all independent and non-fatal.
-	b.progress.SetStage("extracting", "Extracting title, entities, quests, and combat")
+	prog.SetStage("extracting", "Extracting title, entities, quests, and combat")
 
 	var extractWg sync.WaitGroup
 	extractWg.Add(4)
 
 	go func() {
 		defer extractWg.Done()
+		defer recoverPanic("pipeline title/quotes extraction")
 		b.extractTitleAndQuotes(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 	}()
 
 	go func() {
 		defer extractWg.Done()
+		defer recoverPanic("pipeline entity extraction")
 		b.extractEntities(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 	}()
 
 	go func() {
 		defer extractWg.Done()
+		defer recoverPanic("pipeline quest extraction")
 		b.extractQuests(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 	}()
 
 	go func() {
 		defer extractWg.Done()
+		defer recoverPanic("pipeline combat extraction")
 		// Combat then creatures (creatures depend on combat encounters in DB).
 		b.extractCombat(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
 		b.extractCreatures(ctx, session, sessionID, transcript, sumResult.Summary, dmName)
@@ -349,10 +364,10 @@ func (b *Bot) runPipeline(sessionID int64, result stopResult) {
 	extractWg.Wait()
 
 	// Generate vector embeddings after extractions complete (embeds entities and quests).
-	b.progress.SetStage("generating embeddings", "Generating embeddings")
+	prog.SetStage("generating embeddings", "Generating embeddings")
 	b.generateEmbeddings(ctx, session, sessionID, merged, sumResult.Summary, dmName)
 
-	b.progress.Complete()
+	prog.Complete()
 }
 
 // transcribeRemainder transcribes only the unprocessed portion of a WAV file,
@@ -421,32 +436,23 @@ func (b *Bot) gatherCampaignVocabulary(ctx context.Context, campaignID int64) []
 	return words
 }
 
-// buildTranscriptWithTelegram persists Telegram messages to the DB, filters
-// them, and returns a formatted transcript with voice segments and Telegram
-// messages interleaved chronologically.
-func (b *Bot) buildTranscriptWithTelegram(
-	ctx context.Context,
-	session *storage.Session,
-	campaign *storage.Campaign,
-	merged []transcribe.UserSegment,
-	telegramMsgs []telegram.Message,
-	dmName string,
-) string {
-	// If no Telegram messages, just format voice segments.
+// persistTelegramMessages writes every Telegram message captured during the
+// session to the DB. The listener's in-memory buffer is the only copy, so this
+// runs before any stage that can bail out. The insert is idempotent
+// (ON CONFLICT DO NOTHING), so a later reprocess is safe.
+func (b *Bot) persistTelegramMessages(ctx context.Context, session *storage.Session, telegramMsgs []telegram.Message) {
 	if len(telegramMsgs) == 0 {
-		return transcribe.FormatTranscript(merged)
+		return
 	}
 
-	// Determine the Telegram DM user ID for filtering.
+	// Determine the Telegram DM user ID so DM messages are flagged.
 	var telegramDMID int64
-	if campaign != nil && campaign.TelegramDMUserID != nil {
+	if campaign, _ := b.store.GetCampaign(ctx, session.CampaignID); campaign != nil && campaign.TelegramDMUserID != nil {
 		telegramDMID = *campaign.TelegramDMUserID
 	}
 
-	// Persist all Telegram messages to DB.
-	var dbMsgs []storage.TelegramMessage
+	dbMsgs := make([]storage.TelegramMessage, 0, len(telegramMsgs))
 	for _, m := range telegramMsgs {
-		isDM := telegramDMID != 0 && m.FromID == telegramDMID
 		dbMsgs = append(dbMsgs, storage.TelegramMessage{
 			SessionID:     session.ID,
 			TelegramMsgID: m.MessageID,
@@ -455,46 +461,14 @@ func (b *Bot) buildTranscriptWithTelegram(
 			FromDisplay:   m.FromDisplay,
 			Text:          m.Text,
 			SentAt:        m.Timestamp,
-			IsDM:          isDM,
+			IsDM:          telegramDMID != 0 && m.FromID == telegramDMID,
 		})
 	}
 	if err := b.store.InsertTelegramMessages(ctx, dbMsgs); err != nil {
 		log.Printf("pipeline: InsertTelegramMessages: %v", err)
+		return
 	}
-
-	// Filter: only DM messages that pass relevance check.
-	var entries []transcribe.TelegramEntry
-	senderLabel := "DM"
-	if dmName != "" {
-		senderLabel = dmName
-	}
-
-	for _, m := range telegramMsgs {
-		isDM := telegramDMID != 0 && m.FromID == telegramDMID
-		if !telegram.IsRelevant(m, isDM) {
-			continue
-		}
-		elapsed := m.Timestamp.Sub(session.StartedAt).Seconds()
-		if elapsed < 0 {
-			elapsed = 0
-		}
-		name := senderLabel
-		if !isDM {
-			name = m.FromDisplay
-		}
-		entries = append(entries, transcribe.TelegramEntry{
-			ElapsedSecs: elapsed,
-			SenderName:  name,
-			Text:        m.Text,
-		})
-	}
-
-	if len(entries) == 0 {
-		return transcribe.FormatTranscript(merged)
-	}
-
-	log.Printf("pipeline: interleaving %d Telegram messages into transcript", len(entries))
-	return transcribe.FormatTranscriptWithTelegram(merged, entries)
+	log.Printf("pipeline: persisted %d Telegram message(s) for session %d", len(dbMsgs), session.ID)
 }
 
 // transcribeSharedMic transcribes a shared-mic WAV file and attributes each

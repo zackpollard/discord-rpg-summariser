@@ -86,13 +86,13 @@ func (s *Server) setupRoutes() {
 
 	s.handle("GET /api/members", s.handleListMembers)
 
-	// Live data endpoints — not protected by auth since EventSource
-	// doesn't support credentials and these are read-only streams.
-	s.mux.HandleFunc("GET /api/voice-activity", s.handleVoiceActivity)
-	s.mux.HandleFunc("GET /api/live-transcript", s.handleLiveTranscript)
-	s.mux.HandleFunc("GET /api/sessions/{id}/progress", s.handlePipelineProgress)
-	s.mux.HandleFunc("GET /api/tts/progress", s.handleTTSProgress)
-	s.mux.HandleFunc("POST /api/tts/cancel", s.handleCancelTTS)
+	// Live data endpoints. Same-origin EventSource sends the session cookie
+	// automatically, so these are protected like every other route.
+	s.handle("GET /api/voice-activity", s.handleVoiceActivity)
+	s.handle("GET /api/live-transcript", s.handleLiveTranscript)
+	s.handle("GET /api/sessions/{id}/progress", s.handlePipelineProgress)
+	s.handle("GET /api/tts/progress", s.handleTTSProgress)
+	s.handle("POST /api/tts/cancel", s.handleCancelTTS)
 }
 
 // handle registers a route, wrapping the handler with auth middleware when

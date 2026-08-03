@@ -481,7 +481,16 @@ func (s *Store) MergeEntities(ctx context.Context, campaignID, keepID, mergeID i
 		return fmt.Errorf("insert entity merge audit: %w", err)
 	}
 
-	// 6. Delete the merged entity.
+	// 6. Drop the merged entity's embedding so RAG stops retrieving it
+	// (embeddings has no FK to entities, so nothing cascades).
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM embeddings WHERE campaign_id = $1 AND doc_type = 'entity' AND doc_id = $2`,
+		campaignID, mergeID,
+	); err != nil {
+		return fmt.Errorf("delete merged entity embedding: %w", err)
+	}
+
+	// 7. Delete the merged entity.
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM entities WHERE id = $1`, mergeID,
 	); err != nil {

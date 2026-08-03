@@ -5,8 +5,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"discord-rpg-summariser/internal/auth"
 	"discord-rpg-summariser/internal/config"
@@ -42,14 +44,18 @@ type Server struct {
 	oauthCfg      *auth.OAuthConfig
 	secureCookies bool
 	authEnabled   bool
+
+	reprocessMu  sync.Mutex
+	reprocessing map[int64]struct{} // sessions with a reprocess goroutine in flight
 }
 
 func NewServer(store *storage.Store, listenAddr, guildID, webDir string, opts ...Option) *Server {
 	s := &Server{
-		store:      store,
-		listenAddr: listenAddr,
-		guildID:    guildID,
-		mux:        http.NewServeMux(),
+		store:        store,
+		listenAddr:   listenAddr,
+		guildID:      guildID,
+		mux:          http.NewServeMux(),
+		reprocessing: make(map[int64]struct{}),
 	}
 
 	for _, opt := range opts {
@@ -82,8 +88,7 @@ func WithAuth(cfg *config.Config) Option {
 			return
 		}
 
-		secureCookies := !strings.HasPrefix(disc.RedirectURL, "http://localhost") &&
-			!strings.HasPrefix(disc.RedirectURL, "http://127.0.0.1")
+		secureCookies := !isLoopbackHTTPURL(disc.RedirectURL)
 
 		sm, err := auth.NewSessionManager(web.SessionSecret, secureCookies)
 		if err != nil {
@@ -197,7 +202,8 @@ func (s *Server) setupSPA(webDir string) {
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") {
+		w.Header().Set("Vary", "Origin")
+		if isLoopbackHTTPURL(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -223,4 +229,22 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isLoopbackHTTPURL reports whether rawURL is a plain-HTTP URL whose host is
+// the loopback interface. The host is matched exactly (not by prefix) so that
+// attacker-registrable names like http://localhost.example.com are rejected.
+func isLoopbackHTTPURL(rawURL string) bool {
+	if rawURL == "" {
+		return false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }

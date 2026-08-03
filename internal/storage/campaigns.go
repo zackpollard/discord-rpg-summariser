@@ -78,6 +78,12 @@ func (s *Store) SetActiveCampaign(ctx context.Context, guildID string, campaignI
 	}
 	defer tx.Rollback(ctx)
 
+	// Serialise per guild so concurrent activations can't both observe the
+	// other's pre-deactivation state and collide on idx_campaigns_guild_active.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, guildID); err != nil {
+		return fmt.Errorf("lock guild campaigns: %w", err)
+	}
+
 	_, err = tx.Exec(ctx, `UPDATE campaigns SET is_active = false WHERE guild_id = $1 AND is_active = true`, guildID)
 	if err != nil {
 		return fmt.Errorf("deactivate old: %w", err)
@@ -138,22 +144,39 @@ func (s *Store) SetCampaignDM(ctx context.Context, campaignID int64, dmUserID st
 }
 
 // GetOrCreateActiveCampaign returns the active campaign for a guild, creating
-// a "Default Campaign" if none exists.
+// a "Default Campaign" if none exists. The lookup and the creation run in a
+// single transaction holding a per-guild advisory lock, so concurrent callers
+// can't each create their own default campaign.
 func (s *Store) GetOrCreateActiveCampaign(ctx context.Context, guildID string) (*Campaign, error) {
-	c, err := s.GetActiveCampaign(ctx, guildID)
+	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("begin tx: %w", err)
 	}
-	if c != nil {
-		return c, nil
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, guildID); err != nil {
+		return nil, fmt.Errorf("lock guild campaigns: %w", err)
 	}
 
-	id, err := s.CreateCampaign(ctx, guildID, "Default Campaign", "")
-	if err != nil {
-		return nil, fmt.Errorf("auto-create campaign: %w", err)
+	var c Campaign
+	err = tx.QueryRow(ctx,
+		`SELECT `+campaignCols+` FROM campaigns WHERE guild_id = $1 AND is_active = true`, guildID,
+	).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.GameSystem, &c.IsActive, &c.DMUserID, &c.TelegramDMUserID, &c.Recap, &c.RecapGeneratedAt, &c.PreviouslyOn, &c.PreviouslyOnGeneratedAt, &c.CreatedAt)
+	if err != nil && err != pgx.ErrNoRows {
+		return nil, err
 	}
-	if err := s.SetActiveCampaign(ctx, guildID, id); err != nil {
-		return nil, fmt.Errorf("set auto-created campaign active: %w", err)
+	if err == pgx.ErrNoRows {
+		err = tx.QueryRow(ctx,
+			`INSERT INTO campaigns (guild_id, name, description, is_active) VALUES ($1, 'Default Campaign', '', true)
+			 RETURNING `+campaignCols, guildID,
+		).Scan(&c.ID, &c.GuildID, &c.Name, &c.Description, &c.GameSystem, &c.IsActive, &c.DMUserID, &c.TelegramDMUserID, &c.Recap, &c.RecapGeneratedAt, &c.PreviouslyOn, &c.PreviouslyOnGeneratedAt, &c.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("auto-create campaign: %w", err)
+		}
 	}
-	return s.GetCampaign(ctx, id)
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return &c, nil
 }

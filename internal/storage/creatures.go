@@ -125,28 +125,38 @@ func (s *Store) GetCreatureCombatStats(ctx context.Context, entityID int64) (*Cr
 	}
 
 	// Total damage dealt by this creature.
-	s.Pool.QueryRow(ctx,
+	if err := s.Pool.QueryRow(ctx,
 		`SELECT COALESCE(SUM(damage), 0) FROM combat_actions WHERE actor_entity_id = $1 AND damage IS NOT NULL`, entityID,
-	).Scan(&stats.TotalDamageDealt)
+	).Scan(&stats.TotalDamageDealt); err != nil {
+		return nil, fmt.Errorf("creature combat stats (damage dealt): %w", err)
+	}
 
 	// Total damage taken by this creature.
-	s.Pool.QueryRow(ctx,
+	if err := s.Pool.QueryRow(ctx,
 		`SELECT COALESCE(SUM(damage), 0) FROM combat_actions WHERE target_entity_id = $1 AND damage IS NOT NULL`, entityID,
-	).Scan(&stats.TotalDamageTaken)
+	).Scan(&stats.TotalDamageTaken); err != nil {
+		return nil, fmt.Errorf("creature combat stats (damage taken): %w", err)
+	}
 
 	// Who defeated this creature (actors that dealt damage to it).
 	rows, err := s.Pool.Query(ctx,
 		`SELECT DISTINCT ca.actor FROM combat_actions ca
 		 WHERE ca.target_entity_id = $1 AND ca.action_type = 'attack' AND ca.damage IS NOT NULL
 		 ORDER BY ca.actor`, entityID)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var name string
-			if rows.Scan(&name) == nil {
-				stats.DefeatedBy = append(stats.DefeatedBy, name)
-			}
+	if err != nil {
+		return nil, fmt.Errorf("creature combat stats (defeated by): %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("creature combat stats (defeated by): %w", err)
 		}
+		stats.DefeatedBy = append(stats.DefeatedBy, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("creature combat stats (defeated by): %w", err)
 	}
 
 	return &stats, nil

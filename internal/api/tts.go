@@ -28,11 +28,13 @@ type ttsService struct {
 	source   string             // active generation source ("recap" or "previously-on")
 	voiceKey string             // active generation voice key ("user:123" or "profile:45")
 	cancel   context.CancelFunc // cancels the active generation
+
+	refSem chan struct{} // serialises reference extraction (loads whole WAVs)
 }
 
 // NewTTSService creates a TTS service that synthesizes recaps.
 func NewTTSService(synth *tts.Synthesizer, store *storage.Store) *ttsService {
-	svc := &ttsService{synth: synth, store: store, progress: -1}
+	svc := &ttsService{synth: synth, store: store, progress: -1, refSem: make(chan struct{}, 1)}
 	synth.SetProgressCallback(func(p float64) {
 		svc.mu.Lock()
 		svc.progress = p
@@ -41,7 +43,19 @@ func NewTTSService(synth *tts.Synthesizer, store *storage.Store) *ttsService {
 	return svc
 }
 
-func (t *ttsService) extractRef(campaignID int64, userID string) (*tts.ReferenceClip, error) {
+func (t *ttsService) extractRef(ctx context.Context, campaignID int64, userID string) (*tts.ReferenceClip, error) {
+	// Extraction loads whole session WAVs into memory, so run one at a time
+	// and give up early if the client has already gone away.
+	select {
+	case t.refSem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-t.refSem }()
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return tts.ExtractReference(t.store, campaignID, userID)
 }
 
@@ -155,6 +169,12 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 	if source == "" {
 		source = "recap"
 	}
+	// source ends up in the cache filename — only the two known values are
+	// ever valid, so reject anything else rather than joining it onto a path.
+	if source != "recap" && source != "previously-on" {
+		writeError(w, http.StatusBadRequest, "invalid source")
+		return
+	}
 	regenerate := r.URL.Query().Get("regenerate") == "true"
 
 	// Build voice key for cache lookup.
@@ -204,7 +224,7 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 		profileID, _ := strconv.ParseInt(profileIDStr, 10, 64)
 		ref, err = s.ttsSvc.extractProfileRef(r.Context(), profileID)
 	} else {
-		ref, err = s.ttsSvc.extractRef(campaignID, voiceUserID)
+		ref, err = s.ttsSvc.extractRef(r.Context(), campaignID, voiceUserID)
 	}
 	if err != nil {
 		log.Printf("recap tts: extract ref: %v", err)
@@ -212,9 +232,16 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark as generating with a cancellable context.
+	// Mark as generating with a cancellable context. Only one generation runs
+	// at a time — a second would clobber the first's cancel func and progress.
 	genCtx, genCancel := context.WithCancel(r.Context())
 	s.ttsSvc.mu.Lock()
+	if s.ttsSvc.cancel != nil {
+		s.ttsSvc.mu.Unlock()
+		genCancel()
+		writeError(w, http.StatusConflict, "another TTS generation is already in progress")
+		return
+	}
 	s.ttsSvc.progress = 0
 	s.ttsSvc.source = source
 	s.ttsSvc.voiceKey = voiceKey
@@ -259,8 +286,17 @@ func (s *Server) handleGetRecapTTS(w http.ResponseWriter, r *http.Request) {
 	writeWAVResponse(w, samples, sampleRate)
 }
 
+// sanitizeVoiceKey turns a voice key into a filename-safe segment. Keys look
+// like "user:123" or "profile:45"; anything outside that alphabet (path
+// separators in particular) is folded to a dash.
 func sanitizeVoiceKey(key string) string {
-	return strings.ReplaceAll(key, ":", "-")
+	return strings.Map(func(c rune) rune {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '-', c == '_':
+			return c
+		}
+		return '-'
+	}, key)
 }
 
 func (s *Server) handleListCachedTTS(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +404,7 @@ func (s *Server) handleGetRefAudio(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ref, err := s.ttsSvc.extractRef(campaignID, voiceUserID)
+	ref, err := s.ttsSvc.extractRef(r.Context(), campaignID, voiceUserID)
 	if err != nil {
 		log.Printf("ref audio: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to extract reference audio")
